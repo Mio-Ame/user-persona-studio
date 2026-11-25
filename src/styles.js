@@ -2712,6 +2712,35 @@ export const SHADOW_CSS = String.raw`
   flex-shrink: 0;
 }
 
+.ups-setting-row.ups-setting-row-compact {
+  align-self: flex-start;
+  width: fit-content;
+  flex-wrap: nowrap;
+}
+
+.ups-appearance-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: max-content;
+  max-width: 100%;
+  gap: 10px;
+}
+
+.ups-appearance-rows > .ups-setting-row {
+  max-width: 100%;
+  flex-wrap: nowrap;
+}
+
+.ups-appearance-rows > .ups-appearance-control-row {
+  /* The export row sets the grid's intrinsic width. */
+  contain: inline-size;
+  justify-content: space-between;
+}
+
+.ups-appearance-mode {
+  width: auto;
+}
+
 .ups-inline-toggle-pill {
   display: inline-flex;
   align-items: center;

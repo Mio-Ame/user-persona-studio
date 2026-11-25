@@ -62,6 +62,8 @@ import {
   createApiProfile,
   pushGenerationHistory,
   resolveCharacterRealName,
+  resolveCharacterReferenceName,
+  buildGreetingOptions,
   classifyWorldbookEntry,
   detectMultiCharacterCard,
   computeCompanionTokenPlan,
@@ -662,6 +664,8 @@ export function createStudioUI(options = {}) {
     charComboOpen: false,
     realNameEditedForCharKey: '',
     charRealNameManualOpen: false,
+    subCharacterNameOverrides: new Map(),
+    greetingOptions: [],
     expandedSyncedIds: new Set(),
     sectionsPanelOpen: false,
     mustHaveTrayOpen: false,
@@ -2082,27 +2086,27 @@ export function createStudioUI(options = {}) {
     type: 'button',
     className: 'ups-link-btn',
     hidden: true,
-    text: '卡名不是角色本名？点此填写实际称呼',
+    text: '填写角色称呼（选填）',
     attrs: { 'data-ups-char-real-name-toggle': 'true' },
   });
   const charRealNameInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input ups-input-sm',
     style: { flex: '1 1 130px' },
-    placeholder: '填写卡中角色的实际姓名',
+    placeholder: '留空也能生成',
     attrs: { 'data-ups-char-real-name': 'true', 'aria-label': '卡中角色实际姓名' },
   });
   const charRealNameAutoBadgeEl = createEl(doc, 'span', {
     className: 'ups-badge ups-badge-ok',
     hidden: true,
-    text: '已识别本名',
+    text: '自动识别',
   });
   const charRealNameRowEl = createEl(
     doc,
     'div',
     { className: 'ups-row', hidden: true, attrs: { 'data-ups-char-real-name-row': 'true' } },
     [
-      createEl(doc, 'span', { className: 'ups-chip-label', text: '卡中角色名：' }),
+      createEl(doc, 'span', { className: 'ups-chip-label', text: '角色称呼' }),
       charRealNameInput,
       charRealNameAutoBadgeEl,
     ]
@@ -2112,6 +2116,18 @@ export function createStudioUI(options = {}) {
     hidden: true,
     attrs: { 'data-ups-multichar-bar': 'true' },
   });
+  const subCharacterNamesEl = createEl(doc, 'div', { className: 'ups-field', hidden: true });
+  const greetingSelect = createEl(doc, 'select', {
+    className: 'ups-select',
+    attrs: { 'data-ups-greeting': 'true', 'aria-label': '开场白参考' },
+  });
+  const greetingSummaryEl = createEl(doc, 'div', { className: 'ups-muted', hidden: true });
+  const greetingFieldEl = createEl(doc, 'label', { className: 'ups-field', hidden: true }, [
+    createEl(doc, 'span', { className: 'ups-label', text: '开场白参考' }),
+    greetingSelect,
+    greetingSummaryEl,
+  ]);
+  greetingSelect.addEventListener('change', syncGreetingSummary, { signal });
   const charFollowActiveBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
@@ -2198,6 +2214,8 @@ export function createStudioUI(options = {}) {
       charRealNameToggleBtn,
       charRealNameRowEl,
       multiCharFocusBarEl,
+      subCharacterNamesEl,
+      greetingFieldEl,
       wbPanelEl,
     ]
   );
@@ -2507,12 +2525,6 @@ export function createStudioUI(options = {}) {
           ]),
         ]),
       ]),
-      createEl(doc, 'div', { className: 'ups-card', attrs: { 'data-ups-synced-entries': 'true' } }, [
-        createEl(doc, 'div', { className: 'ups-mod-head' }, [
-          createEl(doc, 'span', { className: 'ups-mod-title', text: '本次生成条目' }),
-        ]),
-        syncedEntriesListEl,
-      ]),
       createEl(doc, 'div', { className: 'ups-card' }, [
         createEl(doc, 'div', { className: 'ups-mod-head' }, [
           createEl(doc, 'span', { className: 'ups-mod-title', text: '预设条目' }),
@@ -2817,7 +2829,7 @@ export function createStudioUI(options = {}) {
           apiTimeoutInput,
         ]),
       ]),
-      createEl(doc, 'div', { className: 'ups-setting-row' }, [
+      createEl(doc, 'div', { className: 'ups-setting-row ups-setting-row-compact' }, [
         createEl(doc, 'div', { className: 'ups-setting-meta' }, [
           createEl(doc, 'div', { className: 'ups-label', text: '流式输出' }),
         ]),
@@ -2838,7 +2850,7 @@ export function createStudioUI(options = {}) {
   const colorModeSelect = createEl(
     doc,
     'select',
-    { className: 'ups-select ups-setting-control', attrs: { 'aria-label': '明暗模式' } },
+    { className: 'ups-select ups-appearance-mode', attrs: { 'aria-label': '明暗模式' } },
     COLOR_MODE_OPTIONS.map((m) => createEl(doc, 'option', { value: m.id, text: m.label }))
   );
   const showPersonaBtnSwitch = createEl(
@@ -2878,7 +2890,7 @@ export function createStudioUI(options = {}) {
   );
   const exportSafeBackupBtn = createEl(doc, 'button', {
     type: 'button',
-    className: 'ups-btn ups-setting-control',
+    className: 'ups-btn',
     text: '导出安全配置',
   });
 
@@ -2904,35 +2916,37 @@ export function createStudioUI(options = {}) {
         createEl(doc, 'div', { className: 'ups-mod-head' }, [
           createEl(doc, 'span', { className: 'ups-mod-title', text: '外观与入口设置' }),
         ]),
-        createEl(doc, 'div', { className: 'ups-setting-row' }, [
-          createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-label', text: '明暗显示模式' }),
+        createEl(doc, 'div', { className: 'ups-appearance-rows' }, [
+          createEl(doc, 'div', { className: 'ups-setting-row ups-appearance-control-row' }, [
+            createEl(doc, 'div', { className: 'ups-setting-meta' }, [
+              createEl(doc, 'div', { className: 'ups-label', text: '明暗显示模式' }),
+            ]),
+            colorModeSelect,
           ]),
-          colorModeSelect,
-        ]),
-        createEl(doc, 'div', { className: 'ups-setting-row' }, [
-          createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-label', text: '人设管理面板快捷按钮' }),
+          createEl(doc, 'div', { className: 'ups-setting-row ups-appearance-control-row' }, [
+            createEl(doc, 'div', { className: 'ups-setting-meta' }, [
+              createEl(doc, 'div', { className: 'ups-label', text: '人设管理面板快捷按钮' }),
+            ]),
+            showPersonaBtnSwitch,
           ]),
-          showPersonaBtnSwitch,
-        ]),
-        createEl(doc, 'div', { className: 'ups-setting-row' }, [
-          createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-label', text: '扩展菜单入口' }),
+          createEl(doc, 'div', { className: 'ups-setting-row ups-appearance-control-row' }, [
+            createEl(doc, 'div', { className: 'ups-setting-meta' }, [
+              createEl(doc, 'div', { className: 'ups-label', text: '扩展菜单入口' }),
+            ]),
+            showWandMenuSwitch,
           ]),
-          showWandMenuSwitch,
-        ]),
-        createEl(doc, 'div', { className: 'ups-setting-row' }, [
-          createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-label', text: '角色列表显示「人设适配」按钮' }),
+          createEl(doc, 'div', { className: 'ups-setting-row ups-appearance-control-row' }, [
+            createEl(doc, 'div', { className: 'ups-setting-meta' }, [
+              createEl(doc, 'div', { className: 'ups-label', text: '角色列表显示「人设适配」按钮' }),
+            ]),
+            showCharAdaptBtnSwitch,
           ]),
-          showCharAdaptBtnSwitch,
-        ]),
-        createEl(doc, 'div', { className: 'ups-setting-row' }, [
-          createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-label', text: '导出安全配置备份' }),
+          createEl(doc, 'div', { className: 'ups-setting-row' }, [
+            createEl(doc, 'div', { className: 'ups-setting-meta' }, [
+              createEl(doc, 'div', { className: 'ups-label', text: '导出安全配置备份' }),
+            ]),
+            exportSafeBackupBtn,
           ]),
-          exportSafeBackupBtn,
         ]),
       ]),
     ]
@@ -4001,6 +4015,8 @@ export function createStudioUI(options = {}) {
 
   function renderMultiCharFocusBar() {
     const info = state.multiCharInfo;
+    subCharacterNamesEl.replaceChildren();
+    subCharacterNamesEl.hidden = true;
     if (!info || !info.isMultiChar || !Array.isArray(info.characterEntries) || info.characterEntries.length === 0) {
       multiCharFocusBarEl.hidden = true;
       multiCharFocusBarEl.replaceChildren();
@@ -4008,6 +4024,7 @@ export function createStudioUI(options = {}) {
     }
     multiCharFocusBarEl.hidden = false;
     const selectedSet = new Set(state.selectedSubCharKeys);
+    const nameFields = [];
     const chips = [
       createEl(doc, 'span', { className: 'ups-chip-label', text: '多人卡聚焦（不选则按群像全局）：' }),
       ...info.characterEntries.map((ce) => {
@@ -4015,9 +4032,28 @@ export function createStudioUI(options = {}) {
         const chip = createEl(doc, 'button', {
           type: 'button',
           className: `ups-btn-sm${isPicked ? ' is-active' : ''}`,
-          text: ce.name,
-          attrs: { 'data-ups-subchar-chip': ce.key },
+          text: state.subCharacterNameOverrides.get(ce.key) || ce.name,
+          attrs: { 'data-ups-subchar-chip': ce.key, 'aria-pressed': String(isPicked) },
         });
+        if (isPicked) {
+          const nameInput = createEl(doc, 'input', {
+            type: 'text',
+            className: 'ups-input ups-input-sm',
+            value: state.subCharacterNameOverrides.get(ce.key) || '',
+            placeholder: ce.name,
+            attrs: { 'data-ups-subchar-name': ce.key, 'aria-label': `修改${ce.name}的称呼` },
+          });
+          nameInput.addEventListener('input', () => {
+            const name = nameInput.value.trim();
+            if (name) state.subCharacterNameOverrides.set(ce.key, name);
+            else state.subCharacterNameOverrides.delete(ce.key);
+            chip.textContent = name || ce.name;
+          }, { signal });
+          nameFields.push(createEl(doc, 'label', { className: 'ups-row' }, [
+            createEl(doc, 'span', { className: 'ups-chip-label', text: `${ce.name}的称呼` }),
+            nameInput,
+          ]));
+        }
         chip.addEventListener('click', () => {
           const cur = new Set(state.selectedSubCharKeys);
           if (cur.has(ce.key)) {
@@ -4035,6 +4071,8 @@ export function createStudioUI(options = {}) {
       }),
     ];
     multiCharFocusBarEl.replaceChildren(...chips);
+    subCharacterNamesEl.hidden = nameFields.length === 0;
+    subCharacterNamesEl.replaceChildren(...nameFields);
   }
 
   async function handlePickCharacterOption(val) {
@@ -4137,6 +4175,35 @@ export function createStudioUI(options = {}) {
     return '';
   }
 
+  function getSelectedGreeting() {
+    return state.greetingOptions.find((option) => String(option.index) === greetingSelect.value);
+  }
+
+  function syncGreetingSummary() {
+    const opening = getSelectedGreeting();
+    greetingSummaryEl.textContent = opening?.summary || '';
+    greetingSummaryEl.hidden = !greetingSummaryEl.textContent;
+  }
+
+  function syncGreetingOptions(charCtx, sameChar) {
+    const previous = sameChar ? getSelectedGreeting() : null;
+    state.greetingOptions = charCtx ? buildGreetingOptions(charCtx) : [];
+    greetingFieldEl.hidden = state.greetingOptions.length === 0;
+    greetingSelect.replaceChildren(
+      createEl(doc, 'option', { value: '', text: '不发送' }),
+      ...state.greetingOptions.map((opening) => {
+        const label = opening.title || opening.text.replace(/\s+/g, ' ').slice(0, 32);
+        const number = opening.index === 0 ? '首条' : `#${opening.index}`;
+        return createEl(doc, 'option', { value: String(opening.index), text: `${number} · ${label}` });
+      }),
+    );
+    const keepSelection = previous && state.greetingOptions.some(
+      ({ index, text }) => index === previous.index && text === previous.text
+    );
+    greetingSelect.value = keepSelection ? String(previous.index) : '';
+    syncGreetingSummary();
+  }
+
   function computeIsCharAdaptFlow({
     mode = state.mode,
     subMode = state.subMode,
@@ -4179,21 +4246,14 @@ export function createStudioUI(options = {}) {
       charRealNameToggleBtn.hidden = true;
       charRealNameAutoBadgeEl.hidden = true;
       state.selectedSubCharKeys = [];
+      state.subCharacterNameOverrides.clear();
     } else {
       if (!sameChar) {
         state.charRealNameManualOpen = false;
         state.selectedSubCharKeys = [];
+        state.subCharacterNameOverrides.clear();
       }
-      const resolvedReal =
-        String(charCtx.realName || '').trim() ||
-        resolveCharacterRealName({
-          name: charCtx.name,
-          description: charCtx.mergedDescription || charCtx.description,
-          firstMessage: charCtx.firstMessage,
-          worldEntries: entries,
-        }).realName ||
-        charCtx.name ||
-        '';
+      const resolvedReal = resolveCharacterReferenceName({ ...charCtx, worldEntries: entries });
       if (state.realNameEditedForCharKey !== nextCharKey) {
         state.charRealNameOverride = resolvedReal;
         charRealNameInput.value = resolvedReal;
@@ -4209,6 +4269,7 @@ export function createStudioUI(options = {}) {
     }
 
     state.multiCharInfo = charCtx ? detectMultiCharacterCard(charCtx, entries) : { isMultiChar: false, characterEntries: [] };
+    syncGreetingOptions(charCtx, sameChar);
     renderMultiCharFocusBar();
     state.worldSelectionCharKey = nextCharKey;
     if (openWorldbook && entries.length > 0) {
@@ -4561,7 +4622,10 @@ export function createStudioUI(options = {}) {
     const active = getActiveScheme(settings);
     if (!active) return;
     const syncedItems = buildSyncedPreferenceEntries({ scheme: active, ui: settings.ui });
-    const rows = syncedItems.map((item) => {
+    const query = state.stackSearchQuery.trim().toLowerCase();
+    const rows = syncedItems.filter((item) => !query || [item.name, item.content].some(
+      (text) => String(text ?? '').toLowerCase().includes(query)
+    )).map((item) => {
       const isExpanded = state.expandedSyncedIds.has(item.id);
       const bodyElNode = createEl(doc, 'div', {
         className: 'ups-synced-body',
@@ -4680,13 +4744,15 @@ export function createStudioUI(options = {}) {
       );
     });
     syncedEntriesListEl.replaceChildren(...rows);
+    syncedEntriesListEl.hidden = rows.length === 0;
+    return rows.length;
   }
 
   function renderStackTab() {
     const active = getActiveScheme(settings);
     if (!active) return;
     updateSchemeSelects();
-    renderSyncedEntriesBlock();
+    const visibleSyncedEntries = renderSyncedEntriesBlock();
     const q = state.stackSearchQuery.trim().toLowerCase();
     const entries = active.entries || [];
     const filtered = entries.filter((entry) => {
@@ -4698,7 +4764,7 @@ export function createStudioUI(options = {}) {
       );
     });
 
-    if (filtered.length === 0) {
+    if (filtered.length === 0 && !visibleSyncedEntries) {
       stackListEl.replaceChildren(
         createEl(doc, 'div', {
           className: 'ups-muted',
@@ -5231,7 +5297,7 @@ export function createStudioUI(options = {}) {
       return cardEl;
     });
 
-    stackListEl.replaceChildren(...cards);
+    stackListEl.replaceChildren(syncedEntriesListEl, ...cards);
     if (state.justAddedEntryId) {
       const targetId = state.justAddedEntryId;
       state.justAddedEntryId = '';
@@ -5821,7 +5887,9 @@ export function createStudioUI(options = {}) {
       state.injectChar && state.cachedCharContext
         ? {
             ...state.cachedCharContext,
-            realName: state.charRealNameOverride || state.cachedCharContext.realName || '',
+            realName: state.charRealNameOverride,
+            subCharacterNameOverrides: Object.fromEntries(state.subCharacterNameOverrides),
+            openingReference: getSelectedGreeting()?.text || '',
             ...(state.charWorldEntries.length > 0
               ? {
                   selectedWorldEntries: state.charWorldEntries.filter((e) =>

@@ -2108,6 +2108,63 @@ test('Group 14.2: Subject-omission Token-economy rules & resolveCharacterRealNam
 // Group 15: R2/R3/R4 Companion Engine, Global Token Planner & 84-Card Noise Compatibility
 // ============================================================================
 
+test('角色称呼：姓名型卡名不会被配角档案替换，作品卡可不填本名', () => {
+  const worldEntries = [
+    { comment: 'NPC：夏舟', content: '姓名：夏舟\n身份：商店店员' },
+    { comment: '旧港地理', content: '客船每周三靠岸。' },
+  ];
+  assert.equal(resolveCharacterRealName({ name: '林桥', worldEntries }).realName, '林桥');
+  const prompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '码头维修员',
+    charContext: { name: '《旧港札记》', selectedWorldEntries: worldEntries },
+  }).assembledPromptText;
+  assert.match(prompt, /客船每周三靠岸/);
+  assert.doesNotMatch(prompt, /角色真名指代规范|角色真名：/);
+  assert.match(prompt, /卡名可能是作品名/);
+});
+
+test('角色称呼：群像优先用档案明确的真名，关系后缀不进入名字', () => {
+  const entries = [
+    { uid: 'lead', comment: '主要角色：潮王', content: '姓名：潮王（真名：方潮）\n身份：船长' },
+    { uid: 'family', comment: '主要角色：夏舟-丈夫💗', content: '身份：商店店员' },
+    { uid: 'family2', comment: '主要角色：夏禾-女儿💗', content: '身份：邮差' },
+  ];
+  const roster = detectMultiCharacterCard({ name: '《旧港札记》' }, entries);
+  assert.equal(roster.isMultiChar, true);
+  assert.deepEqual(roster.characterEntries.map(({ name }) => name), ['方潮', '夏舟', '夏禾']);
+});
+
+test('角色称呼：显式留空可覆盖推断，群像改称呼仍按原条目关联', () => {
+  const emptyPrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '码头维修员',
+    charContext: {
+      name: '《旧港札记》',
+      realName: '',
+      description: '<character name="方潮">\n身份：船长',
+      selectedWorldEntries: [{ comment: '旧港地理', content: '客船每周三靠岸。' }],
+    },
+  }).assembledPromptText;
+  assert.doesNotMatch(emptyPrompt, /角色真名指代规范|角色真名：/);
+  assert.match(emptyPrompt, /客船每周三靠岸/);
+
+  const entries = ['方潮', '夏舟', '夏禾'].map((name, index) => ({
+    entryKey: String(index), comment: `主要角色：${name}`, content: `姓名：${name}\n身份：灯塔值班员`,
+  }));
+  const focusedPrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '码头维修员',
+    charContext: {
+      name: '《旧港札记》', realName: '', worldEntries: entries, selectedWorldEntries: entries,
+      subCharacterNameOverrides: { 0: '方队长' },
+    },
+    selectedSubCharacterKeys: ['0'],
+  }).assembledPromptText;
+  assert.match(focusedPrompt, /聚焦目标角色：\n方队长/);
+  assert.match(focusedPrompt, /灯塔值班员/);
+});
+
 test('Group 15.1 (R2/R3/R4): isNoiseWorldbookEntry, stripCompanionConflicts & extractVerbatimCompanionSlices preserve author prose verbatim', () => {
   assert.equal(isNoiseWorldbookEntry({ comment: '状态栏规范', content: '<status>HP:100</status>' }), true);
   assert.equal(isNoiseWorldbookEntry({ comment: 'COT思维链', content: 'step 1' }), true);

@@ -1608,9 +1608,11 @@ function cleanExtractedPersonName(rawVal) {
   s = s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
   s = s.replace(/\s*#.*$/, '').trim();
   s = s.split(/[（(｜|/／,，☯✦✧]/)[0].trim();
+  s = s.replace(/\s*[-－—–·]\s*(?:丈夫|妻子|夫君|夫人|女儿|儿子|母亲|父亲|哥哥|姐姐|弟弟|妹妹|兄长|伴侣|配偶)(?=[\s\p{Extended_Pictographic}\uFE0F]*$)/u, '');
+  s = s.replace(/[\s\p{Extended_Pictographic}\uFE0F]+$/u, '');
   s = s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
   if (!s || s.length > 24) return '';
-  if (/^(?:\{\{char\}\}|\{\{user\}\}|<char>|<user>|unknown|none|null|undefined|未命名|待定|未知|无)$/i.test(s)) {
+  if (/^(?:\{\{char\}\}|\{\{user\}\}|<char>|<user>|unknown|none|null|undefined|未命名|待定|未知|不详|保密|无)$/i.test(s)) {
     return '';
   }
   if (
@@ -1659,9 +1661,16 @@ const GENERIC_YAML_TOP_KEYS = new Set([
   '状态栏',
 ]);
 
+function extractExplicitTrueName(text) {
+  const match = String(text ?? '').match(/(?:^|\n|[（(])[ \t]*(?:[-*•][ \t]*)?(?:真名|本名|原名|真实姓名)\s*[:：][ \t]*([^\n#<>）)]{1,40})/u);
+  return cleanExtractedPersonName(match?.[1]);
+}
+
 function extractRealNameFromText(text, rawCardName) {
   const src = String(text ?? '').replace(/\r\n?/g, '\n');
   if (!src.trim()) return '';
+  const explicitTrueName = extractExplicitTrueName(src);
+  if (explicitTrueName) return explicitTrueName;
 
   // 1. XML / tag attributes: <character_information character="..."> or <character name="...">
   const tagAttrRe = /<\s*(?:character_information|character)\b[^>]*\b(?:character|name)\s*=\s*["']([^"'\n<>]{1,32})["']/i;
@@ -1733,25 +1742,32 @@ export function resolveCharacterRealName({
   const rawCardName = String(name || cardName || '').trim();
   const strippedCardTitle = stripCardTitleDecorations(rawCardName);
 
+  const nameFromCard = cleanExtractedPersonName(rawCardName);
+  if (!isTitleLikeCardName(rawCardName) && nameFromCard) {
+    return { realName: nameFromCard, source: 'card_name', strippedCardTitle };
+  }
+
   const fromDesc = extractRealNameFromText(description, rawCardName);
   if (fromDesc) {
     return { realName: fromDesc, source: 'description', strippedCardTitle };
   }
 
-  const validWorldEntries = Array.isArray(worldEntries)
-    ? worldEntries.filter((e) => e && typeof e === 'object' && !isNoiseWorldbookEntry(e))
-    : [];
-  const worldText = validWorldEntries
-    .map((e) => `${String(e.comment ?? '')}\n${String(e.content ?? '')}`)
-    .join('\n');
-  const fromWorld = extractRealNameFromText(worldText, rawCardName);
-  if (fromWorld) {
-    return { realName: fromWorld, source: 'worldbook', strippedCardTitle };
-  }
-
   const fromFirst = extractRealNameFromText(firstMes || firstMessage, rawCardName);
   if (fromFirst) {
     return { realName: fromFirst, source: 'firstMes', strippedCardTitle };
+  }
+
+  const worldNames = new Set();
+  for (const entry of Array.isArray(worldEntries) ? worldEntries : []) {
+    if (!entry || isWorldbookEntryDisabled(entry) || classifyWorldbookEntry(entry) !== 'character_lore') continue;
+    const label = String(entry.comment ?? entry.name ?? '').trim();
+    // Named supporting entries and route variants cannot establish the card's main identity.
+    if (!/^(?:(?:主角|主控|核心角色|当前角色)(?:\s*[：:·-]\s*.+|(?:人物|角色)?(?:档案|简介|设定|资料))?|(?:角色|人物|自我)(?:档案|简介|设定)|基本(?:资料|信息)|character[ _]profile)$/iu.test(label)) continue;
+    const candidate = extractRealNameFromText(entry.content, rawCardName);
+    if (candidate) worldNames.add(candidate);
+  }
+  if (worldNames.size === 1) {
+    return { realName: [...worldNames][0], source: 'worldbook', strippedCardTitle };
   }
 
   if (strippedCardTitle && strippedCardTitle !== rawCardName) {
@@ -1763,6 +1779,67 @@ export function resolveCharacterRealName({
     source: 'card_name',
     strippedCardTitle,
   };
+}
+
+export function resolveCharacterReferenceName(context = {}) {
+  if (typeof context.realName === 'string') return context.realName.trim();
+  const resolved = resolveCharacterRealName({
+    ...context,
+    firstMes: '',
+    firstMessage: '',
+    worldEntries: context.worldEntries ?? context.selectedWorldEntries,
+  });
+  if (resolved.source === 'stripped_title') return '';
+  if (resolved.source === 'card_name' && isTitleLikeCardName(resolved.realName)) return '';
+  return resolved.realName;
+}
+
+export function buildGreetingOptions({ firstMessage = '', alternateGreetings = [] } = {}) {
+  const first = typeof firstMessage === 'string' ? firstMessage : '';
+  const alternatives = Array.isArray(alternateGreetings) ? alternateGreetings : [];
+  const directoryLines = first.split(/\r?\n/);
+  const heading = directoryLines.findIndex((line) =>
+    /^\s*(?:#{1,6}\s*|【)?(?:开场白|开场)(?:目录|索引|列表|一览)?[】：:]?\s*$/u.test(line)
+  );
+  const directory = new Map();
+  let current;
+  for (let i = heading + 1; heading >= 0 && i < directoryLines.length; i += 1) {
+    const line = directoryLines[i].trim();
+    const item = line.match(/^(?:#{1,6}\s*|[-*]\s+)?(?:开场白\s*)?#?(\d{1,3})[.．、：:)）\s]+\s*(.+)$/u);
+    if (item) {
+      current = { title: item[2].trim(), summary: '' };
+      directory.set(Number(item[1]), current);
+    } else if (/^#{1,6}\s+/u.test(line)) {
+      break;
+    } else if (current && !current.summary && line) {
+      current.summary = line.replace(/^(?:简介|概要|摘要)[：:]\s*/u, '').replace(/^\*+|\*+$/g, '').trim();
+    }
+  }
+
+  const firstIsDirectory = heading >= 0 && (
+    directory.size > 1 ||
+    /(?:目录|索引|列表|一览)/u.test(directoryLines[heading]) ||
+    (directory.size === 1 && /(?:食用说明|使用说明|游玩指南|版权声明)/u.test(first))
+  );
+  const options = [];
+  for (const [index, raw] of [first, ...alternatives].entries()) {
+    if (typeof raw !== 'string' || (index === 0 && firstIsDirectory)) continue;
+    const comments = {};
+    const text = raw.replace(/<!--[\s\S]*?-->/g, (comment) => {
+      const field = comment.match(/^<!---?\s*(title|desc)\s*[:：]\s*([\s\S]*?)\s*-?-->$/iu);
+      if (field && !comments[field[1].toLowerCase()]) comments[field[1].toLowerCase()] = field[2].trim();
+      return '';
+    }).replace(/<(script|style|iframe)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, '').trim();
+    if (!text) continue;
+    const listing = firstIsDirectory ? directory.get(index) : null;
+    options.push({
+      index,
+      title: (comments.title || listing?.title || '').slice(0, 100),
+      summary: (comments.desc || listing?.summary || '').slice(0, 250),
+      text,
+    });
+  }
+  return options;
 }
 
 const NON_CHARACTER_LORE_TITLE_RE =
@@ -1971,18 +2048,15 @@ export function detectMultiCharacterCard(cardContext = {}, worldEntries = []) {
         rawComment.replace(/^(?:主要角色|角色档案|人物档案|角色|人物|NPC|配角|攻略对象|可攻略(?:角色|npc)?)[：:·\s-]+/iu, '')
       )
     );
-    const resolved = resolveCharacterRealName({
-      name: cleanedTitle,
-      description: contentStr,
-    });
-    // Prefer the canonical title/name used by the card (e.g. "世王" when真名 is secret, or resolved person name when title is generic like "IF分支")
+    const explicitTrueName = extractExplicitTrueName(contentStr) || extractExplicitTrueName(rawComment);
     const candidateFromTitle =
       cleanedTitle && !NON_PERSON_CANDIDATE_NAME_RE.test(cleanedTitle) && !PLACE_OR_ORG_NAME_RE.test(cleanedTitle)
         ? cleanedTitle
         : '';
     const name =
+      (explicitTrueName && !NON_PERSON_CANDIDATE_NAME_RE.test(explicitTrueName) && !PLACE_OR_ORG_NAME_RE.test(explicitTrueName) ? explicitTrueName : '') ||
       candidateFromTitle ||
-      resolved.realName ||
+      extractRealNameFromText(contentStr, cleanedTitle) ||
       (Array.isArray(entry.keys) ? cleanExtractedPersonName(entry.keys[0]) : '') ||
       `角色${idx + 1}`;
     if (!name || NON_PERSON_CANDIDATE_NAME_RE.test(name) || PLACE_OR_ORG_NAME_RE.test(name)) return;
@@ -2058,6 +2132,12 @@ export function detectMultiCharacterCard(cardContext = {}, worldEntries = []) {
   };
 }
 
+function getFocusedCharacterName(context, character) {
+  const overrides = context.subCharacterNameOverrides;
+  const override = overrides && Object.hasOwn(overrides, character.key) ? overrides[character.key] : '';
+  return String(override ?? '').trim() || character.name;
+}
+
 export function buildEnsembleRosterSummary(characterEntries = [], maxTokens = 450) {
   const list = Array.isArray(characterEntries) ? characterEntries.filter((c) => c && !c.disabled) : [];
   if (list.length === 0) return '';
@@ -2088,7 +2168,7 @@ function formatCharContextBlock(charContext, options = {}) {
       ? charContext.worldEntries
       : null;
 
-  const multiInfo = allEntries ? detectMultiCharacterCard(charContext, allEntries) : { isMultiChar: false, characterEntries: [] };
+  const multiInfo = detectMultiCharacterCard(charContext, charContext.worldEntries ?? allEntries);
   const explicitSubKeys = Array.isArray(opts.selectedSubCharKeys)
     ? opts.selectedSubCharKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
     : [];
@@ -2104,7 +2184,7 @@ function formatCharContextBlock(charContext, options = {}) {
       const focusedSet = new Set(explicitSubKeys.slice(0, 3));
       focusedCharacterNames = multiInfo.characterEntries
         .filter((c) => focusedSet.has(c.key))
-        .map((c) => c.name);
+        .map((c) => getFocusedCharacterName(charContext, c));
       entriesForContext = allEntries.filter((entry, idx) => {
         const cls = classifyWorldbookEntry(entry);
         if (cls === 'system_format' && entry.forceInclude !== true) return false;
@@ -2115,9 +2195,10 @@ function formatCharContextBlock(charContext, options = {}) {
       });
     } else if (Array.isArray(charContext.selectedWorldEntries)) {
       // Inspect whether user manually checked 1–3 specific character entries inside selectedWorldEntries
-      const checkedCharEntries = multiInfo.characterEntries.filter((c) => !c.disabled);
+      const checkedKeys = new Set(allEntries.map(getWorldbookEntryIdentityKey));
+      const checkedCharEntries = multiInfo.characterEntries.filter((c) => !c.disabled && checkedKeys.has(c.key));
       if (checkedCharEntries.length >= 1 && checkedCharEntries.length <= 3 && multiInfo.characterEntries.length >= 4) {
-        focusedCharacterNames = checkedCharEntries.map((c) => c.name);
+        focusedCharacterNames = checkedCharEntries.map((c) => getFocusedCharacterName(charContext, c));
       } else {
         // Global ensemble mode: card overview + worldbuilding + acting_rules + compact 1-line roster summary
         rosterSummaryText = buildEnsembleRosterSummary(multiInfo.characterEntries, 450);
@@ -2143,13 +2224,7 @@ function formatCharContextBlock(charContext, options = {}) {
   const resolvedRealName =
     focusedCharacterNames.length === 1
       ? focusedCharacterNames[0]
-      : String(charContext.realName ?? '').trim() ||
-        resolveCharacterRealName({
-          name: charContext.name,
-          description: effectiveDescription,
-          firstMessage: charContext.firstMessage,
-          worldEntries: entriesForContext || allEntries,
-        }).realName;
+      : resolveCharacterReferenceName({ ...charContext, worldEntries: allEntries });
 
   const fields = [
     ['角色卡名称', charContext.name],
@@ -2158,7 +2233,7 @@ function formatCharContextBlock(charContext, options = {}) {
     ['角色简介', effectiveDescription],
     ['性格设定', charContext.personality],
     ['当前场景', charContext.scenario],
-    ['开场白参考', charContext.firstMessage],
+    ['开场白参考', charContext.openingReference],
   ];
   const lines = [];
   for (const [label, val] of fields) {
@@ -2618,7 +2693,7 @@ export function computeCompanionTokenPlan({
     mainCharTokens += estimateTokens(mainCharContext.mergedDescription || mainCharContext.description);
     mainCharTokens += estimateTokens(mainCharContext.personality);
     mainCharTokens += estimateTokens(mainCharContext.scenario);
-    mainCharTokens += estimateTokens(mainCharContext.firstMessage);
+    mainCharTokens += estimateTokens(mainCharContext.openingReference);
     const entriesSource = Array.isArray(mainSelectedWorldEntries)
       ? mainSelectedWorldEntries
       : Array.isArray(mainCharContext.selectedWorldEntries)
@@ -3189,7 +3264,7 @@ export function buildGenerationMessages(options = {}) {
     const explicitSubKeys = Array.isArray(resolvedSubCharKeys)
       ? resolvedSubCharKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
       : [];
-    const poolEntries = opts.charContext.selectedWorldEntries || opts.charContext.worldEntries || [];
+    const poolEntries = opts.charContext.worldEntries || opts.charContext.selectedWorldEntries || [];
     const multiInfo = Array.isArray(poolEntries) && poolEntries.length > 0
       ? detectMultiCharacterCard(opts.charContext, poolEntries)
       : { isMultiChar: false, characterEntries: [] };
@@ -3198,22 +3273,18 @@ export function buildGenerationMessages(options = {}) {
       const focusedSet = new Set(explicitSubKeys.slice(0, 3));
       const matched = multiInfo.characterEntries.filter((c) => focusedSet.has(c.key));
       if (matched.length === 1) {
-        focusedSubRealName = matched[0].name;
+        focusedSubRealName = getFocusedCharacterName(opts.charContext, matched[0]);
       }
     }
     const resolvedMainRealName =
       focusedSubRealName ||
-      String(opts.charContext.realName ?? '').trim() ||
-      resolveCharacterRealName({
-        name: cardName,
-        description: opts.charContext.mergedDescription || opts.charContext.description,
-        firstMessage: opts.charContext.firstMessage,
-        worldEntries: opts.charContext.selectedWorldEntries || opts.charContext.worldEntries,
-      }).realName;
+      resolveCharacterReferenceName(opts.charContext);
     if (resolvedMainRealName && cardName && resolvedMainRealName !== cardName) {
       taskParts.push(
-        `【角色真名指代规范】\n当前角色卡卡名为「${cardName}」，角色真实姓名为「${resolvedMainRealName}」。生成正文中凡涉及该角色时，必须直接称呼「${resolvedMainRealName}」，严禁机械输出 {{char}} 或将作品卡名当作人名！`
+        `【角色真名指代规范】\n关联角色的称呼为「${resolvedMainRealName}」。需要点名时使用该称呼，严禁机械输出 {{char}} 或将作品卡名当作人名。`
       );
+    } else if (cardName) {
+      taskParts.push('卡名可能是作品名。请按角色资料和世界书里的明确称呼写；仍无法确定时，用关系称呼或省略姓名，不要猜测。');
     }
   }
 

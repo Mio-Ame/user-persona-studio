@@ -9,7 +9,7 @@ import {
   estimateTokens,
   stripDraftAuditBlocks,
   isNoiseWorldbookEntry,
-  resolveCharacterRealName,
+  resolveCharacterReferenceName,
 } from './core.js';
 
 export const EXTENSION_SETTINGS_KEY = 'user_persona_studio';
@@ -1283,6 +1283,9 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
   const rawPersonality = pickNonEmptyField(fields.personality, character.personality, character.data?.personality);
   const rawScenario = pickNonEmptyField(fields.scenario, character.scenario, character.data?.scenario);
   const rawFirstMessage = pickNonEmptyField(fields.firstMessage, character.first_mes, character.data?.first_mes);
+  const alternateGreetings = [
+    character.data?.alternate_greetings, character.alternate_greetings, fields.alternateGreetings,
+  ].find(Array.isArray);
 
   const worldName = resolveCharacterPrimaryWorldName(character);
   let worldSummary = worldName ? `关联世界书：${worldName}` : '';
@@ -1362,9 +1365,9 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
     }
   }
 
-  const realNameInfo = resolveCharacterRealName({
+  const realName = resolveCharacterReferenceName({
     name: rawName,
-    description: effectiveDescription,
+    description: rawDescription,
     firstMessage: rawFirstMessage,
     worldEntries: loadedEntriesForMerge,
   });
@@ -1380,7 +1383,7 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
     characterId: String(characterId),
     avatar: String(character.avatar ?? ''),
     name: rawName,
-    realName: realNameInfo.realName || rawName,
+    realName,
     chatId: rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null,
     isActive,
     worldName,
@@ -1392,6 +1395,7 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
     scenario: rawScenario,
     firstMessage: rawFirstMessage,
     shallow: Boolean(character.shallow),
+    ...(alternateGreetings?.length ? { alternateGreetings: alternateGreetings.map((item) => typeof item === 'string' ? item : '') } : {}),
   };
   if (resolvedOptions?.includeWorldEntries) {
     result.worldEntries = worldEntries;

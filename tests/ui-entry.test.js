@@ -2875,3 +2875,66 @@ test('M2: checked appearance lines share one heading and format warnings have no
     ui.destroy();
   }
 });
+
+test('角色称呼：能清空自动主角称呼，也能编辑已选群像角色的称呼', async () => {
+  const env = createMockEnvironment();
+  const worldEntries = ['方潮', '夏舟', '夏禾'].map((name, index) => ({
+    entryKey: String(index), comment: `主要角色：${name}`, content: `姓名：${name}\n身份：灯塔值班员`,
+    defaultEnabled: true,
+  }));
+  const char = {
+    name: '《旧港札记》', characterId: '0', realName: '方潮', worldEntries,
+    firstMessage: '# 使用说明\n作者说明\n# 开场白\n1. 渡轮夜班\n*一起值班*',
+    alternateGreetings: ['船铃响了，渡轮靠岸。'],
+  };
+  let prompt = '';
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    onSaveSettings: () => {},
+    hostApi: {
+      getCharacterContext: async () => char,
+      getActiveCharacterContext: async () => char,
+      loadCharacterWorldbookEntries: async () => worldEntries,
+      getActivePersona: async () => null,
+      listPersonas: async () => [],
+      runStudioGeneration: async ({ messages }) => {
+        prompt = messages.map(({ content }) => content).join('\n');
+        return { text: '灯塔维修员。' };
+      },
+    },
+  });
+  try {
+    ui.open();
+    await ui.refreshContext();
+    const sr = ui.shadow;
+    const opening = sr.querySelector('[data-ups-greeting]');
+    assert.equal(opening.value, '');
+    assert.ok(opening.textContent.includes('渡轮夜班'));
+    const input = sr.querySelector('[data-ups-char-real-name]');
+    input.value = '';
+    input.dispatchEvent({ type: 'input' });
+    sr.querySelector('[data-ups-inspiration]').value = '码头维修员';
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.doesNotMatch(prompt, /角色真名指代规范/);
+    assert.equal(prompt.includes('船铃响了'), false);
+    sr.querySelector('[data-ups-subchar-chip="0"]').click();
+    const subInput = sr.querySelector('[data-ups-subchar-name="0"]');
+    assert.ok(subInput);
+    assert.equal(subInput.getAttribute('spellcheck'), 'false');
+    subInput.value = '方队长';
+    subInput.dispatchEvent({ type: 'input' });
+    assert.equal(sr.querySelector('[data-ups-subchar-chip="0"]').textContent, '方队长');
+    opening.value = '1';
+    opening.dispatchEvent({ type: 'change' });
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.match(prompt, /聚焦目标角色：\n方队长/);
+    assert.match(prompt, /灯塔值班员/);
+    assert.match(prompt, /船铃响了，渡轮靠岸/);
+    assert.doesNotMatch(prompt, /作者说明/);
+  } finally {
+    ui.destroy();
+  }
+});

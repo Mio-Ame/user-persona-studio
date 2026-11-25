@@ -3415,8 +3415,9 @@ test('T4-11: Scenario 11 (v1.6.1) - Searchable char combobox, live 卡中角色�
   await env.waitTicks();
   const presetsPanel = shadow.querySelector('[data-ups-tab-panel="presets"]');
   assert.ok(presetsPanel.textContent.includes('1840～2160'));
-  const syncedBox = presetsPanel.querySelector('[data-ups-synced-entries]');
+  const syncedBox = presetsPanel.querySelector('[data-ups-acc-list] [data-ups-synced-list]');
   assert.ok(syncedBox);
+  assert.equal(presetsPanel.textContent.includes('本次生成条目'), false);
   assert.ok(syncedBox.textContent.includes('成稿前草稿自检'));
   assert.ok(syncedBox.textContent.includes('蓝灯常驻'));
 
