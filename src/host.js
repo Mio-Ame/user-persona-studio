@@ -1906,7 +1906,18 @@ function normalizeWorldbookEntriesContainer(data) {
 }
 
 export async function saveSupplementaryWorldbook(
-  { worldName, entries, avatarId, upsert = false, pruneManaged = false, managedPrefix = '' } = {},
+  {
+    worldName,
+    entries,
+    avatarId,
+    upsert = false,
+    pruneManaged = false,
+    managedPrefix = '',
+    defaultPosition = 4,
+    defaultDepth = 2,
+    defaultRole = 0,
+    defaultOrder = 120,
+  } = {},
   deps = {}
 ) {
   const cleanWorldName = String(worldName ?? '').trim();
@@ -2092,8 +2103,61 @@ export async function saveSupplementaryWorldbook(
     targetEntry.selective = rawEntry.selective !== false;
     targetEntry.disable = Boolean(rawEntry.disable);
     targetEntry.addMemo = rawEntry.addMemo !== false;
-    targetEntry.position = Number.isFinite(Number(rawEntry.position)) ? Number(rawEntry.position) : 0;
-    targetEntry.order = Number.isFinite(Number(rawEntry.order)) ? Number(rawEntry.order) : 100;
+    const fallbackPosition = Number.isFinite(Number(defaultPosition))
+      ? Math.min(7, Math.max(0, Math.round(Number(defaultPosition))))
+      : 4;
+    const fallbackDepth = Number.isFinite(Number(defaultDepth))
+      ? Math.min(99, Math.max(0, Math.round(Number(defaultDepth))))
+      : 2;
+    const fallbackRole = Number.isFinite(Number(defaultRole))
+      ? Math.min(2, Math.max(0, Math.round(Number(defaultRole))))
+      : 0;
+    const fallbackOrder = Number.isFinite(Number(defaultOrder))
+      ? Math.min(10000, Math.max(0, Math.round(Number(defaultOrder))))
+      : 120;
+
+    const hasExplicitPos =
+      rawEntry.position !== undefined &&
+      rawEntry.position !== null &&
+      String(rawEntry.position).trim() !== '' &&
+      Number.isFinite(Number(rawEntry.position));
+    const hasExplicitDepth =
+      rawEntry.depth !== undefined &&
+      rawEntry.depth !== null &&
+      String(rawEntry.depth).trim() !== '' &&
+      Number.isFinite(Number(rawEntry.depth));
+    const hasExplicitRole =
+      rawEntry.role !== undefined &&
+      rawEntry.role !== null &&
+      String(rawEntry.role).trim() !== '' &&
+      Number.isFinite(Number(rawEntry.role));
+    const hasExplicitOrder =
+      rawEntry.order !== undefined &&
+      rawEntry.order !== null &&
+      String(rawEntry.order).trim() !== '' &&
+      Number.isFinite(Number(rawEntry.order));
+
+    const resolvedPosition = hasExplicitPos
+      ? Math.min(7, Math.max(0, Math.round(Number(rawEntry.position))))
+      : hasExplicitDepth
+        ? 4
+        : fallbackPosition;
+    const resolvedOrder = hasExplicitOrder
+      ? Math.min(10000, Math.max(0, Math.round(Number(rawEntry.order))))
+      : fallbackOrder;
+
+    targetEntry.position = resolvedPosition;
+    targetEntry.order = resolvedOrder;
+    if (resolvedPosition === 4 || hasExplicitDepth) {
+      targetEntry.depth = hasExplicitDepth
+        ? Math.min(99, Math.max(0, Math.round(Number(rawEntry.depth))))
+        : fallbackDepth;
+    }
+    if (resolvedPosition === 4 || hasExplicitRole) {
+      targetEntry.role = hasExplicitRole
+        ? Math.min(2, Math.max(0, Math.round(Number(rawEntry.role))))
+        : fallbackRole;
+    }
 
     if (incomingSlotKey || incomingManaged || rawUpsMeta || cleanManagedPrefix) {
       const prevExts =

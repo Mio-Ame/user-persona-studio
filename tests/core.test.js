@@ -38,6 +38,10 @@ import {
   DEFAULT_TRIGGER,
   MAX_GENERATION_HISTORY,
   MAX_HISTORY_ENTRY_CHARS,
+  DEFAULT_HIDE_DRAFT_AUDIT,
+  WORLD_INFO_POSITION,
+  DEFAULT_USER_WORLDBOOK_PLACEMENT,
+  CANONICAL_POINT_CATEGORIES,
   ST_SENSITIVE_FIELDS,
   createDefaultSettings,
   sanitizeSettingsForExport,
@@ -75,6 +79,7 @@ import {
   extractVerbatimCompanionSlices,
   computeCompanionTokenPlan,
   buildCompanionWorldbookEntries,
+  resolvePresetEntryPreview,
   buildDraftAuditInstruction,
   buildGenerationMessages,
   applyTailRoleStrategy,
@@ -89,6 +94,7 @@ import {
   lintPersonaText,
   splitCoreAndShell,
   splitDualLayerOutput,
+  mergeDuplicatePersonaSections,
   parsePersonaSections,
   computeLineDiff,
   mergeSectionUpdate,
@@ -183,7 +189,7 @@ test('Group 1.2: QUALITATIVE_LABEL_PATTERNS has 16 detectors matching their own 
   }
 });
 
-test('Group 1.3: BUILTIN_PRESET_SCHEMES defines 3 relatable built-in presets with 7 modular slots & natural everyday default format', () => {
+test('Group 1.3: BUILTIN_PRESET_SCHEMES defines 3 relatable built-in presets with 9 modular slots & natural everyday default format', () => {
   assert.equal(Object.keys(BUILTIN_PRESET_SCHEMES).length, 3);
   const { longform_coact, player_controlled, persona_refactor } = BUILTIN_PRESET_SCHEMES;
 
@@ -207,16 +213,18 @@ test('Group 1.3: BUILTIN_PRESET_SCHEMES defines 3 relatable built-in presets wit
   assert.equal(persona_refactor.temperature, 0.65);
   assert.equal(persona_refactor.maxTokens, 5200);
 
-  const requiredSlots = ['role', 'context', 'craft', 'taste', 'banned', 'pacing', 'format'];
+  const requiredSlots = ['role', 'context', 'craft', 'taste', 'banned', 'pacing', 'format', 'worldbook', 'draft_audit'];
   for (const scheme of [longform_coact, player_controlled, persona_refactor]) {
     assert.equal(scheme.tailMode, 'auto');
     assert.ok(scheme.prefillText.length > 0);
     assert.ok(scheme.triggerText.length > 0);
-    assert.equal(scheme.entries.length, 7);
+    assert.equal(scheme.entries.length, 9);
     const slotTypes = scheme.entries.map((e) => e.slotType);
     for (const slot of requiredSlots) {
       assert.ok(slotTypes.includes(slot), `${scheme.id} missing slotType ${slot}`);
     }
+    assert.equal(scheme.entries.find((e) => e.slotType === 'worldbook')?.enabled, false);
+    assert.equal(scheme.entries.find((e) => e.slotType === 'draft_audit')?.enabled, true);
     const joined = scheme.entries.map((e) => e.content).join('\n');
     assert.ok(joined.includes(CORE_SECTION_HEADER));
     assert.ok(joined.includes(SHELL_SECTION_HEADER));
@@ -521,8 +529,15 @@ test('Group 3.1: buildGenerationMessages honors bannedSendMode, backstoryMode, s
   assert.equal(res.assembledPromptText.includes('——'), false, 'Assembled prompt must contain zero —— em-dashes');
   // Default visibilityTags is false -> no forced [外表可见] directive
   assert.equal(res.assembledPromptText.includes('[外表可见]'), false);
-  // Default draftAudit is false when omitted
-  assert.equal(res.assembledPromptText.includes(DRAFT_START_MARKER), false);
+  // Default draft_audit slot is enabled in v3 scheme -> includes DRAFT_START_MARKER unless explicitly disabled
+  assert.equal(res.assembledPromptText.includes(DRAFT_START_MARKER), true);
+  const resNoAudit = buildGenerationMessages({
+    mode: 'new',
+    scheme,
+    inspiration: '日常故事',
+    draftAudit: false,
+  });
+  assert.equal(resNoAudit.assembledPromptText.includes(DRAFT_START_MARKER), false);
   // Dual layer delimiter instructed
   assert.ok(res.assembledPromptText.includes(WORLDBOOK_DIVIDER));
   assert.ok(res.assembledPromptText.includes('顾行舟'));
@@ -752,14 +767,15 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
     scheme: schemeUser,
     tasteProfile: { anchors: ['私密偏爱条目'], banned: ['私密拉黑条目'], useBuiltinBanned: true },
     includeTaste: false,
+    includeDraftAudit: false,
   });
   const expUserJson = JSON.stringify(expUser);
   assert.equal(expUserJson.includes('私密偏爱条目'), false);
   assert.equal(expUserJson.includes('私密拉黑条目'), false);
-  assert.equal(expUser.prompts.some((p) => p.identifier === 'ups_draft_audit'), false);
+  const orderUser = expUser.prompt_order[0].order;
+  assert.equal(orderUser.find((o) => o.identifier === 'ups_draft_audit')?.enabled, false);
   assert.equal(expUser.temperature, 0.55);
   assert.equal(expUser.openai_max_tokens, 2800);
-  const orderUser = expUser.prompt_order[0].order;
   const chatIdx = orderUser.findIndex((o) => o.identifier === 'chatHistory');
   assert.equal(orderUser[chatIdx + 1].identifier, 'ups_tail_trigger');
 
@@ -767,13 +783,17 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
     tailMode: 'assistant_prefill',
     prefillText: `${CORE_SECTION_HEADER}\n   `,
   });
-  const expPrefill = exportSillyTavernPreset({ scheme: schemePrefill });
-  assert.equal(expPrefill.assistant_prefill, '');
-  const orderPrefill = expPrefill.prompt_order[0].order;
+  const expPrefillNoAudit = exportSillyTavernPreset({ scheme: schemePrefill, includeDraftAudit: false });
+  assert.equal(expPrefillNoAudit.assistant_prefill, '');
+  const orderPrefill = expPrefillNoAudit.prompt_order[0].order;
   const chatIdx2 = orderPrefill.findIndex((o) => o.identifier === 'chatHistory');
   assert.equal(orderPrefill[chatIdx2 + 1].identifier, 'ups_tail_prefill');
   assert.equal(orderPrefill[chatIdx2 + 1].enabled, true);
-  assert.equal(expPrefill.prompts.find((p) => p.identifier === 'ups_tail_prefill').content, CORE_SECTION_HEADER);
+  assert.equal(expPrefillNoAudit.prompts.find((p) => p.identifier === 'ups_tail_prefill').content, CORE_SECTION_HEADER);
+
+  const expPrefillDefaultAudit = exportSillyTavernPreset({ scheme: schemePrefill });
+  assert.equal(expPrefillDefaultAudit.prompt_order[0].order.find((o) => o.identifier === 'ups_draft_audit')?.enabled, true);
+  assert.equal(expPrefillDefaultAudit.prompts.find((p) => p.identifier === 'ups_tail_prefill').content, DRAFT_START_MARKER);
 
   // Verify SillyTavern RegexScriptData exporter
   const regexScript = exportDraftStripRegexScript('测试工坊');
@@ -992,9 +1012,15 @@ test('Group 5.3: splitCoreAndShell & splitDualLayerOutput parse all supported de
     const parsed = splitDualLayerOutput(dual);
     assert.ok(parsed.coreDescription.includes('主档案摘要'));
     assert.equal(parsed.worldbookEntries.length, 2);
-    assert.equal(parsed.worldbookEntries[0].comment, '祖传修书工坊');
+    assert.equal(parsed.worldbookEntries[0].comment, '【{{user}}补充设定】祖传修书工坊');
     assert.deepEqual(parsed.worldbookEntries[0].key, ['修书工坊', '老街铺面', '浆糊配方']);
+    assert.ok(parsed.worldbookEntries[0].content.includes('非 {{char}} 设定'));
     assert.ok(parsed.worldbookEntries[0].content.includes('二楼只留作晾晒书页之用'));
+    assert.equal(parsed.worldbookEntries[0].position, WORLD_INFO_POSITION.AT_DEPTH);
+    assert.equal(parsed.worldbookEntries[0].depth, 2);
+    assert.equal(parsed.worldbookEntries[0].role, 0);
+    assert.equal(parsed.worldbookEntries[0].order, 120);
+    assert.equal(parsed.worldbookEntries[1].order, 121);
     assert.deepEqual(parsed.worldbookEntries[1].key, ['旧债', '同门']);
   }
 });
@@ -1424,12 +1450,18 @@ test('Group 9.1 (Tier 5): splitDualLayerOutput parses ##/#### headings & lintPer
 
   const parsed = splitDualLayerOutput(dualH2H4);
   assert.equal(parsed.worldbookEntries.length, 2);
-  assert.equal(parsed.worldbookEntries[0].comment, '补充条目一');
+  assert.equal(parsed.worldbookEntries[0].comment, '【{{user}}补充设定】补充条目一');
   assert.deepEqual(parsed.worldbookEntries[0].key, ['码头', '货栈']);
-  assert.equal(parsed.worldbookEntries[0].content, '第一条世界书正文。');
-  assert.equal(parsed.worldbookEntries[1].comment, '补充条目二');
+  assert.equal(
+    parsed.worldbookEntries[0].content,
+    '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】\n第一条世界书正文。'
+  );
+  assert.equal(parsed.worldbookEntries[1].comment, '【{{user}}补充设定】补充条目二');
   assert.deepEqual(parsed.worldbookEntries[1].key, ['旧账']);
-  assert.equal(parsed.worldbookEntries[1].content, '第二条世界书正文。');
+  assert.equal(
+    parsed.worldbookEntries[1].content,
+    '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】\n第二条世界书正文。'
+  );
 
   const attrXmlReport = lintPersonaText('<div class="x">hello');
   assert.ok(
@@ -1870,7 +1902,8 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
 
   // Default directive: structured shallow Chinese layout, zero code fences/XML, forbids adult content without nsfw token
   const defDirective = buildGenerationSectionDirective(defCfg, { backstoryMode: 'light_vibe' });
-  assert.ok(defDirective.includes('结构化清单版'));
+  assert.ok(defDirective.includes('清单版'));
+  assert.equal(defDirective.includes('结构化清单版'), false);
   assert.ok(defDirective.includes('浅层中文键值'));
   assert.ok(defDirective.includes('严禁生成任何成人向、情色或越界亲密描写内容'));
   assert.equal(/\bnsfw\b/i.test(defDirective), false);
@@ -1897,7 +1930,8 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
   const optInDir = buildGenerationSectionDirective(customCfg, {
     companions: [{ id: 'c1', name: '林栖' }],
   });
-  assert.ok(optInDir.includes('自然分段版'));
+  assert.ok(optInDir.includes('分段版'));
+  assert.equal(optInDir.includes('自然分段版'), false);
   assert.ok(optInDir.includes('亲密关系倾向'));
   assert.ok(optInDir.includes('边界与事后相处'));
   assert.ok(optInDir.includes('修仙灵根与境界'));
@@ -2196,6 +2230,11 @@ test('Group 15.2 (R2/R3/R4): computeCompanionTokenPlan, buildCompanionWorldbookE
   assert.equal(wbEntries[0].extensions.user_persona_studio.managed, true);
   assert.equal(wbEntries[0].order, 100);
   assert.equal(wbEntries[1].order, 60);
+  assert.equal(wbEntries[0].position, WORLD_INFO_POSITION.AT_DEPTH);
+  assert.equal(wbEntries[0].depth, 2);
+  assert.equal(wbEntries[0].role, 0);
+  assert.ok(wbEntries[0].comment.includes('{{user}}'));
+  assert.ok(wbEntries[0].content.includes('非 {{char}} 设定'));
   assert.ok(wbEntries[0].key.includes('顾淮'));
   assert.equal(wbEntries[0].key.includes('《夜巷来信》'), false);
   assert.ok(wbEntries[0].content.includes('偏爱乌龙茶'));
@@ -2482,7 +2521,7 @@ test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldboo
   const charWoven = buildGenerationMessages({
     mode: 'create',
     inspiration: '新来的青年画师',
-    charContext: { name: '云舒霖', description: '江南画院名家' },
+    charContext: { name: '测试甲', description: '在工作室画画' },
   });
   assert.ok(charWoven.assembledPromptText.includes('【人物经历与角色世界血肉融合】'));
 
@@ -2494,4 +2533,355 @@ test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldboo
   });
   const distillJoined = distillMsgs.map((m) => m.content).join('\n');
   assert.ok(distillJoined.includes('句式') && distillJoined.includes('解释性语言'));
+});
+
+// ============================================================================
+// Group 18: M1 Fixes (R1.1, R1.3, R2.1, R3.1–R3.3, R4.1, R4.2, R4.5)
+// ============================================================================
+
+test('Group 18.1 (R1.1): detectMultiCharacterCard strips YAML bullets, guards explicitHeaderMatch & sorts deterministically', () => {
+  const singleProtagonistEntries = [
+    { comment: '时期：高中', content: '高二秋天转学过来。' },
+    { comment: '角色：IF线', content: '姓名：假分支\n年龄：18' },
+    { comment: '人物档案：测试一中', content: '姓名：测试一中\n位置：城东' },
+    { comment: '角色：时空一致性', content: '姓名：规则\n说明：一致性约束' },
+    { comment: '情感观', content: '对亲密关系的看法。' },
+    { comment: '续命任务面板', content: '<status>HP:100</status>' },
+    { comment: 'iMessage', content: '聊天记录模板' },
+    { comment: '== NPC档案 ==', content: '分隔符' },
+    {
+      uid: 10,
+      comment: '测试乙',
+      content: '- 姓名：测试乙\n- 出生日期: 六月\n- 年龄：21\n- 修理工，负责检修。',
+    },
+    {
+      uid: 11,
+      comment: '测试丙',
+      content: '- 姓名：测试丙\n- 性别：男\n- 身份定位：同班同学',
+    },
+  ];
+
+  const singleRes = detectMultiCharacterCard({ name: '测试丁' }, singleProtagonistEntries);
+  assert.equal(singleRes.isMultiChar, false);
+  assert.equal(singleRes.characterEntries.length, 2);
+  assert.deepEqual(singleRes.characterEntries.map((c) => c.name), ['测试乙', '测试丙']);
+  assert.equal(singleRes.characterEntries[0].roleTag.includes('出生日期'), false);
+  assert.equal(singleRes.characterEntries[0].roleTag, '修理工，负责检修');
+  assert.equal(singleRes.characterEntries[1].roleTag, '同班同学');
+
+  // Empty/title-like card name with NPC-only roster must still stay isMultiChar: false
+  const emptyTitleSingle = detectMultiCharacterCard({ name: '' }, [
+    { comment: '== NPC ==', content: 'divider' },
+    ...['甲', '乙', '丙', '丁'].map((n, i) => ({
+      uid: 20 + i,
+      comment: n,
+      content: `姓名：${n}\n年龄：20\n身份：路人${i + 1}`,
+    })),
+  ]);
+  assert.equal(emptyTitleSingle.isMultiChar, false);
+
+  // Ensemble card with explicit main roles + disabled duplicate sorts enabled main roles deterministically
+  const ensembleRes = detectMultiCharacterCard({ name: '《群星闪耀》' }, [
+    { comment: '== NPC ==', content: 'divider' },
+    { uid: 1, order: 200, comment: '张掌柜', content: '姓名：张掌柜\n年龄：45\n身份：茶楼老板' },
+    { comment: '== 主要角色 ==', content: 'divider' },
+    { uid: 2, order: 105, comment: '主要角色：谢知微', content: '姓名：谢知微\n身份：绸缎庄东家', disable: true },
+    { uid: 3, order: 102, comment: '主要角色：柳明川', content: '姓名：柳明川\n身份：茶行掌柜' },
+    { uid: 4, order: 101, comment: '主要角色：温景和', content: '姓名：温景和\n身份：书院先生' },
+    { uid: 5, order: 105, comment: '主要角色：谢知微', content: '姓名：谢知微\n身份：绸缎庄东家（主线）', disable: false },
+  ]);
+  assert.equal(ensembleRes.isMultiChar, true);
+  assert.deepEqual(
+    ensembleRes.characterEntries.map((c) => c.name),
+    ['温景和', '柳明川', '谢知微', '张掌柜']
+  );
+  assert.equal(ensembleRes.characterEntries[2].disabled, false);
+  assert.equal(ensembleRes.characterEntries[2].roleTag, '绸缎庄东家（主线）');
+
+  // Compound non-person titles, XML <character name="..."> guard, + / numbered bullets & char_name suppression
+  const edgeRes = detectMultiCharacterCard({ name: '测试主角' }, [
+    { uid: 101, comment: '角色-IF线故事', content: '姓名：未知\n身份：分支\n年龄：18' },
+    { uid: 102, comment: '人物：某学院分校', content: '姓名：某学院分校\n身份：地点' },
+    { uid: 103, comment: '人物：测试一中校门', content: '姓名：测试一中校门\n身份：地点' },
+    { uid: 104, comment: '某些设定', content: '<character name="IF线">\n年龄：18\n身份：分支' },
+    { uid: 105, comment: '（自改）参考:user信息', content: '<character_User>\nname: {{User}}\ngender: female' },
+    { uid: 106, comment: '【npc简】相爷府', content: '<相府npc>\n年龄：44\n外貌：清瘦' },
+    { uid: 107, comment: '123·角色1', content: '姓名：甲\n身份：学生\n年龄：15' },
+    { uid: 108, comment: '主要角色：张三', content: '* 姓名：张三\n+ 身份：法医' },
+    { uid: 109, comment: '主要角色：测试戊', content: 'char_name: 测试戊\nNickname:\nage: 21\n性格：温润克制。' },
+  ]);
+  assert.deepEqual(
+    edgeRes.characterEntries.map((c) => c.name),
+    ['张三', '测试戊']
+  );
+  assert.equal(edgeRes.characterEntries[0].roleTag, '法医');
+  assert.equal(edgeRes.characterEntries[1].roleTag.includes('char_name'), false);
+  assert.equal(edgeRes.characterEntries[1].roleTag.includes('Nickname:'), false);
+});
+
+test('Group 18.2 (R1.3): WORLD_INFO_POSITION, anti-contamination placement & {{user}} attribution in dual-layer & companion entries', () => {
+  assert.equal(WORLD_INFO_POSITION.BEFORE, 0);
+  assert.equal(WORLD_INFO_POSITION.AT_DEPTH, 4);
+  assert.deepEqual(DEFAULT_USER_WORLDBOOK_PLACEMENT, {
+    position: 4,
+    depth: 2,
+    role: 0,
+    order: 120,
+  });
+
+  const dualCustom = splitDualLayerOutput(
+    [
+      `${CORE_SECTION_HEADER}\n主档案`,
+      WORLDBOOK_DIVIDER,
+      '[条目：{{user}}的旧怀表]',
+      '关键词：怀表',
+      '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】\n祖父留下的怀表。',
+      '[条目：码头租屋]',
+      '触发方式：蓝灯常驻',
+      '关键词：租屋',
+      '内容：靠海的二层小楼。',
+    ].join('\n'),
+    {
+      worldbookPlacement: { position: WORLD_INFO_POSITION.AT_DEPTH, depth: 3, role: 0, order: 140 },
+    }
+  );
+  assert.equal(dualCustom.worldbookEntries.length, 2);
+  // Idempotent when {{user}} already present in comment and first line of content
+  assert.equal(dualCustom.worldbookEntries[0].comment, '{{user}}的旧怀表');
+  assert.equal(
+    dualCustom.worldbookEntries[0].content.match(/非 \{\{char\}\} 设定/g).length,
+    1
+  );
+  assert.equal(dualCustom.worldbookEntries[0].position, 4);
+  assert.equal(dualCustom.worldbookEntries[0].depth, 3);
+  assert.equal(dualCustom.worldbookEntries[0].role, 0);
+  assert.equal(dualCustom.worldbookEntries[0].order, 140);
+  assert.equal(dualCustom.worldbookEntries[1].comment, '【{{user}}补充设定】码头租屋');
+  assert.ok(dualCustom.worldbookEntries[1].content.startsWith('【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】'));
+  assert.equal(dualCustom.worldbookEntries[1].order, 141);
+
+  const compCustom = buildCompanionWorldbookEntries({
+    companions: [{ id: 'c1', name: '林栖', frequencyTier: 'active_circle', cardContext: { name: '林栖', description: '画师。' } }],
+    position: WORLD_INFO_POSITION.AFTER,
+    order: 150,
+  });
+  assert.equal(compCustom[0].position, 1);
+  assert.equal(compCustom[0].order, 170);
+  assert.equal('depth' in compCustom[0], false);
+  assert.ok(compCustom[0].comment.includes('{{user}}'));
+  assert.ok(compCustom[0].content.includes('非 {{char}} 设定'));
+});
+
+test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion splicing, segmented pacing quotas & export draftAudit parity', () => {
+  const presetsSerialized = JSON.stringify(BUILTIN_PRESET_SCHEMES) + JSON.stringify(GENERATION_SECTION_GROUPS);
+  const defaultPrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '在江南开一家修表铺',
+    charContext: { name: '沈砚', description: '港务局调度员' },
+  }).assembledPromptText;
+
+  // R2.1 & R3.1 hygiene
+  assert.equal(/(结构化清单版|自然分段版|自动联动|当前选项自动联动条目)/.test(presetsSerialized + defaultPrompt), false);
+  assert.equal(/(开启【|仅当|未启用的过往经历|亲密设定板块未开启|切勿大幅缩水或超写)/.test(presetsSerialized + defaultPrompt), false);
+
+  // R3.2: no unenabled companion/relative phrasing in default prompt or joint upbringing without companions/npc_network
+  assert.equal(/(亲友|客串)/.test(defaultPrompt), false);
+  const jointWithoutCompanions = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '与对方青梅竹马',
+    charContext: { name: '周恪' },
+  }).assembledPromptText;
+  assert.ok(jointWithoutCompanions.includes('检测到与 {{char}} 存在青梅竹马'));
+  assert.equal(/(亲友|客串)/.test(jointWithoutCompanions), false);
+
+  // R3.2: dynamic splicing appears when companions or npc_network are enabled
+  const withNpcSection = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '与对方青梅竹马',
+    charContext: { name: '周恪' },
+    generationSections: { enabledIds: ['basic_identity', 'parents_family'] },
+  }).assembledPromptText;
+  assert.ok(withNpcSection.includes('在场亲友'));
+  assert.ok(withNpcSection.includes('{{char}} 或亲友'));
+
+  // R3.3: Segmented pacing quotas & adaptive density for 2000 vs 600 chars + blank_self cleanup
+  const scheme2000 = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.longform_coact, 2000);
+  const pacing2000 = resolvePresetEntryPreview(
+    scheme2000.entries.find((e) => e.slotType === 'pacing'),
+    scheme2000,
+    {},
+    { generationSections: { enabledIds: GENERATION_SECTION_PRESETS.standard.enabledIds } }
+  );
+  assert.ok(pacing2000.includes('不少于 1840 字'));
+  assert.ok(pacing2000.includes('【细节展开密度：充分扩写】'));
+  assert.ok(pacing2000.includes('分段参考配额（当前启用 7 个板块'));
+
+  const scheme600 = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.player_controlled, 600);
+  const pacing600 = resolvePresetEntryPreview(
+    scheme600.entries.find((e) => e.slotType === 'pacing'),
+    scheme600,
+    {},
+    {
+      backstoryMode: 'blank_self',
+      generationSections: { enabledIds: ['basic_identity', 'appearance_outfit', 'personality_logic', 'backstory_growth', 'relation_to_char'] },
+    }
+  );
+  assert.ok(pacing600.includes('不少于 550 字'));
+  assert.ok(pacing600.includes('【细节展开密度：精炼短句】'));
+  assert.ok(pacing600.includes('当前启用 4 个板块'));
+  assert.equal(pacing600.includes('与过往事实'), false);
+
+  // Small budget (400 / 600 chars) with only 2 sections must STILL emit concise density, never 充分扩写
+  const scheme400 = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.longform_coact, 400);
+  const pacing400TwoSec = resolvePresetEntryPreview(
+    scheme400.entries.find((e) => e.slotType === 'pacing'),
+    scheme400,
+    {},
+    { generationSections: { enabledIds: ['basic_identity', 'personality_logic'] } }
+  );
+  assert.ok(pacing400TwoSec.includes('【细节展开密度：精炼短句】'));
+  const pacing600TwoSec = resolvePresetEntryPreview(
+    scheme600.entries.find((e) => e.slotType === 'pacing'),
+    scheme600,
+    {},
+    { generationSections: { enabledIds: ['basic_identity', 'personality_logic'] } }
+  );
+  assert.ok(pacing600TwoSec.includes('【细节展开密度：精炼短句】'));
+
+  // exportSillyTavernPreset with DEFAULT_PREFILL + assistant_prefill + includeDraftAudit: true emits DRAFT_START_MARKER
+  const expDefaultPrefillAudit = exportSillyTavernPreset({
+    scheme: {
+      ...BUILTIN_PRESET_SCHEMES.longform_coact,
+      tailMode: 'assistant_prefill',
+      prefillText: DEFAULT_PREFILL,
+    },
+    includeDraftAudit: true,
+  });
+  assert.equal(
+    expDefaultPrefillAudit.prompts.find((p) => p.identifier === 'ups_tail_prefill')?.content,
+    DRAFT_START_MARKER
+  );
+
+  // Stale v3 entries with removed phrases auto-upgrade
+  const upgradedStale = createDefaultSettings({
+    schemes: [
+      {
+        id: 'longform_coact',
+        presetVersion: 3,
+        entries: [
+          {
+            id: 'lf_pacing',
+            slotType: 'pacing',
+            content: '切勿大幅缩水或超写，与 {{char}}（及在场亲友）相处。',
+          },
+        ],
+      },
+    ],
+  });
+  const lf = upgradedStale.schemes.find((s) => s.id === 'longform_coact');
+  assert.equal(JSON.stringify(lf.entries).includes('及在场亲友'), false);
+  assert.equal(JSON.stringify(lf.entries).includes('切勿大幅缩水或超写'), false);
+
+  // exportSillyTavernPreset honors uiPreferences.draftAudit when includeDraftAudit omitted
+  const expUiOff = exportSillyTavernPreset({
+    scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
+    uiPreferences: { draftAudit: false },
+  });
+  assert.equal(expUiOff.prompt_order[0].order.find((o) => o.identifier === 'ups_draft_audit')?.enabled, false);
+  assert.equal(expUiOff.extensions.user_persona_studio.includeDraftAudit, false);
+});
+
+test('Group 18.4 (R4.1, R4.2, R4.5): hideDraftAudit default, narrowed nested_indent lint, mergeDuplicatePersonaSections & NSFW point category', () => {
+  // R4.1 default
+  assert.equal(DEFAULT_HIDE_DRAFT_AUDIT, true);
+  const defSettings = createDefaultSettings();
+  assert.equal(defSettings.ui.hideDraftAudit, true);
+  assert.equal(defSettings.ui.worldbookPosition, 4);
+  assert.equal(defSettings.ui.worldbookDepth, 2);
+  assert.equal(defSettings.ui.worldbookOrder, 120);
+  assert.equal(createDefaultSettings({ ui: { hideDraftAudit: false } }).ui.hideDraftAudit, false);
+
+  // R4.2 narrowed nested_indent lint
+  const whitelistedTagsText = [
+    CORE_SECTION_HEADER,
+    '<user>',
+    '  普通两空格缩进不触发',
+    '</user>',
+    '<char>正常</char>',
+    '<user_supplement>补充</user_supplement>',
+  ].join('\n');
+  assert.equal(
+    lintPersonaText(whitelistedTagsText).issues.some((i) => i.type === 'nested_indent'),
+    false
+  );
+
+  const multiNested = lintPersonaText('  - 嵌套一\n  - 嵌套二\n<div>残余标签</div>');
+  const nestedIssues = multiNested.issues.filter((i) => i.type === 'nested_indent');
+  assert.equal(nestedIssues.length, 1);
+  assert.equal(nestedIssues[0].noBanAction, true);
+  assert.equal(nestedIssues[0].count, 3);
+
+  // R4.5 mergeDuplicatePersonaSections
+  const dupPersona = [
+    '【基础人设】',
+    '## 外貌与体型',
+    '- 黑长直发，身高 165cm。',
+    '- 习惯穿深灰大衣。',
+    '## 性格与逻辑',
+    '说话简洁克制。',
+    '## 外貌与体型',
+    '黑长直发，身高 165cm。',
+    '左腕有一道浅疤。',
+    '',
+    '【基础人设】',
+    '## 性格与逻辑',
+    '说话简洁克制。',
+    '遇事会先冷静观察。',
+    '',
+    '【补充世界书条目】',
+    '[条目：旧物]',
+    '关键词：旧物',
+    '内容：保持原样。',
+  ].join('\n');
+
+  const merged = mergeDuplicatePersonaSections(dupPersona);
+  assert.equal(merged.match(/## 外貌与体型/g).length, 1);
+  assert.equal(merged.match(/## 性格与逻辑/g).length, 1);
+  assert.equal(merged.match(/【基础人设】/g).length, 1);
+  assert.equal(merged.match(/黑长直发，身高 165cm。/g).length, 1);
+  assert.ok(merged.includes('习惯穿深灰大衣'));
+  assert.ok(merged.includes('左腕有一道浅疤'));
+  assert.ok(merged.includes('遇事会先冷静观察'));
+  assert.ok(merged.includes('【补充世界书条目】\n[条目：旧物]'));
+
+  const refactorPrompt = buildGenerationMessages({
+    mode: 'optimize',
+    subMode: 'de_label_reformat',
+    existingDraft: dupPersona,
+  }).assembledPromptText;
+  const draftSlice = refactorPrompt.split('【原有人设底稿】')[1] || '';
+  assert.equal(draftSlice.match(/## 外貌与体型/g).length, 1);
+
+  // R4.5 NSFW point category routing without false positives
+  assert.ok(CANONICAL_POINT_CATEGORIES.includes('NSFW / 亲密设定'));
+  const nsfwPersona = [
+    CORE_SECTION_HEADER,
+    '## 经历与技能',
+    '敏感取向：耳后与后颈最敏感，偏爱慢热温柔的试探。',
+    'NSFW 场景表现：动情时会刻意压低呼吸，指尖抓紧床单。',
+    '性格细节：对潮湿和尖锐噪音比较敏感。',
+    '擅长修补古籍书画。',
+  ].join('\n');
+  const pts = extractPersonaPoints(nsfwPersona, 24);
+  const grouped = groupPersonaPoints(pts);
+  const nsfwGroup = grouped.find((g) => g.category === 'NSFW / 亲密设定');
+  assert.ok(nsfwGroup);
+  assert.ok(nsfwGroup.items.some((p) => p.fullText.includes('敏感取向')));
+  assert.ok(nsfwGroup.items.some((p) => p.fullText.includes('NSFW 场景表现')));
+  assert.equal(
+    nsfwGroup.items.some((p) => p.fullText.includes('尖锐噪音比较敏感')),
+    false
+  );
+  const expGroup = grouped.find((g) => g.category === '经历与技能');
+  assert.ok(expGroup && expGroup.items.some((p) => p.fullText.includes('修补古籍书画')));
 });

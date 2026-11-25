@@ -71,6 +71,25 @@ export const DEFAULT_PREFILL = `${CORE_SECTION_HEADER}\n## 外貌与日常印象
 export const DEFAULT_TRIGGER = '请直接按以上要求输出完整结果，不要寒暄或附加解释。';
 export const MAX_GENERATION_HISTORY = 8;
 export const MAX_HISTORY_ENTRY_CHARS = 12000;
+export const DEFAULT_HIDE_DRAFT_AUDIT = true;
+
+export const WORLD_INFO_POSITION = Object.freeze({
+  BEFORE: 0,
+  AFTER: 1,
+  AN_TOP: 2,
+  AN_BOTTOM: 3,
+  AT_DEPTH: 4,
+  EM_TOP: 5,
+  EM_BOTTOM: 6,
+  OUTLET: 7,
+});
+
+export const DEFAULT_USER_WORLDBOOK_PLACEMENT = Object.freeze({
+  position: WORLD_INFO_POSITION.AT_DEPTH,
+  depth: 2,
+  role: 0,
+  order: 120,
+});
 
 export const ST_SENSITIVE_FIELDS = Object.freeze([
   'reverse_proxy',
@@ -96,6 +115,8 @@ const VALID_SLOT_TYPES = new Set([
   'banned',
   'pacing',
   'format',
+  'worldbook',
+  'draft_audit',
   'custom',
 ]);
 const VALID_TAIL_MODES = new Set(['auto', 'user', 'assistant_prefill', 'prefill_plus_user']);
@@ -114,6 +135,33 @@ const SECTION_ITEM_BY_ID = new Map(ALL_SECTION_ITEMS.map((item) => [item.id, ite
 const INTIMATE_SECTION_IDS = new Set(
   (GENERATION_SECTION_GROUPS.find((g) => g.id === 'intimate')?.items || []).map((item) => item.id)
 );
+const NPC_NETWORK_SECTION_IDS = new Set(
+  (GENERATION_SECTION_GROUPS.find((g) => g.id === 'npc_network')?.items || []).map((item) => item.id)
+);
+const BODY_TRAIT_SECTION_IDS = new Set(
+  (GENERATION_SECTION_GROUPS.find((g) => g.id === 'body_traits')?.items || []).map((item) => item.id)
+);
+const SECTION_CHAR_WEIGHTS = Object.freeze({
+  basic_identity: 0.7,
+  appearance_outfit: 1.1,
+  personality_logic: 1.3,
+  habits_tastes: 1.0,
+  backstory_growth: 1.1,
+  career_finance: 0.85,
+  relation_to_char: 1.15,
+  parents_family: 0.65,
+  siblings: 0.65,
+  friends_circle: 0.65,
+  ex_partner: 0.65,
+  key_npc_pet: 0.65,
+  height_build: 0.65,
+  voice_scent_marks: 0.65,
+  constitution_ability: 0.65,
+  intimate_dynamic: 0.75,
+  intimate_preference: 0.75,
+  intimate_sensitivity: 0.75,
+  intimate_boundary: 0.75,
+});
 const VALID_COMPANION_TIER_IDS = new Set(COMPANION_FREQUENCY_TIERS.map((t) => t.id));
 const COMPANION_TIER_BY_ID = new Map(COMPANION_FREQUENCY_TIERS.map((t) => [t.id, t]));
 const VALID_COMPANION_CARRY_MODES = new Set(COMPANION_CARRY_MODES.map((m) => m.id));
@@ -124,14 +172,17 @@ const COMPANION_TIER_WEIGHTS = Object.freeze({
   active_circle: 1.35,
 });
 const UPS_EXT_KEY = 'user_persona_studio';
-const CANONICAL_POINT_CATEGORIES = Object.freeze([
+export const CANONICAL_POINT_CATEGORIES = Object.freeze([
   '基础信息',
   '外貌与印象',
   '性格与底色',
   '习惯与喜好',
   '经历与技能',
+  'NSFW / 亲密设定',
   '当前身份与关系',
 ]);
+const NSFW_INTIMATE_RE =
+  /(?:nsfw|r18|亲密设定|亲密关系倾向|亲密偏好|亲密氛围|亲密互动|亲密表现|亲密接触|敏感取向|敏感带|敏感点|身体敏感|生理敏感|性敏感|事后相处|边界与事后|性癖|情欲|床事|欢爱|房事|性向|xp倾向)/iu;
 const BUILTIN_SCHEME_IDS = new Set(Object.keys(BUILTIN_PRESET_SCHEMES));
 const VALID_BANNED_CATEGORY_IDS = new Set(BUILTIN_BANNED_CATEGORIES.map((c) => c.id));
 
@@ -318,7 +369,7 @@ function sanitizeMustHaveTemplates(rawTemplates) {
 }
 
 const LEGACY_BUILTIN_CONTENT_RE =
-  /(?:人物本体核|当前剧场壳|跨卡可锁|随卡可换|手控客观|纯手控|客观手控|非抢话|未公开私事|旁人无从知晓|外显可感知|既有共识|占\s*20%|1300\s*至\s*2400|尽量用\s*\{\{user\}\}\s*指代)/u;
+  /(?:人物本体核|当前剧场壳|跨卡可锁|随卡可换|手控客观|纯手控|客观手控|非抢话|未公开私事|旁人无从知晓|外显可感知|既有共识|占\s*20%|1300\s*至\s*2400|尽量用\s*\{\{user\}\}\s*指代|开启【长设定自动拆出世界书】|仅当.*开启通用跨卡模式|仅在明确选择通用跨卡模式|及在场亲友|及客串人物|切勿大幅缩水或超写)/u;
 
 function upgradeLegacyBuiltinEntries(resolvedId, sanitizedEntries, rawPresetVersion) {
   const factory = BUILTIN_PRESET_SCHEMES[resolvedId];
@@ -662,7 +713,12 @@ export function createDefaultSettings(overrides = {}) {
       pureCrossCardReuse: Boolean(rawUi.pureCrossCardReuse),
       visibilityTags: Boolean(rawUi.visibilityTags),
       draftAudit: rawUi.draftAudit !== false,
+      hideDraftAudit: rawUi.hideDraftAudit !== false,
       antiParrot: rawUi.antiParrot !== false,
+      worldbookPosition: clampInt(rawUi.worldbookPosition, 0, 7, DEFAULT_USER_WORLDBOOK_PLACEMENT.position),
+      worldbookDepth: clampInt(rawUi.worldbookDepth, 0, 99, DEFAULT_USER_WORLDBOOK_PLACEMENT.depth),
+      worldbookOrder: clampInt(rawUi.worldbookOrder, 0, 10000, DEFAULT_USER_WORLDBOOK_PLACEMENT.order),
+      worldbookRole: clampInt(rawUi.worldbookRole, 0, 2, DEFAULT_USER_WORLDBOOK_PLACEMENT.role),
       moduleRatios: normalizeModuleRatios(rawUi.moduleRatios),
       generationSections: normalizeGenerationSectionsConfig(rawUi.generationSections),
       mustHaveTemplates: sanitizeMustHaveTemplates(rawUi.mustHaveTemplates),
@@ -1192,7 +1248,122 @@ function formatBuiltinBannedPromptBlock(disabledCategories = [], bannedSendMode 
   return lines.join('\n');
 }
 
-function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true) {
+function getCompanionNpcFlags(ctx = null) {
+  const c = ctx && typeof ctx === 'object' ? ctx : {};
+  const hasCompanions = Array.isArray(c.companions) && c.companions.some((x) => x && typeof x === 'object');
+  const enabledIds = Array.isArray(c.generationSections?.enabledIds)
+    ? c.generationSections.enabledIds
+    : [];
+  const hasNpcNetwork = enabledIds.some((id) => NPC_NETWORK_SECTION_IDS.has(id));
+  return { hasCompanions, hasNpcNetwork, hasAny: hasCompanions || hasNpcNetwork };
+}
+
+function normalizeWorldbookPlacement(raw = {}) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    position: clampInt(src.position ?? src.worldbookPosition, 0, 7, DEFAULT_USER_WORLDBOOK_PLACEMENT.position),
+    depth: clampInt(src.depth ?? src.worldbookDepth, 0, 99, DEFAULT_USER_WORLDBOOK_PLACEMENT.depth),
+    role: clampInt(src.role ?? src.worldbookRole, 0, 2, DEFAULT_USER_WORLDBOOK_PLACEMENT.role),
+    order: clampInt(src.order ?? src.worldbookOrder, 0, 10000, DEFAULT_USER_WORLDBOOK_PLACEMENT.order),
+  };
+}
+
+function ensureUserWorldbookAttribution(content, ownershipLine = '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】') {
+  const body = String(content ?? '').trim();
+  if (!body) return '';
+  const firstLine = body.split('\n')[0] || '';
+  if (/\{\{user\}\}/.test(firstLine) && /(?:补充设定|客串角色|非\s*\{\{char\}\})/.test(firstLine)) {
+    return body;
+  }
+  return `${ownershipLine}\n${body}`;
+}
+
+function buildSegmentedPacingDirective(scheme = {}, uiContext = null) {
+  const budget = computeLengthBudget(scheme?.targetChars || 1500);
+  const tokensMin = scheme?.targetTokens?.min ?? budget.tokensMin;
+  const tokensMax = scheme?.targetTokens?.max ?? budget.tokensMax;
+  const ctx = uiContext && typeof uiContext === 'object' ? uiContext : {};
+  const sectionsCfg = normalizeGenerationSectionsConfig(ctx.generationSections || {});
+  const backstoryMode = VALID_BACKSTORY_MODES.has(ctx.backstoryMode) ? ctx.backstoryMode : '';
+  const enabledSet = new Set(sectionsCfg.enabledIds);
+  if (backstoryMode === 'blank_self') {
+    enabledSet.delete('backstory_growth');
+  }
+
+  const ratios = normalizeModuleRatios(ctx.moduleRatios);
+  const useRatioScaling = ratios.mode === 'custom' || ratios.private > 0;
+  const rawItems = [];
+  for (const group of GENERATION_SECTION_GROUPS) {
+    for (const item of group.items) {
+      if (enabledSet.has(item.id)) {
+        rawItems.push({ id: item.id, label: item.label });
+      }
+    }
+  }
+  for (const cs of sectionsCfg.customSections) {
+    rawItems.push({ id: cs.id || cs.name, label: cs.name });
+  }
+  if (rawItems.length === 0) {
+    rawItems.push({ id: 'basic_identity', label: '基本身份' });
+  }
+
+  const weightedItems = rawItems.map((item) => {
+    let w = SECTION_CHAR_WEIGHTS[item.id] || 1.0;
+    if (useRatioScaling) {
+      if (item.id === 'appearance_outfit' || BODY_TRAIT_SECTION_IDS.has(item.id)) {
+        w *= Math.max(0.25, ratios.appearance / 25);
+      } else if (item.id === 'personality_logic' || item.id === 'habits_tastes') {
+        w *= Math.max(0.25, ratios.personality / 30);
+      } else if (item.id === 'backstory_growth') {
+        w *= Math.max(0.25, ratios.backstory / 20);
+      } else if (
+        item.id === 'relation_to_char' ||
+        item.id === 'career_finance' ||
+        NPC_NETWORK_SECTION_IDS.has(item.id)
+      ) {
+        w *= Math.max(0.25, ratios.relationship / 25);
+      } else if (INTIMATE_SECTION_IDS.has(item.id)) {
+        w *= Math.max(0.35, (ratios.private || 15) / 15);
+      }
+    }
+    return { ...item, weight: w };
+  });
+
+  const totalWeight = weightedItems.reduce((sum, item) => sum + item.weight, 0) || 1;
+  const avgPerSection = Math.round(budget.chars / Math.max(1, weightedItems.length));
+  const quotaLines = weightedItems.map((item) => {
+    const center = Math.max(30, Math.round(((budget.chars * item.weight) / totalWeight) / 10) * 10);
+    const secMin = Math.max(20, Math.round((center * 0.85) / 10) * 10);
+    const secMax = Math.max(secMin + 20, Math.round((center * 1.15) / 10) * 10);
+    return `- ${item.label}：约 ${secMin}～${secMax} 字`;
+  });
+
+  let densityBlock;
+  if (budget.chars <= 800 || avgPerSection < 95) {
+    densityBlock = [
+      '【细节展开密度：精炼短句】',
+      `当前字数偏紧凑且共划分 ${weightedItems.length} 个板块，请用高信息密度的精炼短句直写核心特征与事实，删去铺垫套话，严格控制在 ${budget.charsMax} 字以内。`,
+    ].join('\n');
+  } else if (budget.chars >= 1400 || avgPerSection >= 180) {
+    densityBlock = [
+      '【细节展开密度：充分扩写】',
+      `各启用板块均须充分展开具体的生活细节、言行习惯、行为逻辑与情绪微表现，用扎实的生活质感撑起篇幅，确保成稿有效汉字稳步达到 ${budget.charsMin} 字以上。`,
+    ].join('\n');
+  } else {
+    densityBlock = [
+      '【细节展开密度：适中扎实】',
+      `各板块写明关键事实并配 1～2 处具体日常表现，不空泛凑字也不流水账堆砌，成稿稳步落在 ${budget.charsMin}～${budget.charsMax} 字区间。`,
+    ].join('\n');
+  }
+
+  return [
+    `【总字数硬约束】全文有效汉字不少于 ${budget.charsMin} 字、不超过 ${budget.charsMax} 字（目标约 ${budget.chars} 字，约 ${tokensMin}～${tokensMax} tokens）${ctx.dualLayer ? '；开启世界书分流时为主档案正文与补充世界书条目之和' : ''}。`,
+    densityBlock,
+    `【分段参考配额（当前启用 ${weightedItems.length} 个板块，平均约 ${avgPerSection} 字/板块）】\n${quotaLines.join('\n')}`,
+  ].join('\n\n');
+}
+
+function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true, uiContext = null) {
   const budget = computeLengthBudget(scheme.targetChars || 1500);
   let content = String(entry.content ?? '')
     .replaceAll('{{targetChars}}', String(budget.chars))
@@ -1221,7 +1392,45 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
     ? tasteProfile.disabledCategories
     : [];
 
-  if (entry.slotType === 'taste') {
+  const hasUiCtx = Boolean(uiContext && typeof uiContext === 'object');
+  const factoryScheme = BUILTIN_PRESET_SCHEMES[scheme?.id] || null;
+  const factoryEntry = factoryScheme?.entries?.find((fe) => fe.id === entry.id) || null;
+  const isDefaultEntryContent = !factoryEntry || String(entry.content ?? '').trim() === String(factoryEntry.content ?? '').trim();
+
+  if (entry.slotType === 'context' && hasUiCtx) {
+    const backstoryMode = VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : '';
+    const spotlightMode = VALID_SPOTLIGHT_MODES.has(uiContext.spotlightMode) ? uiContext.spotlightMode : '';
+    const { hasCompanions, hasNpcNetwork } = getCompanionNpcFlags(uiContext);
+    const relationTarget =
+      hasCompanions && hasNpcNetwork
+        ? '角色、在场亲友与客串角色'
+        : hasCompanions
+          ? '角色与客串角色'
+          : hasNpcNetwork
+            ? '角色与在场亲友'
+            : '角色';
+    const contextAddons = [];
+    if (uiContext.pureCrossCardReuse === true) {
+      contextAddons.push(
+        `【纯通用跨卡复用】保持${CORE_SECTION_HEADER}独立通用，剥离特定角色或旧卡专属绑定，仅在${SHELL_SECTION_HEADER}衔接当前角色关系。`
+      );
+    } else if (backstoryMode !== 'blank_self') {
+      contextAddons.push(
+        `【人物经历与故事融合】人物的成长环境、经历轨迹与习惯成因顺着当前世界观、社会土壤及与${relationTarget}的交集脉络自然生长，长出有来处的真实血肉。`
+      );
+    }
+    if (backstoryMode) {
+      const bsText = buildBackstoryDirective(backstoryMode);
+      if (bsText) contextAddons.push(bsText);
+    }
+    if (spotlightMode) {
+      const spText = buildSpotlightDirective(spotlightMode);
+      if (spText) contextAddons.push(spText);
+    }
+    if (contextAddons.length > 0) {
+      content += `\n\n${contextAddons.join('\n')}`;
+    }
+  } else if (entry.slotType === 'taste') {
     if (anchors.length > 0) {
       content += `\n\n【个人喜欢的细节偏好（精炼融入，吃穿小喜好点到即止并按人物性格自然体现外显度）】\n${anchors.join('\n')}`;
     }
@@ -1239,6 +1448,50 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
     if (blocks.length > 0) {
       content += `\n\n${blocks.join('\n\n')}`;
     }
+  } else if (entry.slotType === 'pacing' && !uiContext?.targetSection) {
+    if (hasUiCtx && uiContext.backstoryMode === 'blank_self') {
+      content = content
+        .replace(/与成长脉络/g, '与当下生活状态')
+        .replace(/及成长经历/g, '与当下生活状态')
+        .replace(/与过往事实/g, '与当下客观事实');
+    }
+    if (hasUiCtx || isDefaultEntryContent) {
+      const segmentedPacing = buildSegmentedPacingDirective(scheme, uiContext);
+      if (segmentedPacing) {
+        content += `\n\n${segmentedPacing}`;
+      }
+    }
+    if (hasUiCtx && uiContext.moduleRatios) {
+      const ratios = normalizeModuleRatios(uiContext.moduleRatios);
+      if (ratios.mode === 'custom' || ratios.private > 0) {
+        const ratioParts = [
+          `外貌气质约 ${ratios.appearance}%`,
+          `性格习惯约 ${ratios.personality}%`,
+          `过往经历约 ${ratios.backstory}%`,
+          `当前背景与关系约 ${ratios.relationship}%`,
+        ];
+        if (ratios.private > 0) {
+          ratioParts.push(`私密心事或暗线约 ${ratios.private}%`);
+        }
+        content += `\n\n【人设构成占比指导】\n请按以下篇幅比重分配各维度细节（优先满足玩家明确指定的要求）：${ratioParts.join('，')}。`;
+      }
+    }
+  } else if (entry.slotType === 'format' && hasUiCtx && uiContext.generationSections) {
+    const backstoryMode = VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : 'light_vibe';
+    const secDirective = buildGenerationSectionDirective(uiContext.generationSections, {
+      backstoryMode,
+      companions: Array.isArray(uiContext.companions) ? uiContext.companions : [],
+    });
+    if (secDirective) {
+      content += `\n\n${secDirective}`;
+    }
+  } else if (entry.slotType === 'worldbook' && hasUiCtx && isDefaultEntryContent) {
+    content = buildDualLayerDirective(scheme, uiContext.worldbookLightMode);
+  } else if (entry.slotType === 'draft_audit' && hasUiCtx && isDefaultEntryContent) {
+    content = buildDraftAuditInstruction(scheme, {
+      backstoryMode: VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : 'light_vibe',
+      spotlightMode: VALID_SPOTLIGHT_MODES.has(uiContext.spotlightMode) ? uiContext.spotlightMode : 'balanced',
+    });
   }
 
   return content.trim();
@@ -1277,22 +1530,34 @@ export function classifyWorldbookEntry(entry) {
   const headerProbe = `${comment}\n${keysText}`;
   const head = content.slice(0, 280);
 
+  // 0. Pure section dividers, empty separator banners, or author-only notices ("请勿开启") -> system_format
+  if (
+    (!content && /^[=\-─━✦✧☯۰•↓↑\s]/.test(comment)) ||
+    /^(?:=+[^=]+=+|─+[^─]+─+|☯۰•.*•۰☯)$/u.test(comment) ||
+    /(?:玩前须知|请勿开启)/u.test(comment) ||
+    /^\{\{\/\//.test(head)
+  ) {
+    return 'system_format';
+  }
+
   // 1. Acting / portrayal rules ('acting_rules') — check BEFORE system_format so character anti-OOC rules are NEVER discarded
   if (
-    /(?:人设修正|人物修正|人设规范|令行禁止|防\s*OOC|防霸总|防油腻|防超雄|扮演原则|演绎守则|演绎修正|剧情守则|故事守则|言行边界|行为准则|人物禁令|说话规范|说话习惯修正|^(?:修正|守则)$|(?:^|[【\[·\s_-])修正(?:$|[】\]·\s_-]))/iu.test(
+    /(?:人设修正|人物修正|人设规范|令行禁止|防\s*OOC|防霸总|防油腻|防超雄|防发情|端水化|边缘化|扮演原则|扮演准则|演绎守则|演绎修正|剧情守则|故事守则|言行边界|行为准则|行为规范|人物禁令|说话规范|说话习惯修正|时空一致性|现实逻辑|信息边界|人物与关系一致性|关系背景通用规则|情感变化规则|情感数值|塑造补丁|correct_spec|roleplay_rule|^(?:修正|守则)$|(?:^|[【\[·\s_-])修正(?:$|[】\]·\s_-]))/iu.test(
       headerProbe
     ) ||
-    /^【(?:人设修正|令行禁止|剧情守则|故事守则|扮演原则|防OOC|人设规范)】/iu.test(head)
+    /^(?:【(?:人设修正|令行禁止|剧情守则|故事守则|扮演原则|防OOC|人设规范)】|<\s*(?:扮演原则|roleplay_rule|时空一致性|现实逻辑与信息边界|人物与关系一致性|关系背景通用规则|补丁[：:]))/iu.test(
+      head
+    )
   ) {
     return 'acting_rules';
   }
 
   // 2. Pure technical/system/format entries ('system_format')
   if (
-    /(?:状态栏|statusbar|status_bar|思维链|\bcot\b|writingspec|writing_spec|写作格式规范|排版规范|字数要求|regex|正则|initvar|mvu|变量初始化|变量更新|变量表|变量脚本|format_spec|输出格式控制)/iu.test(
+    /(?:状态栏|标题栏|任务面板|statusbar|status_bar|status_rule|思维链|\bcot\b|writingspec|writing_spec|写作格式规范|排版规范|字数要求|regex|正则|initvar|mvu|变量初始化|变量更新|变量表|变量脚本|format_spec|输出格式控制|弹幕美化|短信输出规则)/iu.test(
       headerProbe
     ) ||
-    /^(?:<\s*(?:status(?:bar)?|cot|thinking|writingspec|initvar|format_spec)\b|\/\/\s*initvar|【(?:状态栏|思维链|变量初始化|变量脚本|输出格式)】)/iu.test(
+    /^(?:<\s*(?:status(?:bar|_rule)?|顶部状态栏|底部状态栏|顶部标题规则|续命面板|xjw_status|jzd_status_instruction|cot|thinking|writingspec|initvar|format_spec)\b|\/\/\s*initvar|\[InitVar\]|【(?:状态栏|思维链|变量初始化|变量脚本|输出格式)】)/iu.test(
       head
     )
   ) {
@@ -1341,12 +1606,17 @@ function cleanExtractedPersonName(rawVal) {
   if (!s) return '';
   s = s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
   s = s.replace(/\s*#.*$/, '').trim();
-  s = s.split(/[（(｜|/／,，]/)[0].trim();
+  s = s.split(/[（(｜|/／,，☯✦✧]/)[0].trim();
+  s = s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
   if (!s || s.length > 24) return '';
   if (/^(?:\{\{char\}\}|\{\{user\}\}|<char>|<user>|unknown|none|null|undefined|未命名|待定|未知|无)$/i.test(s)) {
     return '';
   }
-  if (/^(?:基本信息|基础信息|基本资料|人物设定|角色设定|角色档案|外貌|性格|背景|当前状态|简介)$/u.test(s)) {
+  if (
+    /^(?:基本信息|基础信息|基本资料|人物设定|角色设定|角色档案|外貌|性格|背景|当前状态|简介|情感观|爱情观|价值观|世界观|时代背景|家庭背景|高中及以前|高中毕业后|志愿填报|职业生涯|一些经历|地点|次要角色|人物关系|其他角色|NPC|npc|IF线|时期|身份|阶段|主线|支线|iMessage|微博|小手机)$/iu.test(
+      s
+    )
+  ) {
     return '';
   }
   return s;
@@ -1495,22 +1765,53 @@ export function resolveCharacterRealName({
 }
 
 const NON_CHARACTER_LORE_TITLE_RE =
-  /(?:世界观|背景总纲|背景设定|故事背景|历史沿革|地理|地图|势力|宗门|朝堂|制度|规则|时间线|年表|术语|词条说明|使用说明|开场前情|总览|简介|user设定|用户设定|玩家身份|开篇导语|关系总览)/iu;
+  /(?:世界观|背景总纲|背景设定|故事背景|时代背景|世界背景|历史沿革|地理|地图|地点|风物|江湖|势力|宗门|剑宗|朝堂|制度|规则|时间线|年表|术语|词条说明|使用说明|玩前须知|开场前情|总览|简介|user设定|用户设定|user\s*信息|用户\s*信息|参考\s*[:：]?\s*user|玩家身份|开篇导语|关系总览|人物关系|次要角色|相关NPC|众生志|^(?:NPC|npc)$|情感观|爱情观|价值观|线上人设|iMessage|小手机|微博|论坛|表情包|黑料|一些经历|职业生涯|志愿填报|高中及以前|高中毕业|家庭背景|多选一|三选一|日常向|恋爱向|色色向|彩蛋走向|剧情走向|\bABO\b|第二性征|\bUser是|系统线|副本|凝u|doi|把尿|边缘性行为|\bNSFW\b)/iu;
+
+const NON_PERSON_CANDIDATE_NAME_RE =
+  /^(?:\d+|(?:.*[\s·_-])?(?:角色|人物|配角|npc)\s*\d+|(?:.*(?:的|生成|全部|所有|其他|主要|次要|世界))?(?:npc|npcs|npc们|路人|路人们|配角|龙套|群演|群众)|参考.*|.*user.*信息|.*IF\s*线.*|IF分支.*|分支|时期|身份|阶段|主线|支线|补丁|选开|情感观|家庭背景|时代背景|世界观|皇室|皇家.*|后宫.*|.*嫔位|朝堂|朝廷|宗门|门派|家族|家庭|家人|父母|爸妈|老.{1,4}家|.{1,6}家族|.{1,6}世家|前男友|前女友|前任|现男友|现女友|男友|女友|丈夫|妻子|老公|老婆|恩爱夫妻|夫妻|情侣|忠犬|病娇|白月光|替身|(?:府内|宫中|门下)?(?:下属|小厮|仆役)|.*(?:的小厮|的下属|的侍卫|的丫鬟|们)|高中.*|大学.*|初中.*|小学.*|童年.*|毕业.*|志愿.*|iMessage|微博|小手机|表情包|状态栏|续命.*|.*(?:面板|规则|规范|一致性|边界|定位|补丁|走向|系统|副本|故事|大纲|经历|修养|设定|背景|简介|详情|指南|攻略|流程|模式|事件|之旅|日记|日程))$/iu;
+
+const PLACE_OR_ORG_NAME_RE =
+  /(?:.{1,10}(?:市|省|县|区|镇|村|路|街|巷)|.{1,10}(?:一中|二中|三中|中学|实验小学|小学|大学|学院|校区|分校|书院)(?:分校|校区|校门|门口|大门|教学楼|宿舍|食堂|操场|图书馆)?|.{1,10}(?:分校|校门|校区)|.{1,10}(?:华庭|壹号|一号|澜庭|花园|公馆|公寓|别墅|大厦|山庄|梅庄|集团|公司|医院|基地|俱乐部|工作室|实验室|事务所|研究院|研究所)|.{0,10}(?:皇宫|行宫|东宫|后宫|冷宫|宫殿)|.{2,}(?:府|司|殿|阁|院))$/u;
+
+function countStructuredBioSignals(content) {
+  const src = String(content ?? '').replace(/\r\n?/g, '\n').slice(0, 1200);
+  const patterns = [
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:姓名|名字|名称|本名|真名|char_name|Chinese[ _]?name|name)\s*[:：]/iu,
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:年龄|岁数|出生日期|生日|age|birthday)\s*[:：]/iu,
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:性别|第二性征|信素|gender|sex)\s*[:：]/iu,
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:身高|体型|外貌|长相|appearance|height)\s*[:：]/iu,
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:性格|性情|外貌与性格|personality)\s*[:：]/iu,
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:身份|身份定位|当前身份|职业|头衔|定位|role)\s*[:：]/iu,
+  ];
+  let hits = 0;
+  for (const re of patterns) {
+    if (re.test(src)) hits += 1;
+  }
+  return hits;
+}
 
 function extractRoleTagFromContent(content) {
   const src = String(content ?? '').replace(/\r\n?/g, '\n');
   const kvMatch = src.match(
-    /(?:^|\n)[ \t]*(?:[-*•]\s*)?(?:身份定位|当前身份|身份|定位|职业|头衔|关系|角色定位)\s*[:：]\s*([^\n#<>]{2,28})/iu
+    /(?:^|\n)[ \t]*(?:(?:[-*+•]|\d+[.、)])\s*)?(?:身份定位|当前身份|身份|定位|职业|头衔|关系|角色定位)\s*[:：]\s*([^\n#<>]{2,28})/iu
   );
   if (kvMatch) {
     return kvMatch[1].replace(/^["'“”]+|["'“”]+$/g, '').split(/[。！？]/)[0].trim().slice(0, 24);
   }
   const firstLine = src
     .split('\n')
-    .map((l) => l.trim())
-    .find((l) => l && !/^[【#`<]/.test(l) && !/^(?:姓名|名字|年龄|性别|身高)\s*[:：]/.test(l));
+    .map((l) => l.trim().replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '').trim())
+    .find(
+      (l) =>
+        l &&
+        !/^[【#`<>\[\]{}\-=]/.test(l) &&
+        !/^[^:：\n]{1,28}[:：]\s*$/.test(l) &&
+        !/^(?:姓名|名字|名称|本名|真名|外号|别名|昵称|年龄|岁数|出生日期|生日|星座|血型|mbti|性别|第二性征|信素|身高|体重|出生地|出生地与成长地|成长地|籍贯|地域背景|游戏\s*ID|id|char_name|character(?:_name)?|Chinese[ _]?name|English[ _]?name|full[ _]?name|nickname|alias(?:es)?|name|age|gender|sex|height|weight|birthday|zodiac)\s*[:：]/i.test(
+          l
+        )
+    );
   if (!firstLine) return '';
-  const clean = firstLine.replace(/^\s*[-*•]\s*/, '').split(/[。！？；]/)[0].trim();
+  const clean = firstLine.split(/[。！？；]/)[0].trim();
   return clean.length > 24 ? `${clean.slice(0, 23)}…` : clean;
 }
 
@@ -1518,25 +1819,111 @@ function getWorldbookEntryIdentityKey(entry, idx = 0) {
   return String(entry?.entryKey ?? entry?.uid ?? entry?.comment ?? `wb_${idx}`).trim();
 }
 
-function looksLikeSingleCharacterEntry(entry) {
+function looksLikeSingleCharacterEntry(entry, mainProtagonistName = '') {
   if (!entry || typeof entry !== 'object') return false;
   if (classifyWorldbookEntry(entry) !== 'character_lore') return false;
   const comment = String(entry.comment ?? entry.name ?? '').trim();
   const content = String(entry.content ?? '').trim();
   if (!content) return false;
   if (NON_CHARACTER_LORE_TITLE_RE.test(comment)) return false;
+  if (/^(?:IF\s*线?|时期|身份|阶段|主线|支线|补丁)\s*[｜|:：·-]/iu.test(comment)) return false;
 
-  const explicitHeaderMatch = comment.match(/^(?:角色|人物|NPC|配角|可攻略(?:角色)?)[：:\s-]+(.+)$/iu);
-  if (explicitHeaderMatch) return true;
+  // Reject XML blocks that clearly describe routes, stages, locations, collectives, or user settings
+  const rootTagMatch = content.match(/^<\s*([^>\s/]{1,36})/);
+  if (rootTagMatch) {
+    const rootTag = rootTagMatch[1];
+    if (
+      /^(?:IF线|时期|身份|location|world|scenario|attitude|npc|npcs|其他角色|角色列表|关系|状态栏|续命|规则|补丁|剧情走向|第二性征|character_user|\{\{user\}\}|user)/iu.test(
+        rootTag
+      )
+    ) {
+      return false;
+    }
+    if (mainProtagonistName && rootTag.startsWith(`${mainProtagonistName}_`)) {
+      return false;
+    }
+  }
+  if (mainProtagonistName && comment.includes(mainProtagonistName) && comment !== mainProtagonistName) {
+    return false;
+  }
 
-  const hasBioFields =
-    /(?:^|\n)[ \t]*(?:[-*•]\s*)?(?:姓名|名字|本名|年龄|性别|身高|外貌|性格|身份|职业|basic_info|appearance|personality)\s*[:：]/iu.test(
-      content
-    ) || /<\s*(?:character_information|character)\b/i.test(content);
-  if (hasBioFields) return true;
+  // 1. Explicit character profile markers in comment or XML root tag
+  const explicitHeaderMatch = comment.match(
+    /^(?:主要角色|角色档案|人物档案|角色|人物|攻略对象|可攻略(?:角色|npc)?)[：:·\s-]+(.+)$/iu
+  );
+  if (explicitHeaderMatch) {
+    const explicitCandidate = cleanExtractedPersonName(
+      stripCardTitleDecorations(explicitHeaderMatch[1]).split(/[（(｜|/／·-]/)[0]
+    );
+    if (
+      explicitCandidate &&
+      !NON_PERSON_CANDIDATE_NAME_RE.test(explicitCandidate) &&
+      !PLACE_OR_ORG_NAME_RE.test(explicitCandidate) &&
+      !(mainProtagonistName && explicitCandidate === mainProtagonistName)
+    ) {
+      return true;
+    }
+    return false;
+  }
 
-  const cleanTitle = stripCardTitleDecorations(comment).split(/[（(｜|/／-]/)[0].trim();
-  if (cleanTitle && /^[\u4e00-\u9fff·A-Za-z]{2,10}$/.test(cleanTitle) && content.length >= 20) {
+  const strippedComment = stripCardTitleDecorations(comment);
+  const strippedWithoutParen = strippedComment.split(/[（(｜|/／]/)[0].trim();
+  const candidateHead = cleanExtractedPersonName(strippedComment.split(/[（(｜|/／·-]/)[0]);
+  if (
+    (strippedWithoutParen &&
+      (NON_PERSON_CANDIDATE_NAME_RE.test(strippedWithoutParen) ||
+        PLACE_OR_ORG_NAME_RE.test(strippedWithoutParen))) ||
+    (candidateHead &&
+      (NON_PERSON_CANDIDATE_NAME_RE.test(candidateHead) ||
+        PLACE_OR_ORG_NAME_RE.test(candidateHead) ||
+        (mainProtagonistName && candidateHead === mainProtagonistName)))
+  ) {
+    return false;
+  }
+
+  const xmlCharMatch = content.match(
+    /^<\s*(?:主要角色|人物|角色|character_information|character)(?=\s|[：:_=>/])([^>]*)>/iu
+  );
+  if (xmlCharMatch) {
+    const tagHeader = xmlCharMatch[0];
+    const tagAttrs = xmlCharMatch[1] || '';
+    const attrNameMatch = tagAttrs.match(/\b(?:name|character)\s*=\s*["']([^"'\n<>]{1,40})["']/iu);
+    if (attrNameMatch) {
+      const cleanedAttr = cleanExtractedPersonName(attrNameMatch[1]);
+      if (
+        !cleanedAttr ||
+        NON_PERSON_CANDIDATE_NAME_RE.test(cleanedAttr) ||
+        PLACE_OR_ORG_NAME_RE.test(cleanedAttr) ||
+        (mainProtagonistName && cleanedAttr === mainProtagonistName)
+      ) {
+        return false;
+      }
+    }
+    if (/^<\s*(?:主要角色|人物|角色)\s*[：:_]/iu.test(tagHeader)) {
+      const suffixMatch = tagAttrs.match(/^\s*[：:_]\s*([^\s>/"']+)/u);
+      if (suffixMatch) {
+        const cleanedSuffix = cleanExtractedPersonName(suffixMatch[1]);
+        if (
+          !cleanedSuffix ||
+          NON_PERSON_CANDIDATE_NAME_RE.test(cleanedSuffix) ||
+          PLACE_OR_ORG_NAME_RE.test(cleanedSuffix) ||
+          (mainProtagonistName && cleanedSuffix === mainProtagonistName)
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  if (/【[^】]{1,16}】.*(?:可攻略|角色档案)/iu.test(comment)) {
+    return true;
+  }
+
+  // 2. Clean candidate title & require genuine structured bio fields (>= 2 bio keys)
+  if (!candidateHead) return false;
+
+  const bioSignalCount = countStructuredBioSignals(content);
+  if (bioSignalCount >= 2 && /^[\u4e00-\u9fff·A-Za-z0-9]{1,12}$/.test(candidateHead)) {
     return true;
   }
   return false;
@@ -1552,43 +1939,120 @@ export function detectMultiCharacterCard(cardContext = {}, worldEntries = []) {
         ? ctx.selectedWorldEntries
         : [];
 
-  const characterEntries = [];
-  const seenNames = new Set();
+  const rawCardName = String(ctx.name ?? ctx.cardName ?? '').trim();
+  const cardIsTitleLike = isTitleLikeCardName(rawCardName);
+  const mainProtagonistName = !cardIsTitleLike ? cleanExtractedPersonName(rawCardName) : '';
+
+  let sawNpcSectionDivider = false;
+  const byName = new Map();
 
   entries.forEach((entry, idx) => {
-    if (!looksLikeSingleCharacterEntry(entry)) return;
-    const rawComment = String(entry.comment ?? entry.name ?? '').trim();
-    const cleanedTitle = stripCardTitleDecorations(
-      rawComment.replace(/^(?:角色|人物|NPC|配角|可攻略(?:角色)?)[：:\s-]+/iu, '')
-    )
-      .split(/[（(｜|/／-]/)[0]
-      .trim();
+    const rawComment = String(entry?.comment ?? entry?.name ?? '').trim();
+    if (/^=+.*NPC.*=+$/iu.test(rawComment)) {
+      sawNpcSectionDivider = true;
+      return;
+    }
+    if (/^=+.*=+$/.test(rawComment)) {
+      sawNpcSectionDivider = false;
+      return;
+    }
+    if (!looksLikeSingleCharacterEntry(entry, mainProtagonistName)) return;
+
+    const contentStr = String(entry.content ?? '').trim();
+    const isExplicitMainRole =
+      /^<\s*主要角色\s*[：:_]/iu.test(contentStr) ||
+      /^(?:主要角色|角色档案|攻略对象|可攻略)/iu.test(rawComment);
+    const isSupportingNpc =
+      !isExplicitMainRole && (sawNpcSectionDivider || /^<\s*人物_/iu.test(contentStr) || /^NPC[：:\s-]/iu.test(rawComment));
+
+    const cleanedTitle = cleanExtractedPersonName(
+      stripCardTitleDecorations(
+        rawComment.replace(/^(?:主要角色|角色档案|人物档案|角色|人物|NPC|配角|攻略对象|可攻略(?:角色|npc)?)[：:·\s-]+/iu, '')
+      )
+    );
     const resolved = resolveCharacterRealName({
       name: cleanedTitle,
-      description: entry.content,
+      description: contentStr,
     });
-    const name = resolved.realName || cleanedTitle || (Array.isArray(entry.keys) ? String(entry.keys[0] || '').trim() : '') || `角色${idx + 1}`;
-    const roleTagFromTitle = rawComment.match(/[（(]([^）)]{2,24})[）)]/)?.[1]?.trim() || '';
-    const roleTag = roleTagFromTitle || extractRoleTagFromContent(entry.content);
+    // Prefer the canonical title/name used by the card (e.g. "世王" when真名 is secret, or resolved person name when title is generic like "IF分支")
+    const candidateFromTitle =
+      cleanedTitle && !NON_PERSON_CANDIDATE_NAME_RE.test(cleanedTitle) && !PLACE_OR_ORG_NAME_RE.test(cleanedTitle)
+        ? cleanedTitle
+        : '';
+    const name =
+      candidateFromTitle ||
+      resolved.realName ||
+      (Array.isArray(entry.keys) ? cleanExtractedPersonName(entry.keys[0]) : '') ||
+      `角色${idx + 1}`;
+    if (!name || NON_PERSON_CANDIDATE_NAME_RE.test(name) || PLACE_OR_ORG_NAME_RE.test(name)) return;
+    if (mainProtagonistName && name === mainProtagonistName) return;
+
+    const yinYangTag = rawComment.match(/☯([^☯\n]{2,16})☯/)?.[1]?.trim() || '';
+    const parenTag = rawComment.match(/[（(]([^）)|｜↑↓]{2,20})[）)]/)?.[1]?.trim() || '';
+    const cleanParenTag = /(?:二选一|多选一|选开|默认|IF线)/iu.test(parenTag) ? '' : parenTag;
+    const roleTag = yinYangTag || cleanParenTag || extractRoleTagFromContent(contentStr);
     const summaryLine = roleTag ? `${name}（${roleTag}）` : name;
     const key = getWorldbookEntryIdentityKey(entry, idx);
     const disabled = isWorldbookEntryDisabled(entry);
+    const sourceOrder = Number.isFinite(Number(entry.order)) ? Number(entry.order) : Number.MAX_SAFE_INTEGER;
 
-    const dedupKey = `${key}::${name}`;
-    if (seenNames.has(dedupKey)) return;
-    seenNames.add(dedupKey);
-
-    characterEntries.push({
+    const record = {
       key,
       name,
       roleTag,
       summaryLine,
       disabled,
-    });
+      isExplicitMainRole,
+      isSupportingNpc,
+      sourceOrder,
+      firstIndex: idx,
+    };
+
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, record);
+    } else if (
+      (existing.disabled && !disabled) ||
+      (existing.disabled === disabled && !existing.isExplicitMainRole && isExplicitMainRole)
+    ) {
+      // Replace disabled/secondary variant with enabled primary entry while preserving slot index
+      byName.set(name, { ...record, firstIndex: existing.firstIndex });
+    }
   });
 
+  const dedupedRecords = Array.from(byName.values());
+  dedupedRecords.sort((a, b) => {
+    if (a.disabled !== b.disabled) return Number(a.disabled) - Number(b.disabled);
+    if (a.isExplicitMainRole !== b.isExplicitMainRole) {
+      return Number(b.isExplicitMainRole) - Number(a.isExplicitMainRole);
+    }
+    if (a.isSupportingNpc !== b.isSupportingNpc) {
+      return Number(a.isSupportingNpc) - Number(b.isSupportingNpc);
+    }
+    if (a.sourceOrder !== b.sourceOrder) return a.sourceOrder - b.sourceOrder;
+    if (a.firstIndex !== b.firstIndex) return a.firstIndex - b.firstIndex;
+    return a.name.localeCompare(b.name, 'zh-CN');
+  });
+
+  const characterEntries = dedupedRecords.map(({ key, name, roleTag, summaryLine, disabled }) => ({
+    key,
+    name,
+    roleTag,
+    summaryLine,
+    disabled,
+  }));
+
+  const mainRoleTagCount = dedupedRecords.filter((r) => r.isExplicitMainRole).length;
+  const nonNpcEntryCount = dedupedRecords.filter((r) => !r.isSupportingNpc).length;
+
+  // Single-protagonist cards that merely carry a supporting NPC roster
+  // are NOT multi-protagonist ensemble cards unless they explicitly declare >=3 main/playable roles.
+  const isEnsembleCard = cardIsTitleLike
+    ? mainRoleTagCount >= 3 || nonNpcEntryCount >= 4
+    : mainRoleTagCount >= 3 || (nonNpcEntryCount >= 4 && !mainProtagonistName);
+
   return {
-    isMultiChar: characterEntries.length >= 4,
+    isMultiChar: isEnsembleCard,
     characterEntries,
   };
 }
@@ -1740,44 +2204,46 @@ function formatCharContextBlock(charContext, options = {}) {
   ].join('\n');
 }
 
-export function resolvePresetEntryPreview(entry, scheme, tasteProfile = {}) {
-  return resolveSlotContent(entry, scheme || BUILTIN_PRESET_SCHEMES.longform_coact, tasteProfile, true);
+export function resolvePresetEntryPreview(entry, scheme, tasteProfile = {}, uiContext = null) {
+  return resolveSlotContent(entry, scheme || BUILTIN_PRESET_SCHEMES.longform_coact, tasteProfile, true, uiContext);
 }
 
 export function buildDualLayerDirective(scheme, lightMode = 'green_selective') {
   const isObjective = scheme?.style === 'objective';
   const mainRange = isObjective ? '350～550 字' : '650～950 字';
   const safeLight = VALID_WORLDBOOK_LIGHT_MODES.has(lightMode) ? lightMode : 'green_selective';
+  const ownershipRule =
+    '所有拆分条目均严格归属 {{user}} 个人补充设定（严禁写成 {{char}} 设定），每条内容首行必须写明「【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】」。';
 
   if (safeLight === 'blue_constant') {
     return [
-      '【长设定自动拆出世界书（已开启 · 蓝灯常驻模式）】',
-      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～3 条【蓝灯常驻】核心补充条目（适合全程都需要记住的重要背景、深层关系或行事准则），严格使用以下格式：`,
+      '【补充世界书拆分规范（蓝灯常驻）】',
+      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～3 条【蓝灯常驻】核心补充条目（适合全程都需要记住的重要背景、深层关系或行事准则）。${ownershipRule}严格使用以下格式：`,
       '[条目：条目标题]',
       '触发方式：蓝灯常驻',
       '关键词：核心标签1, 核心标签2',
-      '内容：常驻生效的重要补充事实。',
+      '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】常驻生效的重要补充事实。',
     ].join('\n');
   }
 
   if (safeLight === 'smart_mix') {
     return [
-      '【长设定自动拆出世界书（已开启 · 蓝绿灯自动分流）】',
-      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条补充背景条目，并按重要度自动分配蓝绿灯（全程不可或缺的重要关系/底线标为「蓝灯常驻」，平时不提、聊到相关话题才展开的过往或分支细节标为「绿灯触发」），严格使用以下格式：`,
+      '【补充世界书拆分规范（蓝绿灯分流）】',
+      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条补充背景条目，并按重要度分配蓝绿灯（全程不可或缺的重要关系或底线标为「蓝灯常驻」，聊到相关话题才展开的过往或支线细节标为「绿灯触发」）。${ownershipRule}严格使用以下格式：`,
       '[条目：条目标题]',
       '触发方式：蓝灯常驻 或 绿灯触发',
       '关键词：关键词1, 关键词2',
-      '内容：补充事实与适用情境。',
+      '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】补充事实与适用情境。',
     ].join('\n');
   }
 
   return [
-    '【长设定自动拆出世界书（已开启 · 绿灯关键词触发）】',
-    `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条【绿灯按关键词触发】的补充背景条目（聊到相关人名、地点或往事关键词时才触发），严格使用以下格式：`,
+    '【补充世界书拆分规范（绿灯关键词触发）】',
+    `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条【绿灯按关键词触发】的补充背景条目（聊到相关人名、地点或往事关键词时触发）。${ownershipRule}严格使用以下格式：`,
     '[条目：条目标题]',
     '触发方式：绿灯触发',
     '关键词：关键词1, 关键词2',
-    '内容：补充事实与触发范围说明。',
+    '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】补充事实与触发范围说明。',
   ].join('\n');
 }
 
@@ -1795,8 +2261,8 @@ export function detectJointUpbringingSignals(text) {
 
 function buildVisibilityTagsDirective() {
   return [
-    '【信息可见度与认知边界（已按需开启）】',
-    `当前故事涉及情感暗流（如想分手、暗恋、隐瞒近况或未说出口的心事）、隐藏秘密或阵营信息差，请按需使用 ${VISIBILITY_MARKERS.join(' / ')} 清晰区分 {{char}} 表面可观察到的表现、开场已知共识与 {{user}} 未宣之于口的内心隐瞒，严防 {{char}} 读心直接看穿；普通日常细节仍保持自然行文，无需逐句机械打标。`,
+    '【信息可见度与认知边界】',
+    `当前故事涉及情感暗流（如想分手、暗恋、隐瞒近况或未说出口的心事）、隐藏秘密或阵营信息差，请使用 ${VISIBILITY_MARKERS.join(' / ')} 清晰区分 {{char}} 表面可观察到的表现、开场已知共识与 {{user}} 未宣之于口的内心隐瞒，严防 {{char}} 读心直接看穿；普通日常细节保持自然行文，无需逐句机械打标。`,
   ].join('\n');
 }
 
@@ -1841,13 +2307,13 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
   const lines = [];
   if (cfg.layoutStyle === 'structured') {
     lines.push(
-      '【输出版式：结构化清单版（浅层中文分栏 + 平实大白话）】',
-      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块输出二级小标题（## 板块名），其下直接写 1～2 层的浅层中文键值（字段名：内容）或简洁短句；只输出契合当前世界观且有实质内容的字段，不留空壳占位格（例如古风或校园题材不硬套现代商务装，未启用的过往经历不硬写童年阶段）。`,
+      '【输出版式：清单版（浅层中文分栏 + 平实大白话）】',
+      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块输出二级小标题（## 板块名），其下直接写 1～2 层的浅层中文键值（字段名：内容）或简洁短句；只输出契合当前世界观且有实质内容的字段，不留空壳占位格（例如古风或校园题材不硬套现代商务装，没有实质设定则跳过不硬凑）。`,
       '全程使用平实直白的大白话写具体事实、习惯、外显情绪表现与个人目标短板，禁堆砌华丽比喻句；各条目短句默认省略主语（严禁每行开头机械重复 {{user}} 浪费 Token），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧；严禁使用代码块或 XML 标签包裹。'
     );
   } else {
     lines.push(
-      '【输出版式：自然分段版（平实分段叙述）】',
+      '【输出版式：分段版（平实分段叙述）】',
       `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语避免通篇重复刷 {{user}}（仅在双人关系消歧处点明），禁比喻堆砌、禁代码块与 XML 标签。`
     );
   }
@@ -1885,7 +2351,7 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
     forbidParts.push('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历。');
   }
   if (!anyIntimateEnabled) {
-    forbidParts.push('亲密设定板块未开启：严禁生成任何成人向、情色或越界亲密描写内容。');
+    forbidParts.push('严禁生成任何成人向、情色或越界亲密描写内容。');
   }
   if (companions.length > 0) {
     const compNames = companions
@@ -2308,11 +2774,29 @@ export function buildCompanionWorldbookEntries({
   companionPlans = null,
   targetPersonaName = '',
   lightMode = '',
+  position,
+  depth,
+  role,
+  order,
+  worldbookPlacement = null,
 } = {}) {
   const activeCompanions = (Array.isArray(companions) ? companions : [])
     .filter((c) => c && typeof c === 'object')
     .slice(0, 3);
   if (activeCompanions.length === 0) return [];
+
+  const placement = normalizeWorldbookPlacement({
+    position: position ?? worldbookPlacement?.position,
+    depth: depth ?? worldbookPlacement?.depth,
+    role: role ?? worldbookPlacement?.role,
+    order: order ?? worldbookPlacement?.order,
+  });
+  const hasExplicitOrder =
+    (order !== undefined && order !== null && String(order).trim() !== '' && Number.isFinite(Number(order))) ||
+    (worldbookPlacement?.order !== undefined &&
+      worldbookPlacement?.order !== null &&
+      String(worldbookPlacement.order).trim() !== '' &&
+      Number.isFinite(Number(worldbookPlacement.order)));
 
   const personaLabel = String(targetPersonaName ?? '').trim() || '{{user}}';
   const planList = Array.isArray(companionPlans)
@@ -2400,6 +2884,7 @@ export function buildCompanionWorldbookEntries({
     const lightLabel = isBlue ? '蓝灯常驻' : '绿灯按关键词触发';
 
     const contentParts = [
+      '【以下为 {{user}} 的个人补充设定中的关联客串角色（非 {{char}} 设定）】',
       `【客串角色：${compName}】`,
       `与 ${personaLabel} 的关系：${relationToUser}`,
       `与当前主角色的关系：${mainRelText}`,
@@ -2409,16 +2894,23 @@ export function buildCompanionWorldbookEntries({
       contentParts.push(`【原卡原文设定（严格保真，禁止擅自改写或编造）】\n${verbatimText}`);
     }
 
+    const entryOrder = hasExplicitOrder
+      ? clampInt(placement.order + (tier.worldbookOrder - 80), 0, 10000, tier.worldbookOrder)
+      : tier.worldbookOrder;
+
     return {
       key: keys,
-      comment: `客串角色：${compName}`,
+      comment: `【{{user}}客串角色：${compName}】`,
       content: contentParts.join('\n'),
       constant: isBlue,
       selective: !isBlue,
       disable: false,
       addMemo: true,
-      position: 0,
-      order: tier.worldbookOrder,
+      position: placement.position,
+      order: entryOrder,
+      ...(placement.position === WORLD_INFO_POSITION.AT_DEPTH
+        ? { depth: placement.depth, role: placement.role }
+        : {}),
       extensions: {
         [UPS_EXT_KEY]: {
           managed: true,
@@ -2554,11 +3046,65 @@ export function buildGenerationMessages(options = {}) {
   const effectiveTailMode =
     scheme.tailMode === 'auto' ? inferOptimalTailMode(opts.modelHint) : scheme.tailMode;
 
+  const targetSection = String(opts.targetSection ?? '').trim();
+  const backstoryMode = VALID_BACKSTORY_MODES.has(opts.backstoryMode) ? opts.backstoryMode : '';
+  const spotlightMode = VALID_SPOTLIGHT_MODES.has(opts.spotlightMode) ? opts.spotlightMode : '';
+  const ratios = normalizeModuleRatios(opts.moduleRatios);
+  const companions = (Array.isArray(opts.companions) ? opts.companions : [])
+    .filter((c) => c && typeof c === 'object')
+    .slice(0, 3);
+  const applySectionsDirective = !targetSection && Boolean(opts.generationSections || subMode !== 'cross_card_adapt');
+  const effectiveDualLayer =
+    !targetSection &&
+    (opts.dualLayer !== undefined
+      ? Boolean(opts.dualLayer)
+      : Boolean(scheme.entries.find((e) => e.slotType === 'worldbook')?.enabled));
+  const useDraftAudit =
+    !targetSection &&
+    (opts.draftAudit !== undefined
+      ? opts.draftAudit === true
+      : Boolean(scheme.entries.find((e) => e.slotType === 'draft_audit')?.enabled));
+
+  const slotUiContext = targetSection
+    ? null
+    : {
+        mode,
+        subMode,
+        backstoryMode,
+        spotlightMode,
+        pureCrossCardReuse: Boolean(opts.pureCrossCardReuse),
+        moduleRatios: opts.moduleRatios,
+        generationSections: applySectionsDirective ? (opts.generationSections || {}) : null,
+        dualLayer: effectiveDualLayer,
+        worldbookLightMode: opts.worldbookLightMode,
+        companions,
+      };
+
   const messages = [];
+  let emittedContextSlot = false;
+  let emittedPacingSlot = false;
+  let emittedFormatSlot = false;
+  let emittedWorldbookSlot = false;
+  let emittedDraftAuditSlot = false;
+
   for (const entry of scheme.entries) {
-    if (!entry.enabled) continue;
-    const resolved = resolveSlotContent(entry, scheme, tasteProfile, true);
+    let isEntryEnabled = Boolean(entry.enabled);
+    if (entry.slotType === 'worldbook') {
+      isEntryEnabled = effectiveDualLayer;
+    } else if (entry.slotType === 'draft_audit') {
+      isEntryEnabled = useDraftAudit;
+    }
+    if (!isEntryEnabled) continue;
+
+    const resolved = resolveSlotContent(entry, scheme, tasteProfile, true, slotUiContext);
     if (!resolved) continue;
+
+    if (entry.slotType === 'context') emittedContextSlot = true;
+    else if (entry.slotType === 'pacing') emittedPacingSlot = true;
+    else if (entry.slotType === 'format') emittedFormatSlot = true;
+    else if (entry.slotType === 'worldbook') emittedWorldbookSlot = true;
+    else if (entry.slotType === 'draft_audit') emittedDraftAuditSlot = true;
+
     messages.push({
       role: validRole(entry.role, 'system'),
       content: resolved,
@@ -2568,11 +3114,9 @@ export function buildGenerationMessages(options = {}) {
   const taskParts = [];
   const inspiration = String(opts.inspiration ?? '').trim();
   const userMustHaves = String(opts.userMustHaves ?? '').trim();
-  const existingDraft = String(opts.existingDraft ?? '').trim();
+  const existingDraft = mode === 'create' ? '' : mergeDuplicatePersonaSections(opts.existingDraft ?? '');
   const lockedCore = String(opts.lockedCore ?? '').trim();
-  const targetSection = String(opts.targetSection ?? '').trim();
   const useVisibilityTags = opts.visibilityTags === true;
-  const useDraftAudit = opts.draftAudit === true && !targetSection;
   const resolvedSubCharKeys = Array.isArray(opts.selectedSubCharKeys)
     ? opts.selectedSubCharKeys
     : Array.isArray(opts.selectedSubCharacterKeys)
@@ -2582,10 +3126,6 @@ export function buildGenerationMessages(options = {}) {
     selectedSubCharKeys: resolvedSubCharKeys,
   });
   const budget = computeLengthBudget(scheme.targetChars);
-  const ratios = normalizeModuleRatios(opts.moduleRatios);
-  const companions = (Array.isArray(opts.companions) ? opts.companions : [])
-    .filter((c) => c && typeof c === 'object')
-    .slice(0, 3);
 
   if (mode === 'create') {
     taskParts.push(`【任务模式：新建 {{user}} 人设（目标约 ${budget.chars} 字）】`);
@@ -2676,19 +3216,18 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
-  const backstoryMode = VALID_BACKSTORY_MODES.has(opts.backstoryMode) ? opts.backstoryMode : '';
-  const spotlightMode = VALID_SPOTLIGHT_MODES.has(opts.spotlightMode) ? opts.spotlightMode : '';
-
-  if (backstoryMode && !targetSection) {
-    const bsText = buildBackstoryDirective(backstoryMode);
-    if (bsText) taskParts.push(bsText);
+  if (!emittedContextSlot) {
+    if (backstoryMode && !targetSection) {
+      const bsText = buildBackstoryDirective(backstoryMode);
+      if (bsText) taskParts.push(bsText);
+    }
+    if (spotlightMode && !targetSection) {
+      const spText = buildSpotlightDirective(spotlightMode);
+      if (spText) taskParts.push(spText);
+    }
   }
-  if (spotlightMode && !targetSection) {
-    const spText = buildSpotlightDirective(spotlightMode);
-    if (spText) taskParts.push(spText);
-  }
 
-  if (!targetSection && (opts.generationSections || subMode !== 'cross_card_adapt')) {
+  if (applySectionsDirective && !emittedFormatSlot) {
     taskParts.push(
       buildGenerationSectionDirective(opts.generationSections, {
         backstoryMode: backstoryMode || 'light_vibe',
@@ -2697,7 +3236,7 @@ export function buildGenerationMessages(options = {}) {
     );
   }
 
-  if (!targetSection && (ratios.mode === 'custom' || ratios.private > 0)) {
+  if (!emittedPacingSlot && !targetSection && (ratios.mode === 'custom' || ratios.private > 0)) {
     const ratioParts = [
       `外貌气质约 ${ratios.appearance}%`,
       `性格习惯约 ${ratios.personality}%`,
@@ -2708,9 +3247,7 @@ export function buildGenerationMessages(options = {}) {
       ratioParts.push(`私密心事或暗线约 ${ratios.private}%`);
     }
     taskParts.push(
-      `【人设构成占比指导】\n请按以下篇幅比重分配各维度细节（优先满足玩家明确指定的要求）：${ratioParts.join('，')}。${
-        ratios.private === 0 ? '未额外分配私密暗线比重，日常设定保持坦荡自然即可。' : ''
-      }`
+      `【人设构成占比指导】\n请按以下篇幅比重分配各维度细节（优先满足玩家明确指定的要求）：${ratioParts.join('，')}。`
     );
   }
 
@@ -2727,15 +3264,30 @@ export function buildGenerationMessages(options = {}) {
     .join('\n');
 
   if (!targetSection) {
-    if (opts.pureCrossCardReuse === true) {
+    if (opts.pureCrossCardReuse === true && !emittedContextSlot) {
       taskParts.push(
         `【纯通用跨卡复用】\n本次需要跨卡通用复用：请保持${CORE_SECTION_HEADER}独立通用，剥离特定角色或旧卡专属绑定，仅在${SHELL_SECTION_HEADER}衔接当前角色卡。`
       );
-    } else if (opts.sharedUpbringing === true || detectJointUpbringingSignals(combinedText)) {
+    } else if (
+      opts.pureCrossCardReuse !== true &&
+      (opts.sharedUpbringing === true || detectJointUpbringingSignals(combinedText))
+    ) {
+      const { hasCompanions, hasNpcNetwork } = getCompanionNpcFlags({
+        companions,
+        generationSections: opts.generationSections,
+      });
+      const jointTarget =
+        hasCompanions && hasNpcNetwork
+          ? '{{char}}、亲友或客串角色'
+          : hasCompanions
+            ? '{{char}} 或客串角色'
+            : hasNpcNetwork
+              ? '{{char}} 或亲友'
+              : '{{char}}';
       taskParts.push(
-        `【基础人设与共同成长融合】\n检测到与 {{char}} 或客串亲友存在青梅竹马、家人养亲、师徒养成或多年共生关系：请将塑造 {{user}} 性格底色、生活习惯与安全感边界的共同成长印记自然融入${CORE_SECTION_HEADER}，不要机械割裂；同时将当下所处时间点、现居状态与开场矛盾写入${SHELL_SECTION_HEADER}，保持年龄与时间线前后一致。`
+        `【基础人设与共同成长融合】\n检测到与 ${jointTarget} 存在青梅竹马、家人养亲、师徒养成或多年共生关系：请将塑造 {{user}} 性格底色、生活习惯与安全感边界的共同成长印记自然融入${CORE_SECTION_HEADER}，不要机械割裂；同时将当下所处时间点、现居状态与开场矛盾写入${SHELL_SECTION_HEADER}，保持年龄与时间线前后一致。`
       );
-    } else if (opts.charContext && backstoryMode !== 'blank_self') {
+    } else if (opts.pureCrossCardReuse !== true && opts.charContext && backstoryMode !== 'blank_self') {
       taskParts.push(
         `【人物经历与角色世界血肉融合】\n当前关联了具体角色卡：请不要把${CORE_SECTION_HEADER}写成脱离故事的空泛模板，人物的成长环境、经历轨迹与习惯成因可顺着当前角色卡的世界观、社会土壤及与角色的交集脉络自然生长，让人物真正长出有来处的血肉。`
       );
@@ -2771,11 +3323,11 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
-  if (opts.dualLayer && !targetSection) {
+  if (effectiveDualLayer && !emittedWorldbookSlot) {
     taskParts.push(buildDualLayerDirective(scheme, opts.worldbookLightMode));
   }
 
-  if (useDraftAudit) {
+  if (useDraftAudit && !emittedDraftAuditSlot) {
     messages.push({
       role: 'system',
       content: buildDraftAuditInstruction(scheme, {
@@ -2926,7 +3478,7 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     {
       id: 'ups_synced_sections',
       key: 'generationSections',
-      name: '生成板块、版式与经历要求（随主页选择自动同步）',
+      name: '生成板块与经历尺度',
       role: 'system',
       enabled: true,
       toggleable: false,
@@ -2935,7 +3487,7 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     {
       id: 'ups_synced_worldbook',
       key: 'dualLayer',
-      name: `长设定拆入世界书与蓝绿灯策略（${
+      name: `补充世界书拆分规范（${
         WORLDBOOK_LIGHT_MODES.find((m) => m.id === lightMode)?.shortLabel || '绿灯触发'
       }）`,
       role: 'system',
@@ -2946,7 +3498,7 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     {
       id: 'ups_draft_audit',
       key: 'draftAudit',
-      name: '成稿前草稿自检（排雷核对后再输出正文）',
+      name: '成稿前草稿自检',
       role: 'system',
       enabled: uiCfg.draftAudit !== false,
       toggleable: true,
@@ -2964,8 +3516,16 @@ export function exportSillyTavernPreset(options = {}) {
   const tasteProfile = opts.tasteProfile && typeof opts.tasteProfile === 'object' ? opts.tasteProfile : {};
   const includeTaste = opts.includeTaste !== false;
   const includeUsageGuide = opts.includeUsageGuide !== false;
-  const includeDraftAudit = Boolean(opts.includeDraftAudit);
   const includeSyncedOptions = Boolean(opts.uiPreferences && typeof opts.uiPreferences === 'object');
+  const schemeDraftAuditEntry = scheme.entries.find((e) => e.slotType === 'draft_audit');
+  const effectiveIncludeDraftAudit =
+    opts.includeDraftAudit !== undefined
+      ? Boolean(opts.includeDraftAudit)
+      : includeSyncedOptions && opts.uiPreferences.draftAudit !== undefined
+        ? Boolean(opts.uiPreferences.draftAudit)
+        : schemeDraftAuditEntry
+          ? Boolean(schemeDraftAuditEntry.enabled)
+          : false;
   const rawPresetName =
     opts.presetName !== undefined && opts.presetName !== null ? String(opts.presetName).trim() : '';
   const presetName = rawPresetName || String(scheme.name ?? '').trim() || 'User 人设工坊预设';
@@ -3096,22 +3656,52 @@ export function exportSillyTavernPreset(options = {}) {
     { identifier: 'dialogueExamples', enabled: false }
   );
 
-  for (const entry of scheme.entries) {
-    const baseIdentifier = `ups_${sanitizePromptIdentifier(entry.id)}`;
-    let identifier = baseIdentifier;
-    if (usedIds.has(identifier) || reservedSystemIds.has(identifier)) {
-      let suffix = 2;
-      while (
-        usedIds.has(`${baseIdentifier}_${suffix}`) ||
-        reservedSystemIds.has(`${baseIdentifier}_${suffix}`)
-      ) {
-        suffix += 1;
+  const exportUiContext = includeSyncedOptions
+    ? {
+        ...opts.uiPreferences,
+        generationSections: opts.uiPreferences.generationSections || {},
+        dualLayer: Boolean(opts.uiPreferences.dualLayer),
+        worldbookLightMode: opts.uiPreferences.worldbookLightMode || 'green_selective',
       }
-      identifier = `${baseIdentifier}_${suffix}`;
+    : null;
+  let exportedWorldbookSlot = false;
+  let exportedDraftAuditSlot = false;
+  let exportedFormatSlot = false;
+
+  for (const entry of scheme.entries) {
+    let identifier;
+    if (entry.slotType === 'worldbook' && !usedIds.has('ups_synced_worldbook')) {
+      identifier = 'ups_synced_worldbook';
+    } else if (entry.slotType === 'draft_audit' && !usedIds.has('ups_draft_audit')) {
+      identifier = 'ups_draft_audit';
+    } else {
+      const baseIdentifier = `ups_${sanitizePromptIdentifier(entry.id)}`;
+      identifier = baseIdentifier;
+      if (usedIds.has(identifier) || reservedSystemIds.has(identifier)) {
+        let suffix = 2;
+        while (
+          usedIds.has(`${baseIdentifier}_${suffix}`) ||
+          reservedSystemIds.has(`${baseIdentifier}_${suffix}`)
+        ) {
+          suffix += 1;
+        }
+        identifier = `${baseIdentifier}_${suffix}`;
+      }
     }
     usedIds.add(identifier);
 
-    const content = resolveSlotContent(entry, scheme, tasteProfile, includeTaste);
+    let effectiveEnabled = Boolean(entry.enabled);
+    if (entry.slotType === 'worldbook') {
+      exportedWorldbookSlot = true;
+      if (includeSyncedOptions) effectiveEnabled = Boolean(opts.uiPreferences.dualLayer);
+    } else if (entry.slotType === 'draft_audit') {
+      exportedDraftAuditSlot = true;
+      effectiveEnabled = effectiveIncludeDraftAudit;
+    } else if (entry.slotType === 'format') {
+      exportedFormatSlot = true;
+    }
+
+    const content = resolveSlotContent(entry, scheme, tasteProfile, includeTaste, exportUiContext);
     prompts.push(
       makeCustomPromptEntry({
         identifier,
@@ -3120,7 +3710,7 @@ export function exportSillyTavernPreset(options = {}) {
         content,
       })
     );
-    order.push({ identifier, enabled: Boolean(entry.enabled) });
+    order.push({ identifier, enabled: effectiveEnabled });
   }
 
   if (includeSyncedOptions) {
@@ -3130,11 +3720,13 @@ export function exportSillyTavernPreset(options = {}) {
     });
     for (const sEntry of syncedEntries) {
       if (sEntry.id === 'ups_draft_audit') continue;
+      if (sEntry.id === 'ups_synced_worldbook' && exportedWorldbookSlot) continue;
+      if (sEntry.id === 'ups_synced_sections' && exportedFormatSlot) continue;
       usedIds.add(sEntry.id);
       prompts.push(
         makeCustomPromptEntry({
           identifier: sEntry.id,
-          name: `【工坊联动】${sEntry.name}`,
+          name: sEntry.name,
           role: 'system',
           content: sEntry.content,
         })
@@ -3143,13 +3735,13 @@ export function exportSillyTavernPreset(options = {}) {
     }
   }
 
-  if (includeDraftAudit) {
+  if (effectiveIncludeDraftAudit && !exportedDraftAuditSlot) {
     const auditId = 'ups_draft_audit';
     usedIds.add(auditId);
     prompts.push(
       makeCustomPromptEntry({
         identifier: auditId,
-        name: '【草稿自检】先自检规范再输出成稿',
+        name: '成稿前草稿自检',
         role: 'system',
         content: buildDraftAuditInstruction(scheme, opts.uiPreferences || {}),
       })
@@ -3161,7 +3753,9 @@ export function exportSillyTavernPreset(options = {}) {
 
   const basePrefill = String(scheme.prefillText ?? '').trimEnd() || DEFAULT_PREFILL.trimEnd();
   const prefillContent =
-    includeDraftAudit && scheme.tailMode === 'assistant_prefill' && basePrefill === CORE_SECTION_HEADER
+    effectiveIncludeDraftAudit &&
+    scheme.tailMode === 'assistant_prefill' &&
+    (basePrefill === CORE_SECTION_HEADER || basePrefill === DEFAULT_PREFILL.trimEnd())
       ? DRAFT_START_MARKER
       : basePrefill;
   const triggerContent = String(scheme.triggerText ?? '').trim() || DEFAULT_TRIGGER;
@@ -3265,7 +3859,7 @@ export function exportSillyTavernPreset(options = {}) {
         presetName,
         style: scheme.style,
         tailMode: scheme.tailMode,
-        includeDraftAudit,
+        includeDraftAudit: effectiveIncludeDraftAudit,
       },
     },
   };
@@ -3590,21 +4184,43 @@ export function lintPersonaText(text, tasteProfile = {}) {
     }
   }
 
-  // 5. Nested indentation or XML residual
+  // 5. Nested indentation or non-whitelisted XML/HTML residual tags
+  const ALLOWED_PERSONA_TAGS = new Set(['user', 'char', 'user_supplement']);
+  const nestedHits = [];
   lines.forEach((line, idx) => {
-    if (/^[ \t]{2,}[-*+]|^[ \t]{4,}\S/.test(line) || /<\/?[a-zA-Z][a-zA-Z0-9_-]*(?:\s[^>]*)?>/.test(line)) {
-      const trimmedLine = line.trim();
-      issues.push({
-        type: 'nested_indent',
-        severity: 'warn',
-        term: trimmedLine,
-        match: trimmedLine,
+    const indentHit = /^[ \t]{2,}[-*+]\s+\S|^[ \t]{4,}\S/.test(line);
+    let nonAllowedTagMatch = '';
+    const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9_-]*)(?:\s[^>\n]{0,80})?>/g;
+    let m;
+    while ((m = tagRe.exec(line)) !== null) {
+      if (!ALLOWED_PERSONA_TAGS.has(m[1].toLowerCase())) {
+        nonAllowedTagMatch = m[0];
+        break;
+      }
+    }
+    if (indentHit || nonAllowedTagMatch) {
+      nestedHits.push({
         line: idx + 1,
-        message: '存在嵌套缩进或残余标签，可能破坏扁平排版结构',
-        suggestion: '可使用「扁平排版整理」清理缩进与标签。',
+        match: nonAllowedTagMatch || line.trim(),
       });
     }
   });
+  if (nestedHits.length > 0) {
+    issues.push({
+      type: 'nested_indent',
+      severity: 'warn',
+      noBanAction: true,
+      term: nestedHits[0].match,
+      match: nestedHits[0].match,
+      line: nestedHits[0].line,
+      count: nestedHits.length,
+      message:
+        nestedHits.length > 1
+          ? `存在 ${nestedHits.length} 处嵌套缩进或残余标签，可能破坏扁平排版结构`
+          : '存在嵌套缩进或残余标签，可能破坏扁平排版结构',
+      suggestion: '可使用「扁平排版整理」清理缩进与标签。',
+    });
+  }
 
   // 6. Concrete episode replay risk & em-dash proliferation guards
   if (hasReplayRiskExamples(normalized)) {
@@ -3749,6 +4365,9 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
   }
 
   // 3. Strong explicit section-level classification (prevents prose words inside a named section from drifting)
+  if (NSFW_INTIMATE_RE.test(sec) || NSFW_INTIMATE_RE.test(lineKey)) {
+    return { category: 'NSFW / 亲密设定', keepByDefault: true };
+  }
   if (
     /(?:当前身份|当前背景|当前处境|目前处境|当前状态|剧场壳|开场|与.*关系|居住地|当前住址|住址|职业或身份|当前职业|职业与经济|关系网|亲友|父母|兄弟姐妹|朋友|前任|重要伙伴)/i.test(
       sec
@@ -3759,7 +4378,7 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
   if (/(?:外貌|体貌|面容|穿搭|衣着|外表|身体特征|身高体型|声音\/气味|appearance)/i.test(sec)) {
     return { category: '外貌与印象', keepByDefault: true };
   }
-  if (/(?:生活习惯|生活与做事习惯|习惯与喜好|喜好|偏好|饮食|作息|爱好|亲密设定|亲密关系|preferences|hobby)/i.test(sec)) {
+  if (/(?:生活习惯|生活与做事习惯|习惯与喜好|喜好|偏好|饮食|作息|爱好|preferences|hobby)/i.test(sec)) {
     return { category: '习惯与喜好', keepByDefault: true };
   }
   if (/(?:成长经历|过往|经历|背景|技能|特长|能力|术式|体质|background|history|technique)/i.test(sec)) {
@@ -3783,6 +4402,9 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
 
   // 4. General combined keyword matching for flat / unsectioned lines
   const combined = `${sec} ${line}`.trim();
+  if (NSFW_INTIMATE_RE.test(combined)) {
+    return { category: 'NSFW / 亲密设定', keepByDefault: true };
+  }
   if (
     /(?:外貌|体貌|面容|脸型|五官|眉|眼|瞳|鼻|唇|肤色|发色|头发|发型|身高|体重|体型|身材|体态|身体|腿|手|疤|痣|耳饰|穿衣|穿搭|穿着|衣着|声线|声音|外表|气质|appearance|hair|skin|eyes|nose|lips|face|build|height|weight)/i.test(
       combined
@@ -3791,7 +4413,7 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
     return { category: '外貌与印象', keepByDefault: true };
   }
   if (
-    /(?:喜好|偏好|偏爱|爱好|生活习惯|饮食|食物|忌口|过敏|作息|睡眠|熬夜|厌恶|讨厌|爱吃|不吃|习惯|日常|food|preferences|hobby|nsfw)/i.test(
+    /(?:喜好|偏好|偏爱|爱好|生活习惯|饮食|食物|忌口|过敏|作息|睡眠|熬夜|厌恶|讨厌|爱吃|不吃|习惯|日常|food|preferences|hobby)/i.test(
       combined
     )
   ) {
@@ -4278,6 +4900,7 @@ export function splitDualLayerOutput(text, options = {}) {
   const defaultLight = VALID_WORLDBOOK_LIGHT_MODES.has(opts.worldbookLightMode)
     ? opts.worldbookLightMode
     : 'green_selective';
+  const placement = normalizeWorldbookPlacement(opts.worldbookPlacement || opts);
   const stripped = stripDraftAuditBlocks(text).cleanText;
   const normalized = String(stripped ?? '').replace(/\r\n?/g, '\n').trim();
   if (!normalized) {
@@ -4304,9 +4927,9 @@ export function splitDualLayerOutput(text, options = {}) {
 
   const flush = () => {
     if (!current) return;
-    const content = current.contentLines.join('\n').trim();
-    const comment = current.comment.trim() || current.key[0] || '补充背景';
-    if (content) {
+    const rawContent = current.contentLines.join('\n').trim();
+    const rawComment = current.comment.trim() || current.key[0] || '补充背景';
+    if (rawContent) {
       let isBlueConstant = false;
       if (defaultLight === 'blue_constant') {
         isBlueConstant = true;
@@ -4315,12 +4938,22 @@ export function splitDualLayerOutput(text, options = {}) {
       } else if (current.parsedLight === 'blue') {
         isBlueConstant = true;
       }
+      const comment = /\{\{user\}\}/.test(rawComment) ? rawComment : `【{{user}}补充设定】${rawComment}`;
+      const content = ensureUserWorldbookAttribution(
+        rawContent,
+        '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】'
+      );
       entries.push({
         key: current.key,
         comment,
         content,
         constant: isBlueConstant,
         selective: !isBlueConstant,
+        position: placement.position,
+        order: clampInt(placement.order + entries.length, 0, 10000, DEFAULT_USER_WORLDBOOK_PLACEMENT.order),
+        ...(placement.position === WORLD_INFO_POSITION.AT_DEPTH
+          ? { depth: placement.depth, role: placement.role }
+          : {}),
       });
     }
     current = null;
@@ -4390,6 +5023,152 @@ export function splitDualLayerOutput(text, options = {}) {
 
   flush();
   return { coreDescription, worldbookEntries: entries };
+}
+
+export function mergeDuplicatePersonaSections(text) {
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!normalized.trim()) return '';
+
+  const dividerRegex =
+    /^(?:【补充世界书条目】|【延展背景世界书】|={3,}\s*WORLDBOOK\s*={3,}|#{1,3}\s*(?:补充世界书条目|延展背景世界书))\s*$/im;
+  const dividerMatch = dividerRegex.exec(normalized);
+  const bodyRaw = dividerMatch ? normalized.slice(0, dividerMatch.index).trimEnd() : normalized.trimEnd();
+  const wbTail = dividerMatch ? normalized.slice(dividerMatch.index).trim() : '';
+
+  if (!bodyRaw.trim()) {
+    return wbTail;
+  }
+
+  const normalizeHeadingKey = (rawTitle) =>
+    String(rawTitle ?? '')
+      .replace(/^[【#\s]+|[】\s:：]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+  const dedupSectionLines = (lines) => {
+    const trimmedLines = [...lines];
+    while (trimmedLines.length > 0 && !trimmedLines[0].trim()) trimmedLines.shift();
+    while (trimmedLines.length > 0 && !trimmedLines[trimmedLines.length - 1].trim()) trimmedLines.pop();
+    const seen = new Set();
+    const out = [];
+    let prevBlank = false;
+    for (const rawLine of trimmedLines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) {
+        if (!prevBlank) {
+          out.push('');
+          prevBlank = true;
+        }
+        continue;
+      }
+      const normKey = trimmed
+        .replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (normKey && seen.has(normKey)) {
+        continue;
+      }
+      if (normKey) seen.add(normKey);
+      out.push(rawLine.trimEnd());
+      prevBlank = false;
+    }
+    return out;
+  };
+
+  const preambleTop = {
+    key: '__preamble__',
+    rawHeading: '',
+    directLines: [],
+    subSections: [],
+    subMap: new Map(),
+  };
+  const topGroups = [preambleTop];
+  const topMap = new Map([['__preamble__', preambleTop]]);
+
+  let activeTop = preambleTop;
+  let activeSub = null;
+
+  for (const line of bodyRaw.split('\n')) {
+    const trimmed = line.trim();
+    const boxMatch = trimmed.match(/^【([^】]+)】\s*$/);
+    const h1Match = !boxMatch ? trimmed.match(/^#\s+(.+?)\s*$/) : null;
+    const subMatch = !boxMatch && !h1Match ? trimmed.match(/^(#{2,3})\s+(.+?)\s*$/) : null;
+
+    if (boxMatch || h1Match) {
+      const rawTitle = (boxMatch?.[1] || h1Match?.[1] || '').trim();
+      const topKey = normalizeHeadingKey(rawTitle) || `__top_${topGroups.length}`;
+      let group = topMap.get(topKey);
+      if (!group) {
+        group = {
+          key: topKey,
+          rawHeading: trimmed,
+          directLines: [],
+          subSections: [],
+          subMap: new Map(),
+        };
+        topMap.set(topKey, group);
+        topGroups.push(group);
+      }
+      activeTop = group;
+      activeSub = null;
+      continue;
+    }
+
+    if (subMatch) {
+      const rawTitle = subMatch[2].trim();
+      const subKey = normalizeHeadingKey(rawTitle) || `__sub_${activeTop.subSections.length}`;
+      let sub = activeTop.subMap.get(subKey);
+      if (!sub) {
+        sub = {
+          key: subKey,
+          rawHeading: trimmed,
+          lines: [],
+        };
+        activeTop.subMap.set(subKey, sub);
+        activeTop.subSections.push(sub);
+      }
+      activeSub = sub;
+      continue;
+    }
+
+    if (activeSub) {
+      activeSub.lines.push(line);
+    } else {
+      activeTop.directLines.push(line);
+    }
+  }
+
+  const outLines = [];
+  for (const top of topGroups) {
+    const direct = dedupSectionLines(top.directLines);
+    const hasContent = Boolean(top.rawHeading) || direct.length > 0 || top.subSections.length > 0;
+    if (!hasContent) continue;
+
+    if (top.rawHeading) {
+      if (outLines.length > 0 && outLines[outLines.length - 1] !== '') {
+        outLines.push('');
+      }
+      outLines.push(top.rawHeading);
+    }
+    if (direct.length > 0) {
+      outLines.push(...direct);
+    }
+    for (const sub of top.subSections) {
+      const subLines = dedupSectionLines(sub.lines);
+      if (outLines.length > 0 && outLines[outLines.length - 1] !== '' && subLines.length > 0 && top.rawHeading && direct.length > 0) {
+        // Keep clean separation if directLines preceded subsection
+      }
+      outLines.push(sub.rawHeading);
+      if (subLines.length > 0) {
+        outLines.push(...subLines);
+      }
+    }
+  }
+
+  const mergedBody = outLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!wbTail) return mergedBody;
+  return mergedBody ? `${mergedBody}\n\n${wbTail}` : wbTail;
 }
 
 export function parsePersonaSections(text) {

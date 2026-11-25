@@ -575,6 +575,10 @@ test('H7: saveSupplementaryWorldbook creates selective green-light entries, save
   assert.equal(entry0.constant, false);
   assert.equal(entry0.selective, true);
   assert.equal(entry0.disable, false);
+  assert.equal(entry0.position, 4);
+  assert.equal(entry0.depth, 2);
+  assert.equal(entry0.role, 0);
+  assert.equal(entry0.order, 120);
   assert.deepEqual(entry0.key, ['旧怀表', '修表铺']);
   assert.equal(powerUser.persona_descriptions['p1.png'].lorebook, '用户补充设定集');
   assert.equal(powerUser.persona_description_lorebook, '用户补充设定集');
@@ -3324,4 +3328,55 @@ test('H22: getCharacterContext resolves realName, flags disabled entries & merge
   assert.equal(ruleEntry.category, 'acting_rules');
   const sysEntry = result.worldEntries.find((e) => e.comment === '状态栏');
   assert.equal(sysEntry.category, 'system_format');
+});
+
+test('H23 (R1.3): saveSupplementaryWorldbook persists explicit position, depth, role, order & default overrides', async () => {
+  const saved = [];
+  const deps = {
+    skipDynamicImport: true,
+    loadWorldInfo: async () => ({ entries: {} }),
+    createWorldInfoEntry: (_name, data) => {
+      const uid = Object.keys(data.entries).length;
+      data.entries[uid] = { uid };
+      return data.entries[uid];
+    },
+    saveWorldInfo: async (_name, data) => {
+      saved.push(structuredClone(data));
+    },
+    updateWorldInfoList: async () => {},
+  };
+
+  await saveSupplementaryWorldbook(
+    {
+      worldName: '用户补充世界书',
+      defaultPosition: 4,
+      defaultDepth: 3,
+      defaultRole: 0,
+      defaultOrder: 140,
+      entries: [
+        { key: ['暗线'], comment: '【{{user}}补充设定】暗线', content: '深度条目', depth: 5, role: 1, order: 155 },
+        { key: ['后置'], comment: '【{{user}}补充设定】后置', content: '角色后置条目', position: 1, order: 130 },
+        { key: ['默认'], comment: '【{{user}}补充设定】默认', content: '走默认配置条目' },
+      ],
+    },
+    deps
+  );
+
+  const e0 = saved[0].entries[0];
+  const e1 = saved[0].entries[1];
+  const e2 = saved[0].entries[2];
+
+  assert.equal(e0.position, 4);
+  assert.equal(e0.depth, 5);
+  assert.equal(e0.role, 1);
+  assert.equal(e0.order, 155);
+
+  assert.equal(e1.position, 1);
+  assert.equal(e1.order, 130);
+  assert.equal('depth' in e1, false);
+
+  assert.equal(e2.position, 4);
+  assert.equal(e2.depth, 3);
+  assert.equal(e2.role, 0);
+  assert.equal(e2.order, 140);
 });
