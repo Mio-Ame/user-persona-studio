@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Mio-Ame",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "homePage": "https://github.com/Mio-Ame/user-persona-studio",
   "auto_update": true,
   "minimum_client_version": "1.12.0"

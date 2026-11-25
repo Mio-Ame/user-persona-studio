@@ -1,7 +1,15 @@
 // Browser/Node-testable SillyTavern & TauriTavern host adapter for user-persona-studio.
 // Supports clean DI via `deps` and `globalThis.__UPS_HOST_BRIDGE__` plus multi-depth lazy imports.
 
-import { createDefaultSettings, deepClone, estimateTokens } from './core.js';
+import {
+  classifyWorldbookEntry,
+  createDefaultSettings,
+  deepClone,
+  detectMultiCharacterCard,
+  estimateTokens,
+  isNoiseWorldbookEntry,
+  resolveCharacterRealName,
+} from './core.js';
 
 export const EXTENSION_SETTINGS_KEY = 'user_persona_studio';
 
@@ -830,6 +838,12 @@ function normalizeRawWorldbookEntries(rawEntries, { bookName, sourceType }) {
         ? Number(entry.insertion_order)
         : 100;
 
+    const category = classifyWorldbookEntry({
+      comment,
+      keys,
+      content: rawContent,
+    });
+
     out.push({
       entryKey: `${sourceType}::${bookName}::${uid}`,
       sourceType,
@@ -841,6 +855,8 @@ function normalizeRawWorldbookEntries(rawEntries, { bookName, sourceType }) {
       constant: Boolean(entry.constant),
       selective: entry.selective !== false,
       defaultEnabled,
+      disabled: !defaultEnabled,
+      category,
       order,
     });
   }
@@ -926,6 +942,63 @@ export async function listCharacters(deps = {}) {
     return a.name.localeCompare(b.name, 'zh-CN');
   });
   return list;
+}
+
+function pickWorldNamesSource(deps, bridge, ctx, worldInfoMod) {
+  if (Array.isArray(deps?.worldNames)) return deps.worldNames;
+  if (Array.isArray(deps?.world_names)) return deps.world_names;
+  if (Array.isArray(bridge?.worldNames)) return bridge.worldNames;
+  if (Array.isArray(bridge?.world_names)) return bridge.world_names;
+
+  const candidates = [
+    ctx?.worldNames,
+    ctx?.world_names,
+    ctx?.worldInfo?.world_names,
+    worldInfoMod?.world_names,
+    worldInfoMod?.worldNames,
+    globalThis.world_names,
+    globalThis.worldNames,
+  ];
+  for (const arr of candidates) {
+    if (Array.isArray(arr) && arr.length > 0) return arr;
+  }
+  for (const arr of candidates) {
+    if (Array.isArray(arr)) return arr;
+  }
+  return [];
+}
+
+export async function listWorldbooks(deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+
+  const hasImmediateSource =
+    Array.isArray(deps?.worldNames) ||
+    Array.isArray(deps?.world_names) ||
+    Array.isArray(bridge?.worldNames) ||
+    Array.isArray(bridge?.world_names) ||
+    Array.isArray(ctx?.worldNames) ||
+    Array.isArray(ctx?.world_names) ||
+    Array.isArray(ctx?.worldInfo?.world_names) ||
+    Array.isArray(globalThis.world_names) ||
+    Array.isArray(globalThis.worldNames);
+
+  let worldInfoMod = null;
+  if (!hasImmediateSource) {
+    const mods = await loadHostModules({ worldInfo: true }, deps);
+    worldInfoMod = mods.worldInfo;
+  }
+
+  const rawList = pickWorldNamesSource(deps, bridge, ctx, worldInfoMod);
+  if (!Array.isArray(rawList)) return [];
+
+  const unique = new Set();
+  for (const item of rawList) {
+    if (typeof item !== 'string' && typeof item !== 'number') continue;
+    const clean = String(item).trim();
+    if (clean) unique.add(clean);
+  }
+  return Array.from(unique).sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
 export async function loadCharacterWorldbookEntries(targetOrWorldNames = {}, deps = {}) {
@@ -1016,9 +1089,71 @@ export async function loadCharacterWorldbookEntries(targetOrWorldNames = {}, dep
   };
 }
 
+function normalizeGetCharCtxArgs(options, deps) {
+  const optObj = options && typeof options === 'object' ? options : {};
+  const depObj = deps && typeof deps === 'object' ? deps : {};
+  const optKeys = [
+    'includeWorldSummary',
+    'includeWorldEntries',
+    'includeDialogueExamples',
+    'unshallow',
+  ];
+  const depKeys = [
+    'ctx',
+    'context',
+    'fetch',
+    'loadWorldInfo',
+    'charLore',
+    'skipDynamicImport',
+    'getRequestHeaders',
+    'powerUser',
+    'worldNames',
+  ];
+  const hasOpt = (o) => optKeys.some((k) => Object.hasOwn(o, k));
+  const hasDep = (o) => depKeys.some((k) => Object.hasOwn(o, k));
+  if (!hasOpt(optObj) && hasDep(optObj) && !hasDep(depObj)) {
+    return { resolvedOptions: depObj, resolvedDeps: optObj };
+  }
+  return { resolvedOptions: optObj, resolvedDeps: depObj };
+}
+
+function isCharacterProfileWorldbookEntry(entry, rawName = '') {
+  if (!entry || typeof entry !== 'object') return false;
+  if (isNoiseWorldbookEntry(entry)) return false;
+  const comment = String(entry.comment ?? '').trim();
+  const keys = Array.isArray(entry.keys) ? entry.keys.join(' ') : '';
+  const content = String(entry.content ?? '').trim();
+  if (!content) return false;
+
+  const headerText = `${comment}\n${keys}`;
+  if (
+    /(?:角色档案|人物档案|自我档案|人物设定|角色设定|人设|角色简介|人物简介|基本资料|基本信息|外貌设定|性格设定|character_profile|char_profile|persona_bio|\bbio\b)/iu.test(
+      headerText
+    )
+  ) {
+    return true;
+  }
+  const cleanName = String(rawName ?? '').trim();
+  if (
+    cleanName &&
+    cleanName.length >= 2 &&
+    (comment.includes(cleanName) || (Array.isArray(entry.keys) && entry.keys.some((k) => String(k).trim() === cleanName))) &&
+    /(?:姓名|年龄|性别|外貌|性格|身份|档案|简介|age|gender|appearance|personality)/iu.test(content)
+  ) {
+    return true;
+  }
+  if (
+    /(?:^|\n)[ \t]*(?:姓名|本名|年龄|外貌|性格|basic_info|appearance|personality)\s*[:：]/iu.test(content)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export async function getCharacterContext(target = null, options = {}, deps = {}) {
+  const { resolvedOptions, resolvedDeps } = normalizeGetCharCtxArgs(options, deps);
   const bridge = getBridge();
-  const ctx = await resolveHostContext(deps);
+  const ctx = await resolveHostContext(resolvedDeps);
   if (!ctx) return null;
 
   const characters = ctx.characters;
@@ -1071,7 +1206,7 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
 
   // Hydrate shallow card WITHOUT ever switching ctx.characterId or calling selectCharacterById
   let hydratedViaApi = false;
-  if (character.shallow && options?.unshallow !== false) {
+  if (character.shallow && resolvedOptions?.unshallow !== false) {
     try {
       if (typeof ctx.unshallowCharacter === 'function') {
         await ctx.unshallowCharacter(characterId);
@@ -1086,10 +1221,10 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
       character = refreshed;
     }
     if (character.shallow && character.avatar) {
-      const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
+      const fetchImpl = resolvedDeps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
       if (typeof fetchImpl === 'function') {
         try {
-          const headers = await getHostRequestHeaders({}, deps);
+          const headers = await getHostRequestHeaders({}, resolvedDeps);
           const res = await fetchImpl('/api/characters/get', {
             method: 'POST',
             headers,
@@ -1127,43 +1262,6 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
     }
   }
 
-  const worldName = resolveCharacterPrimaryWorldName(character);
-  let worldSummary = worldName ? `关联世界书：${worldName}` : '';
-  let worldNames = worldName ? [worldName] : [];
-  let worldEntries = [];
-
-  if (options?.includeWorldSummary || options?.includeWorldEntries) {
-    const loaded = await loadCharacterWorldbookEntries({ character }, deps);
-    worldNames = loaded.worldNames.length > 0 ? loaded.worldNames : worldNames;
-    if (options?.includeWorldEntries) {
-      worldEntries = loaded.entries;
-    }
-    const snippets = [];
-    for (const entry of loaded.entries) {
-      if (!entry.defaultEnabled) continue;
-      const label = entry.comment || entry.keys[0] || '设定';
-      snippets.push(`${label}：${entry.content}`);
-      if (snippets.length >= 3) break;
-    }
-    if (snippets.length > 0) {
-      const joined = snippets.join('\n');
-      worldSummary = joined.length > 600 ? `${joined.slice(0, 597)}...` : joined;
-    } else if (!worldSummary && worldNames.length > 0) {
-      worldSummary = `关联世界书：${worldNames.join('、')}`;
-    }
-  }
-
-  const activeId =
-    ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== ''
-      ? String(ctx.characterId)
-      : '';
-  const isActive = Boolean(activeId && String(characterId) === activeId);
-  const rawChatId = isActive
-    ? typeof ctx.getCurrentChatId === 'function'
-      ? ctx.getCurrentChatId()
-      : ctx.chatId
-    : null;
-
   const pickNonEmptyField = (...candidates) => {
     for (const candidate of candidates) {
       if (candidate !== undefined && candidate !== null) {
@@ -1174,24 +1272,140 @@ export async function getCharacterContext(target = null, options = {}, deps = {}
     return '';
   };
 
-  // Strictly public-only fields (omits system, jailbreak, creatorNotes, charDepthPrompt, mesExamples, persona)
+  const activeId =
+    ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== ''
+      ? String(ctx.characterId)
+      : '';
+  const isActive = Boolean(activeId && String(characterId) === activeId);
+  const rawName = String(character.name ?? (isActive ? ctx.name2 : '') ?? '').trim();
+  const rawDescription = pickNonEmptyField(fields.description, character.description, character.data?.description);
+  const rawPersonality = pickNonEmptyField(fields.personality, character.personality, character.data?.personality);
+  const rawScenario = pickNonEmptyField(fields.scenario, character.scenario, character.data?.scenario);
+  const rawFirstMessage = pickNonEmptyField(fields.firstMessage, character.first_mes, character.data?.first_mes);
+
+  const worldName = resolveCharacterPrimaryWorldName(character);
+  let worldSummary = worldName ? `关联世界书：${worldName}` : '';
+  let worldNames = worldName ? [worldName] : [];
+  let worldEntries = [];
+  let loadedEntriesForMerge = [];
+
+  const needWorldLoad =
+    Boolean(resolvedOptions?.includeWorldSummary) ||
+    Boolean(resolvedOptions?.includeWorldEntries) ||
+    rawDescription.trim().length < 300;
+
+  if (needWorldLoad) {
+    const loaded = await loadCharacterWorldbookEntries({ character }, resolvedDeps);
+    loadedEntriesForMerge = Array.isArray(loaded.entries) ? loaded.entries : [];
+    if (resolvedOptions?.includeWorldSummary || resolvedOptions?.includeWorldEntries) {
+      worldNames = loaded.worldNames.length > 0 ? loaded.worldNames : worldNames;
+    }
+    if (resolvedOptions?.includeWorldEntries) {
+      worldEntries = loadedEntriesForMerge;
+    }
+    if (resolvedOptions?.includeWorldSummary) {
+      const snippets = [];
+      for (const entry of loadedEntriesForMerge) {
+        if (!entry.defaultEnabled) continue;
+        const label = entry.comment || entry.keys[0] || '设定';
+        snippets.push(`${label}：${entry.content}`);
+        if (snippets.length >= 3) break;
+      }
+      if (snippets.length > 0) {
+        const joined = snippets.join('\n');
+        worldSummary = joined.length > 600 ? `${joined.slice(0, 597)}...` : joined;
+      } else if (!worldSummary && worldNames.length > 0) {
+        worldSummary = `关联世界书：${worldNames.join('、')}`;
+      }
+    }
+  }
+
+  let effectiveDescription = rawDescription;
+  let mergedDescription = '';
+  if (rawDescription.trim().length < 300 && loadedEntriesForMerge.length > 0) {
+    const multiInfo = detectMultiCharacterCard(character, loadedEntriesForMerge);
+    const multiCharKeySet = new Set(multiInfo.characterEntries.map((c) => c.key));
+
+    const eligibleEntries = loadedEntriesForMerge.filter((e) => {
+      if (e.defaultEnabled === false || e.disabled === true) return false;
+      const cls = classifyWorldbookEntry(e);
+      if (cls === 'system_format') return false;
+      if (multiInfo.isMultiChar && multiCharKeySet.has(e.entryKey)) {
+        return false;
+      }
+      return cls === 'acting_rules' || isCharacterProfileWorldbookEntry(e, rawName);
+    });
+
+    const nonNoiseFallback =
+      eligibleEntries.length > 0
+        ? eligibleEntries
+        : !rawDescription.trim() || isNoiseWorldbookEntry({ content: rawDescription })
+          ? loadedEntriesForMerge.filter((e) => {
+              if (e.defaultEnabled === false || e.disabled === true) return false;
+              if (classifyWorldbookEntry(e) === 'system_format') return false;
+              if (multiInfo.isMultiChar && multiCharKeySet.has(e.entryKey)) return false;
+              return true;
+            })
+          : [];
+
+    if (nonNoiseFallback.length > 0) {
+      const extraParts = nonNoiseFallback
+        .map((e) => `${e.comment ? `[${e.comment}]\n` : ''}${e.content}`)
+        .filter(Boolean);
+      const basePart =
+        rawDescription.trim() && !isNoiseWorldbookEntry({ content: rawDescription })
+          ? rawDescription.trim()
+          : '';
+      mergedDescription = [basePart, ...extraParts].filter(Boolean).join('\n\n');
+      effectiveDescription = mergedDescription;
+    }
+  }
+
+  const realNameInfo = resolveCharacterRealName({
+    name: rawName,
+    description: effectiveDescription,
+    firstMessage: rawFirstMessage,
+    worldEntries: loadedEntriesForMerge,
+  });
+
+  const rawChatId = isActive
+    ? typeof ctx.getCurrentChatId === 'function'
+      ? ctx.getCurrentChatId()
+      : ctx.chatId
+    : null;
+
+  // Strictly public-only fields (omits system, jailbreak, creatorNotes, charDepthPrompt, persona; mesExamples only when explicitly requested)
   const result = {
     characterId: String(characterId),
     avatar: String(character.avatar ?? ''),
-    name: String(character.name ?? (isActive ? ctx.name2 : '') ?? '').trim(),
+    name: rawName,
+    realName: realNameInfo.realName || rawName,
     chatId: rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null,
     isActive,
     worldName,
     worldNames,
     worldSummary,
-    description: pickNonEmptyField(fields.description, character.description, character.data?.description),
-    personality: pickNonEmptyField(fields.personality, character.personality, character.data?.personality),
-    scenario: pickNonEmptyField(fields.scenario, character.scenario, character.data?.scenario),
-    firstMessage: pickNonEmptyField(fields.firstMessage, character.first_mes, character.data?.first_mes),
+    description: effectiveDescription,
+    ...(mergedDescription ? { mergedDescription } : {}),
+    personality: rawPersonality,
+    scenario: rawScenario,
+    firstMessage: rawFirstMessage,
     shallow: Boolean(character.shallow),
   };
-  if (options?.includeWorldEntries) {
+  if (resolvedOptions?.includeWorldEntries) {
     result.worldEntries = worldEntries;
+  }
+  const includeDialogueExamples =
+    resolvedOptions?.includeDialogueExamples === true ||
+    targetObj?.includeDialogueExamples === true;
+  if (includeDialogueExamples) {
+    result.mesExamples = pickNonEmptyField(
+      fields.mesExamples,
+      character.mes_example,
+      character.mes_examples,
+      character.data?.mes_example,
+      character.data?.mes_examples
+    );
   }
   return result;
 }
@@ -1648,8 +1862,55 @@ function allocateFallbackWorldInfoEntry(data) {
   return entry;
 }
 
-export async function saveSupplementaryWorldbook({ worldName, entries, avatarId } = {}, deps = {}) {
+function normalizeWorldEntryText(s) {
+  return String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeWorldEntryKeys(keysArr) {
+  return Array.from(new Set((Array.isArray(keysArr) ? keysArr : []).map(normalizeWorldEntryText).filter(Boolean)))
+    .sort()
+    .join('\u0000');
+}
+
+function hasWorldKeyOverlap(keysA, keysB) {
+  const setA = new Set((Array.isArray(keysA) ? keysA : []).map(normalizeWorldEntryText).filter(Boolean));
+  if (setA.size === 0) return false;
+  for (const k of Array.isArray(keysB) ? keysB : []) {
+    if (setA.has(normalizeWorldEntryText(k))) return true;
+  }
+  return false;
+}
+
+function getWorldEntryUpsMeta(entry) {
+  const meta = entry?.extensions?.[EXTENSION_SETTINGS_KEY];
+  return meta && typeof meta === 'object' ? meta : null;
+}
+
+function normalizeWorldbookEntriesContainer(data) {
+  if (!data.entries || typeof data.entries !== 'object') {
+    data.entries = {};
+    return;
+  }
+  if (Array.isArray(data.entries)) {
+    const obj = {};
+    data.entries.forEach((entry, idx) => {
+      if (!entry || typeof entry !== 'object') return;
+      const key =
+        entry.uid !== undefined && entry.uid !== null && String(entry.uid).trim() !== ''
+          ? String(entry.uid)
+          : String(idx);
+      obj[key] = entry;
+    });
+    data.entries = obj;
+  }
+}
+
+export async function saveSupplementaryWorldbook(
+  { worldName, entries, avatarId, upsert = false, pruneManaged = false, managedPrefix = '' } = {},
+  deps = {}
+) {
   const cleanWorldName = String(worldName ?? '').trim();
+  const cleanManagedPrefix = String(managedPrefix ?? '').trim();
   if (!cleanWorldName) {
     throw new Error('补充世界书名称不能为空');
   }
@@ -1698,19 +1959,18 @@ export async function saveSupplementaryWorldbook({ worldName, entries, avatarId 
   if (!data || typeof data !== 'object') {
     data = { entries: {} };
   }
-  if (!data.entries || typeof data.entries !== 'object') {
-    data.entries = {};
-  }
+  normalizeWorldbookEntriesContainer(data);
 
   const uids = [];
+  const claimedMapKeys = new Set();
+  const incomingManagedSlotKeys = new Set();
+  let createdCount = 0;
+  let updatedCount = 0;
+  let prunedCount = 0;
+
   for (const rawEntry of entries) {
     const content = String(rawEntry?.content ?? '').trim();
     if (!content) continue;
-
-    const created =
-      typeof createWorldInfoEntryFn === 'function'
-        ? createWorldInfoEntryFn(cleanWorldName, data)
-        : allocateFallbackWorldInfoEntry(data);
 
     const keys = Array.isArray(rawEntry.key)
       ? rawEntry.key.map((k) => String(k ?? '').trim()).filter(Boolean)
@@ -1718,19 +1978,162 @@ export async function saveSupplementaryWorldbook({ worldName, entries, avatarId 
           .split(/[,，/|、]/)
           .map((k) => k.trim())
           .filter(Boolean);
+    const comment = String(rawEntry.comment ?? rawEntry.title ?? keys[0] ?? '补充背景').trim();
 
-    created.key = keys;
-    created.comment = String(rawEntry.comment ?? rawEntry.title ?? keys[0] ?? '补充背景').trim();
-    created.content = content;
-    created.constant = false;
-    created.selective = true;
-    created.disable = false;
-    created.addMemo = true;
-    created.position = Number.isFinite(Number(rawEntry.position)) ? Number(rawEntry.position) : 0;
-    created.order = Number.isFinite(Number(rawEntry.order)) ? Number(rawEntry.order) : 100;
+    const rawUpsMeta = getWorldEntryUpsMeta(rawEntry);
+    const incomingSlotKey = String(rawUpsMeta?.slotKey ?? rawEntry?.slotKey ?? '').trim();
+    const incomingManaged =
+      rawUpsMeta?.managed !== undefined
+        ? Boolean(rawUpsMeta.managed)
+        : rawEntry?.managed !== undefined
+          ? Boolean(rawEntry.managed)
+          : Boolean(incomingSlotKey);
 
-    if (created.uid !== undefined && created.uid !== null) {
-      uids.push(created.uid);
+    let targetEntry = null;
+    let targetMapKey = null;
+
+    if (upsert === true) {
+      const existingMapKeys = Object.keys(data.entries);
+
+      // Pass 1: exact slotKey match
+      if (incomingSlotKey) {
+        const slotMatches = [];
+        for (const mapKey of existingMapKeys) {
+          if (claimedMapKeys.has(mapKey)) continue;
+          const candidate = data.entries[mapKey];
+          if (!candidate || typeof candidate !== 'object') continue;
+          const meta = getWorldEntryUpsMeta(candidate);
+          if (String(meta?.slotKey ?? '').trim() === incomingSlotKey) {
+            slotMatches.push(mapKey);
+          }
+        }
+        if (slotMatches.length > 0) {
+          targetMapKey = slotMatches[0];
+          targetEntry = data.entries[targetMapKey];
+          // Self-heal extra managed duplicates sharing the same slotKey
+          for (let i = 1; i < slotMatches.length; i += 1) {
+            const dupKey = slotMatches[i];
+            if (getWorldEntryUpsMeta(data.entries[dupKey])?.managed === true) {
+              delete data.entries[dupKey];
+              prunedCount += 1;
+            }
+          }
+        }
+      }
+
+      // Pass 2: normalized (comment, key) signature match
+      if (!targetEntry) {
+        const inComment = normalizeWorldEntryText(comment);
+        const inKeys = normalizeWorldEntryKeys(keys);
+        for (const mapKey of existingMapKeys) {
+          if (claimedMapKeys.has(mapKey)) continue;
+          const candidate = data.entries[mapKey];
+          if (!candidate || typeof candidate !== 'object') continue;
+          const existingSlot = String(getWorldEntryUpsMeta(candidate)?.slotKey ?? '').trim();
+          if (existingSlot && (!incomingSlotKey || existingSlot !== incomingSlotKey)) {
+            continue;
+          }
+          const existingComment = normalizeWorldEntryText(candidate.comment);
+          const existingKeyArr = Array.isArray(candidate.key)
+            ? candidate.key
+            : Array.isArray(candidate.keys)
+              ? candidate.keys
+              : [];
+          const existingKeys = normalizeWorldEntryKeys(existingKeyArr);
+
+          const matched =
+            (inComment && existingComment === inComment && inKeys && existingKeys === inKeys) ||
+            (inComment &&
+              inComment !== '补充背景' &&
+              existingComment === inComment &&
+              (!inKeys || !existingKeys || hasWorldKeyOverlap(keys, existingKeyArr))) ||
+            ((!inComment || inComment === '补充背景') &&
+              (!existingComment || existingComment === '补充背景') &&
+              inKeys &&
+              existingKeys === inKeys);
+
+          if (matched) {
+            targetMapKey = mapKey;
+            targetEntry = candidate;
+            break;
+          }
+        }
+      }
+    }
+
+    if (targetEntry) {
+      updatedCount += 1;
+    } else {
+      const beforeKeys = new Set(Object.keys(data.entries));
+      targetEntry =
+        typeof createWorldInfoEntryFn === 'function'
+          ? createWorldInfoEntryFn(cleanWorldName, data)
+          : allocateFallbackWorldInfoEntry(data);
+      createdCount += 1;
+      if (targetEntry && typeof targetEntry === 'object') {
+        targetMapKey =
+          Object.keys(data.entries).find((k) => data.entries[k] === targetEntry) ||
+          Object.keys(data.entries).find((k) => !beforeKeys.has(k)) ||
+          (targetEntry.uid !== undefined && targetEntry.uid !== null ? String(targetEntry.uid) : null);
+      }
+    }
+
+    if (targetMapKey !== null) {
+      claimedMapKeys.add(targetMapKey);
+    }
+    if (incomingSlotKey && incomingManaged) {
+      incomingManagedSlotKeys.add(incomingSlotKey);
+    }
+
+    targetEntry.key = keys;
+    targetEntry.comment = comment;
+    targetEntry.content = content;
+    targetEntry.constant = Boolean(rawEntry.constant);
+    targetEntry.selective = rawEntry.selective !== false;
+    targetEntry.disable = Boolean(rawEntry.disable);
+    targetEntry.addMemo = rawEntry.addMemo !== false;
+    targetEntry.position = Number.isFinite(Number(rawEntry.position)) ? Number(rawEntry.position) : 0;
+    targetEntry.order = Number.isFinite(Number(rawEntry.order)) ? Number(rawEntry.order) : 100;
+
+    if (incomingSlotKey || incomingManaged || rawUpsMeta || cleanManagedPrefix) {
+      const prevExts =
+        targetEntry.extensions && typeof targetEntry.extensions === 'object' ? targetEntry.extensions : {};
+      const prevUps = getWorldEntryUpsMeta(targetEntry) || {};
+      targetEntry.extensions = {
+        ...prevExts,
+        [EXTENSION_SETTINGS_KEY]: {
+          ...prevUps,
+          ...(rawUpsMeta || {}),
+          ...(incomingSlotKey ? { slotKey: incomingSlotKey } : {}),
+          ...(cleanManagedPrefix ? { managedPrefix: cleanManagedPrefix } : {}),
+          managed: incomingManaged,
+        },
+      };
+    }
+
+    if (targetEntry.uid !== undefined && targetEntry.uid !== null) {
+      uids.push(targetEntry.uid);
+    }
+  }
+
+  if (pruneManaged === true) {
+    for (const mapKey of Object.keys(data.entries)) {
+      if (claimedMapKeys.has(mapKey)) continue;
+      const entry = data.entries[mapKey];
+      const meta = getWorldEntryUpsMeta(entry);
+      if (meta && meta.managed === true) {
+        const slot = String(meta.slotKey ?? '').trim();
+        const entryPrefix = String(meta.managedPrefix ?? '').trim();
+        if (cleanManagedPrefix) {
+          const belongsToPrefix =
+            entryPrefix === cleanManagedPrefix || (slot && slot.startsWith(cleanManagedPrefix));
+          if (!belongsToPrefix) continue;
+        }
+        if (!slot || !incomingManagedSlotKeys.has(slot)) {
+          delete data.entries[mapKey];
+          prunedCount += 1;
+        }
+      }
     }
   }
 
@@ -1813,6 +2216,9 @@ export async function saveSupplementaryWorldbook({ worldName, entries, avatarId 
     entryCount: uids.length,
     uids,
     boundAvatarId,
+    createdCount,
+    updatedCount,
+    prunedCount,
   };
 }
 

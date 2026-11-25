@@ -9,6 +9,15 @@ import {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  COMMON_PERSONA_LEXICON_CATEGORIES,
+  COMPANION_FREQUENCY_TIERS,
+  COMPANION_CARRY_MODES,
+  COMPANION_RELATION_PRESETS,
+  MODULE_RATIO_KEYS,
+  MODULE_RATIO_DEFAULTS,
+  GENERATION_LAYOUT_STYLES,
+  GENERATION_SECTION_GROUPS,
+  GENERATION_SECTION_PRESETS,
   DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
@@ -31,6 +40,15 @@ export {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  COMMON_PERSONA_LEXICON_CATEGORIES,
+  COMPANION_FREQUENCY_TIERS,
+  COMPANION_CARRY_MODES,
+  COMPANION_RELATION_PRESETS,
+  MODULE_RATIO_KEYS,
+  MODULE_RATIO_DEFAULTS,
+  GENERATION_LAYOUT_STYLES,
+  GENERATION_SECTION_GROUPS,
+  GENERATION_SECTION_PRESETS,
   DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
@@ -47,6 +65,8 @@ export {
 
 export const DEFAULT_PREFILL = `${CORE_SECTION_HEADER}\n## 外貌与日常印象\n-`;
 export const DEFAULT_TRIGGER = '请直接按以上要求输出完整结果，不要寒暄或附加解释。';
+export const MAX_GENERATION_HISTORY = 8;
+export const MAX_HISTORY_ENTRY_CHARS = 12000;
 
 export const ST_SENSITIVE_FIELDS = Object.freeze([
   'reverse_proxy',
@@ -82,6 +102,31 @@ const VALID_UI_SUBMODES = new Set(['de_label_reformat', 'core_expand', 'cross_ca
 const VALID_BANNED_SEND_MODES = new Set(['smart_compact', 'personal_only', 'full']);
 const VALID_SPOTLIGHT_MODES = new Set(['balanced', 'featured', 'light_daily']);
 const VALID_BACKSTORY_MODES = new Set(['light_vibe', 'blank_self', 'rich_arc']);
+const VALID_LAYOUT_STYLES = new Set(GENERATION_LAYOUT_STYLES.map((s) => s.id));
+const VALID_SECTION_PRESETS = new Set([...Object.keys(GENERATION_SECTION_PRESETS), 'custom']);
+const ALL_SECTION_ITEMS = GENERATION_SECTION_GROUPS.flatMap((g) => g.items);
+const VALID_SECTION_IDS = new Set(ALL_SECTION_ITEMS.map((item) => item.id));
+const SECTION_ITEM_BY_ID = new Map(ALL_SECTION_ITEMS.map((item) => [item.id, item]));
+const INTIMATE_SECTION_IDS = new Set(
+  (GENERATION_SECTION_GROUPS.find((g) => g.id === 'intimate')?.items || []).map((item) => item.id)
+);
+const VALID_COMPANION_TIER_IDS = new Set(COMPANION_FREQUENCY_TIERS.map((t) => t.id));
+const COMPANION_TIER_BY_ID = new Map(COMPANION_FREQUENCY_TIERS.map((t) => [t.id, t]));
+const VALID_COMPANION_CARRY_MODES = new Set(COMPANION_CARRY_MODES.map((m) => m.id));
+const COMPANION_TIER_WEIGHTS = Object.freeze({
+  background: 0.7,
+  occasional: 1.0,
+  active_circle: 1.35,
+});
+const UPS_EXT_KEY = 'user_persona_studio';
+const CANONICAL_POINT_CATEGORIES = Object.freeze([
+  '基础信息',
+  '外貌与印象',
+  '性格与底色',
+  '习惯与喜好',
+  '经历与技能',
+  '当前身份与关系',
+]);
 const BUILTIN_SCHEME_IDS = new Set(Object.keys(BUILTIN_PRESET_SCHEMES));
 const VALID_BANNED_CATEGORY_IDS = new Set(BUILTIN_BANNED_CATEGORIES.map((c) => c.id));
 
@@ -350,6 +395,110 @@ function sortFavoriteSchemesFirst(schemes) {
   return [...schemes].sort((a, b) => Number(Boolean(b?.favorite)) - Number(Boolean(a?.favorite)));
 }
 
+export function normalizeModuleRatios(ratios = {}) {
+  const raw = ratios && typeof ratios === 'object' ? ratios : {};
+  const appearance = clampInt(raw.appearance, 0, 80, MODULE_RATIO_DEFAULTS.appearance);
+  const personality = clampInt(raw.personality, 0, 80, MODULE_RATIO_DEFAULTS.personality);
+  const backstory = clampInt(raw.backstory, 0, 80, MODULE_RATIO_DEFAULTS.backstory);
+  const relationship = clampInt(raw.relationship, 0, 80, MODULE_RATIO_DEFAULTS.relationship);
+  const privateQuota = clampInt(raw.private, 0, 40, MODULE_RATIO_DEFAULTS.private);
+
+  const hasCustomValues =
+    appearance !== MODULE_RATIO_DEFAULTS.appearance ||
+    personality !== MODULE_RATIO_DEFAULTS.personality ||
+    backstory !== MODULE_RATIO_DEFAULTS.backstory ||
+    relationship !== MODULE_RATIO_DEFAULTS.relationship ||
+    privateQuota !== MODULE_RATIO_DEFAULTS.private;
+
+  const mode =
+    raw.mode === 'custom'
+      ? 'custom'
+      : raw.mode === 'auto'
+        ? (privateQuota > 0 ? 'custom' : 'auto')
+        : hasCustomValues
+          ? 'custom'
+          : 'auto';
+
+  return {
+    mode,
+    appearance,
+    personality,
+    backstory,
+    relationship,
+    private: privateQuota,
+  };
+}
+
+export function normalizeGenerationSectionsConfig(config = {}) {
+  const raw = config && typeof config === 'object' ? config : {};
+  const layoutStyle = VALID_LAYOUT_STYLES.has(raw.layoutStyle) ? raw.layoutStyle : 'structured';
+  const rawPreset = typeof raw.presetId === 'string' ? raw.presetId.trim() : '';
+  let presetId = VALID_SECTION_PRESETS.has(rawPreset) ? rawPreset : 'standard';
+
+  let enabledIds;
+  if (Array.isArray(raw.enabledIds)) {
+    const seen = new Set();
+    const filtered = [];
+    for (const id of raw.enabledIds) {
+      const clean = String(id ?? '').trim();
+      if (VALID_SECTION_IDS.has(clean) && !seen.has(clean)) {
+        seen.add(clean);
+        filtered.push(clean);
+      }
+    }
+    enabledIds = filtered;
+  } else {
+    const presetKey = presetId !== 'custom' && GENERATION_SECTION_PRESETS[presetId] ? presetId : 'standard';
+    enabledIds = [...GENERATION_SECTION_PRESETS[presetKey].enabledIds];
+  }
+
+  if (!rawPreset) {
+    if (Array.isArray(raw.enabledIds)) {
+      const std = GENERATION_SECTION_PRESETS.standard.enabledIds;
+      const isStd = std.length === enabledIds.length && std.every((id) => enabledIds.includes(id));
+      presetId = isStd ? 'standard' : 'custom';
+    } else {
+      presetId = 'standard';
+    }
+  } else if (presetId !== 'custom' && Array.isArray(raw.enabledIds)) {
+    const presetTarget = GENERATION_SECTION_PRESETS[presetId]?.enabledIds || [];
+    const sameSize = presetTarget.length === enabledIds.length;
+    const sameItems = sameSize && presetTarget.every((id) => enabledIds.includes(id));
+    if (!sameItems) {
+      presetId = 'custom';
+    }
+  }
+
+  const customSections = [];
+  if (Array.isArray(raw.customSections)) {
+    const seenCustomIds = new Set();
+    const seenCustomNames = new Set();
+    for (let i = 0; i < raw.customSections.length && customSections.length < 12; i += 1) {
+      const item = raw.customSections[i];
+      if (!item || typeof item !== 'object') continue;
+      const name = String(item.name ?? '').trim().slice(0, 30);
+      if (!name) continue;
+      const nameKey = name.toLowerCase();
+      if (seenCustomNames.has(nameKey)) continue;
+      seenCustomNames.add(nameKey);
+      let id = String(item.id || '').trim() || generateId(`csec_${i}`);
+      while (seenCustomIds.has(id)) {
+        id = generateId('csec');
+      }
+      seenCustomIds.add(id);
+      const guidance = String(item.guidance ?? '').trim().slice(0, 200);
+      customSections.push({ id, name, guidance });
+    }
+  }
+
+  return {
+    layoutStyle,
+    presetId,
+    enabledIds,
+    customSections,
+  };
+}
+
 // ============================================================================
 // A. Settings & Sanitization
 // ============================================================================
@@ -444,6 +593,8 @@ export function createDefaultSettings(overrides = {}) {
       visibilityTags: Boolean(rawUi.visibilityTags),
       draftAudit: rawUi.draftAudit !== false,
       antiParrot: rawUi.antiParrot !== false,
+      moduleRatios: normalizeModuleRatios(rawUi.moduleRatios),
+      generationSections: normalizeGenerationSectionsConfig(rawUi.generationSections),
       mustHaveTemplates: sanitizeMustHaveTemplates(rawUi.mustHaveTemplates),
       geometry: {
         x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? Math.round(rawGeo.x) : 120,
@@ -1034,17 +1185,439 @@ export function buildDraftAuditInstruction(scheme = {}, options = {}) {
     '【成稿前草稿自检】',
     `输出正文前，先在顶部用唯一一个 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：`,
     `1. 题材与经历边界：贴合故事语境，${backstoryShort}，性格顺着人物本色落地而不套固定公式；`,
-    '2. 戏份与伏笔分寸：职业、特殊属性与小喜好收放自然无打卡隐患（喜好外显度符合人物性格，不强设旁人必全知或必猜错），暗线具备自然日常表象，具体举例不写成必演剧本；',
-    `3. 语言净稿：符合${isObjective ? '纯手控零代演' : '自然代演留白'}边界，清零赋魅套话、系统口号与破折号。`,
+    '2. 戏份与伏笔分寸：职业、特殊属性与小喜好收放自然无机械重复隐患（喜好外显度符合人物性格，不强设旁人必全知或必猜错），暗线具备自然日常表象，具体举例不写成必演剧本；',
+    `3. 语言净稿：符合${isObjective ? '不抢话零代演' : '自然代演留白'}边界，清零赋魅套话、系统口号与破折号。`,
     `闭合 \`${DRAFT_END_MARKER}\` 后换一行直接从 \`${CORE_SECTION_HEADER}\` 输出干净正文。`,
   ].join('\n');
 }
 
-function formatCharContextBlock(charContext) {
+export function classifyWorldbookEntry(entry) {
+  if (!entry || typeof entry !== 'object') return 'character_lore';
+  const comment = String(entry.comment ?? entry.name ?? '').trim();
+  const keysList = Array.isArray(entry.keys)
+    ? entry.keys
+    : Array.isArray(entry.key)
+      ? entry.key
+      : [];
+  const keysText = keysList.map((k) => String(k ?? '').trim()).filter(Boolean).join(' ');
+  const content = String(entry.content ?? '').trim();
+  const headerProbe = `${comment}\n${keysText}`;
+  const head = content.slice(0, 280);
+
+  // 1. Acting / portrayal rules ('acting_rules') — check BEFORE system_format so character anti-OOC rules are NEVER discarded
+  if (
+    /(?:人设修正|人物修正|人设规范|令行禁止|防\s*OOC|防霸总|防油腻|防超雄|扮演原则|演绎守则|演绎修正|剧情守则|故事守则|言行边界|行为准则|人物禁令|说话规范|说话习惯修正|^(?:修正|守则)$|(?:^|[【\[·\s_-])修正(?:$|[】\]·\s_-]))/iu.test(
+      headerProbe
+    ) ||
+    /^【(?:人设修正|令行禁止|剧情守则|故事守则|扮演原则|防OOC|人设规范)】/iu.test(head)
+  ) {
+    return 'acting_rules';
+  }
+
+  // 2. Pure technical/system/format entries ('system_format')
+  if (
+    /(?:状态栏|statusbar|status_bar|思维链|\bcot\b|writingspec|writing_spec|写作格式规范|排版规范|字数要求|regex|正则|initvar|mvu|变量初始化|变量更新|变量表|变量脚本|format_spec|输出格式控制)/iu.test(
+      headerProbe
+    ) ||
+    /^(?:<\s*(?:status(?:bar)?|cot|thinking|writingspec|initvar|format_spec)\b|\/\/\s*initvar|【(?:状态栏|思维链|变量初始化|变量脚本|输出格式)】)/iu.test(
+      head
+    )
+  ) {
+    return 'system_format';
+  }
+
+  return 'character_lore';
+}
+
+export function isNoiseWorldbookEntry(entry) {
+  return classifyWorldbookEntry(entry) === 'system_format';
+}
+
+export function isWorldbookEntryDisabled(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (entry.disabled === true || entry.disable === true) return true;
+  if (entry.defaultEnabled === false || entry.enabled === false) return true;
+  return false;
+}
+
+function stripCardTitleDecorations(rawTitle) {
+  let s = String(rawTitle ?? '').trim();
+  if (!s) return '';
+  s = s.replace(/^[【\[（(][^】\]）)]{1,16}[】\]）)]\s*/g, '');
+  s = s.replace(/^[^\p{L}\p{N}《〈「『]+/gu, '');
+  const wrapped = s.match(/^[《〈「『](.+?)[》〉」』]$/);
+  if (wrapped) {
+    s = wrapped[1].trim();
+  }
+  s = s.replace(/\s*(?:v\d+(?:\.\d+)*|ver\.?\s*\d+(?:\.\d+)*|（[^）]{0,12}版）|\([^)]{0,12}ver[^)]*\))$/iu, '');
+  return s.trim();
+}
+
+function isTitleLikeCardName(rawName) {
+  const s = String(rawName ?? '').trim();
+  if (!s) return true;
+  if (/[《》【】\[\]｜|]/.test(s)) return true;
+  if (/^[^\p{L}\p{N}]/u.test(s)) return true;
+  if (/(?:\s-\s|\s—\s|之|往事|物语|手札|四季|指南|档案卡|世界观)/.test(s)) return true;
+  const cjkCount = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+  return cjkCount > 5;
+}
+
+function cleanExtractedPersonName(rawVal) {
+  let s = String(rawVal ?? '').trim();
+  if (!s) return '';
+  s = s.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').trim();
+  s = s.replace(/\s*#.*$/, '').trim();
+  s = s.split(/[（(｜|/／,，]/)[0].trim();
+  if (!s || s.length > 24) return '';
+  if (/^(?:\{\{char\}\}|\{\{user\}\}|<char>|<user>|unknown|none|null|undefined|未命名|待定|未知|无)$/i.test(s)) {
+    return '';
+  }
+  if (/^(?:基本信息|基础信息|基本资料|人物设定|角色设定|角色档案|外貌|性格|背景|当前状态|简介)$/u.test(s)) {
+    return '';
+  }
+  return s;
+}
+
+const GENERIC_YAML_TOP_KEYS = new Set([
+  'info',
+  'character',
+  'char',
+  'profile',
+  'data',
+  'basic_info',
+  'basicinfo',
+  'appearance',
+  'personality',
+  'background',
+  'relationships',
+  'relationship',
+  'habits',
+  'skills',
+  'speech_style',
+  'current_state',
+  '基本信息',
+  '基础信息',
+  '基本资料',
+  '基本身份',
+  '人物档案',
+  '角色档案',
+  '外貌',
+  '性格',
+  '背景',
+  '设定',
+  '关系',
+  '习惯',
+  '技能',
+  '能力',
+  '状态',
+  '剧情守则',
+  '状态栏',
+]);
+
+function extractRealNameFromText(text, rawCardName) {
+  const src = String(text ?? '').replace(/\r\n?/g, '\n');
+  if (!src.trim()) return '';
+
+  // 1. XML / tag attributes: <character_information character="..."> or <character name="...">
+  const tagAttrRe = /<\s*(?:character_information|character)\b[^>]*\b(?:character|name)\s*=\s*["']([^"'\n<>]{1,32})["']/i;
+  const tagMatch = src.match(tagAttrRe);
+  if (tagMatch) {
+    const cleaned = cleanExtractedPersonName(tagMatch[1]);
+    if (cleaned) return cleaned;
+  }
+
+  // 2. Explicit person-name KV fields
+  const explicitKvRe =
+    /(?:^|\n)[ \t]*(?:[-*•]\s*)?(?:姓名|名字|本名|真名|角色名|人物名|Chinese[ _]?name|full[ _]?name)\s*[:：]\s*([^\n#<>]{1,40})/iu;
+  const explicitMatch = src.match(explicitKvRe);
+  if (explicitMatch) {
+    const cleaned = cleanExtractedPersonName(explicitMatch[1]);
+    if (cleaned) return cleaned;
+  }
+
+  // 3. Generic `name:` field (accept when distinct from title-like card.name or looks like a person name)
+  const genericNameRe = /(?:^|\n)[ \t]*(?:[-*•]\s*)?name\s*[:：]\s*([^\n#<>]{1,40})/iu;
+  const genericMatch = src.match(genericNameRe);
+  if (genericMatch) {
+    const cleaned = cleanExtractedPersonName(genericMatch[1]);
+    if (cleaned && (cleaned !== rawCardName || !isTitleLikeCardName(cleaned))) {
+      return cleaned;
+    }
+  }
+
+  // 4. Top-level YAML person object key (e.g. ```yaml\n<info>\n<character>\n周恪:\n  年龄: 26)
+  const strippedLines = src
+    .split('\n')
+    .filter((l) => {
+      const t = l.trim();
+      return !/^```/.test(t) && !/^<\/?(?:info|character|character_information|profile)\b[^>]*>$/i.test(t);
+    });
+  for (let i = 0; i < strippedLines.length; i += 1) {
+    const line = strippedLines[i];
+    const topKeyMatch = line.match(/^[ \t]{0,4}([^\s:#【\[<>{}"'()（）]{2,12})\s*[:：]\s*(?:#.*)?$/);
+    if (!topKeyMatch) continue;
+    const candidateKey = topKeyMatch[1].trim();
+    if (GENERIC_YAML_TOP_KEYS.has(candidateKey.toLowerCase()) || GENERIC_YAML_TOP_KEYS.has(candidateKey)) {
+      continue;
+    }
+    const baseIndent = measureLineIndent(line);
+    const nextLine = strippedLines.slice(i + 1).find((l) => l.trim() !== '');
+    if (
+      nextLine &&
+      measureLineIndent(nextLine) > baseIndent &&
+      /(?:年龄|性别|身高|外貌|性格|身份|简介|职业|age|gender|height|appearance|personality|basic_info|aliases)/iu.test(
+        nextLine
+      )
+    ) {
+      const cleaned = cleanExtractedPersonName(candidateKey);
+      if (cleaned) return cleaned;
+    }
+  }
+
+  return '';
+}
+
+export function resolveCharacterRealName({
+  name = '',
+  cardName = '',
+  description = '',
+  firstMes = '',
+  firstMessage = '',
+  worldEntries = [],
+} = {}) {
+  const rawCardName = String(name || cardName || '').trim();
+  const strippedCardTitle = stripCardTitleDecorations(rawCardName);
+
+  const fromDesc = extractRealNameFromText(description, rawCardName);
+  if (fromDesc) {
+    return { realName: fromDesc, source: 'description', strippedCardTitle };
+  }
+
+  const validWorldEntries = Array.isArray(worldEntries)
+    ? worldEntries.filter((e) => e && typeof e === 'object' && !isNoiseWorldbookEntry(e))
+    : [];
+  const worldText = validWorldEntries
+    .map((e) => `${String(e.comment ?? '')}\n${String(e.content ?? '')}`)
+    .join('\n');
+  const fromWorld = extractRealNameFromText(worldText, rawCardName);
+  if (fromWorld) {
+    return { realName: fromWorld, source: 'worldbook', strippedCardTitle };
+  }
+
+  const fromFirst = extractRealNameFromText(firstMes || firstMessage, rawCardName);
+  if (fromFirst) {
+    return { realName: fromFirst, source: 'firstMes', strippedCardTitle };
+  }
+
+  if (strippedCardTitle && strippedCardTitle !== rawCardName) {
+    return { realName: strippedCardTitle, source: 'stripped_title', strippedCardTitle };
+  }
+
+  return {
+    realName: rawCardName,
+    source: 'card_name',
+    strippedCardTitle,
+  };
+}
+
+const NON_CHARACTER_LORE_TITLE_RE =
+  /(?:世界观|背景总纲|背景设定|故事背景|历史沿革|地理|地图|势力|宗门|朝堂|制度|规则|时间线|年表|术语|词条说明|使用说明|开场前情|总览|简介|user设定|用户设定|玩家身份|开篇导语|关系总览)/iu;
+
+function extractRoleTagFromContent(content) {
+  const src = String(content ?? '').replace(/\r\n?/g, '\n');
+  const kvMatch = src.match(
+    /(?:^|\n)[ \t]*(?:[-*•]\s*)?(?:身份定位|当前身份|身份|定位|职业|头衔|关系|角色定位)\s*[:：]\s*([^\n#<>]{2,28})/iu
+  );
+  if (kvMatch) {
+    return kvMatch[1].replace(/^["'“”]+|["'“”]+$/g, '').split(/[。！？]/)[0].trim().slice(0, 24);
+  }
+  const firstLine = src
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l && !/^[【#`<]/.test(l) && !/^(?:姓名|名字|年龄|性别|身高)\s*[:：]/.test(l));
+  if (!firstLine) return '';
+  const clean = firstLine.replace(/^\s*[-*•]\s*/, '').split(/[。！？；]/)[0].trim();
+  return clean.length > 24 ? `${clean.slice(0, 23)}…` : clean;
+}
+
+function getWorldbookEntryIdentityKey(entry, idx = 0) {
+  return String(entry?.entryKey ?? entry?.uid ?? entry?.comment ?? `wb_${idx}`).trim();
+}
+
+function looksLikeSingleCharacterEntry(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  if (classifyWorldbookEntry(entry) !== 'character_lore') return false;
+  const comment = String(entry.comment ?? entry.name ?? '').trim();
+  const content = String(entry.content ?? '').trim();
+  if (!content) return false;
+  if (NON_CHARACTER_LORE_TITLE_RE.test(comment)) return false;
+
+  const explicitHeaderMatch = comment.match(/^(?:角色|人物|NPC|配角|可攻略(?:角色)?)[：:\s-]+(.+)$/iu);
+  if (explicitHeaderMatch) return true;
+
+  const hasBioFields =
+    /(?:^|\n)[ \t]*(?:[-*•]\s*)?(?:姓名|名字|本名|年龄|性别|身高|外貌|性格|身份|职业|basic_info|appearance|personality)\s*[:：]/iu.test(
+      content
+    ) || /<\s*(?:character_information|character)\b/i.test(content);
+  if (hasBioFields) return true;
+
+  const cleanTitle = stripCardTitleDecorations(comment).split(/[（(｜|/／-]/)[0].trim();
+  if (cleanTitle && /^[\u4e00-\u9fff·A-Za-z]{2,10}$/.test(cleanTitle) && content.length >= 20) {
+    return true;
+  }
+  return false;
+}
+
+export function detectMultiCharacterCard(cardContext = {}, worldEntries = []) {
+  const ctx = cardContext && typeof cardContext === 'object' ? cardContext : {};
+  const entries = Array.isArray(worldEntries) && worldEntries.length > 0
+    ? worldEntries
+    : Array.isArray(ctx.worldEntries)
+      ? ctx.worldEntries
+      : Array.isArray(ctx.selectedWorldEntries)
+        ? ctx.selectedWorldEntries
+        : [];
+
+  const characterEntries = [];
+  const seenNames = new Set();
+
+  entries.forEach((entry, idx) => {
+    if (!looksLikeSingleCharacterEntry(entry)) return;
+    const rawComment = String(entry.comment ?? entry.name ?? '').trim();
+    const cleanedTitle = stripCardTitleDecorations(
+      rawComment.replace(/^(?:角色|人物|NPC|配角|可攻略(?:角色)?)[：:\s-]+/iu, '')
+    )
+      .split(/[（(｜|/／-]/)[0]
+      .trim();
+    const resolved = resolveCharacterRealName({
+      name: cleanedTitle,
+      description: entry.content,
+    });
+    const name = resolved.realName || cleanedTitle || (Array.isArray(entry.keys) ? String(entry.keys[0] || '').trim() : '') || `角色${idx + 1}`;
+    const roleTagFromTitle = rawComment.match(/[（(]([^）)]{2,24})[）)]/)?.[1]?.trim() || '';
+    const roleTag = roleTagFromTitle || extractRoleTagFromContent(entry.content);
+    const summaryLine = roleTag ? `${name}（${roleTag}）` : name;
+    const key = getWorldbookEntryIdentityKey(entry, idx);
+    const disabled = isWorldbookEntryDisabled(entry);
+
+    const dedupKey = `${key}::${name}`;
+    if (seenNames.has(dedupKey)) return;
+    seenNames.add(dedupKey);
+
+    characterEntries.push({
+      key,
+      name,
+      roleTag,
+      summaryLine,
+      disabled,
+    });
+  });
+
+  return {
+    isMultiChar: characterEntries.length >= 4,
+    characterEntries,
+  };
+}
+
+export function buildEnsembleRosterSummary(characterEntries = [], maxTokens = 450) {
+  const list = Array.isArray(characterEntries) ? characterEntries.filter((c) => c && !c.disabled) : [];
+  if (list.length === 0) return '';
+  const lines = [];
+  let usedTokens = 0;
+  for (const item of list) {
+    const line = `- ${item.summaryLine || item.name}`;
+    const t = estimateTokens(line);
+    if (lines.length > 0 && usedTokens + t > maxTokens) {
+      lines.push(`- 其余共 ${list.length - lines.length} 位登场人物从简略过`);
+      break;
+    }
+    lines.push(line);
+    usedTokens += t;
+  }
+  return lines.join('\n');
+}
+
+function formatCharContextBlock(charContext, options = {}) {
   if (!charContext || typeof charContext !== 'object') return '';
+  const opts = options && typeof options === 'object' ? options : {};
+  const effectiveDescription =
+    String(charContext.mergedDescription ?? '').trim() || String(charContext.description ?? '').trim();
+
+  const allEntries = Array.isArray(charContext.selectedWorldEntries)
+    ? charContext.selectedWorldEntries
+    : Array.isArray(charContext.worldEntries)
+      ? charContext.worldEntries
+      : null;
+
+  const multiInfo = allEntries ? detectMultiCharacterCard(charContext, allEntries) : { isMultiChar: false, characterEntries: [] };
+  const explicitSubKeys = Array.isArray(opts.selectedSubCharKeys)
+    ? opts.selectedSubCharKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
+    : [];
+
+  let entriesForContext = allEntries;
+  let rosterSummaryText = '';
+  let focusedCharacterNames = [];
+
+  if (multiInfo.isMultiChar && Array.isArray(allEntries)) {
+    const charKeySet = new Set(multiInfo.characterEntries.map((c) => c.key));
+    if (explicitSubKeys.length > 0) {
+      // Focused target mode (1–3 sub-characters selected explicitly)
+      const focusedSet = new Set(explicitSubKeys.slice(0, 3));
+      focusedCharacterNames = multiInfo.characterEntries
+        .filter((c) => focusedSet.has(c.key))
+        .map((c) => c.name);
+      entriesForContext = allEntries.filter((entry, idx) => {
+        const cls = classifyWorldbookEntry(entry);
+        if (cls === 'system_format' && entry.forceInclude !== true) return false;
+        const k = getWorldbookEntryIdentityKey(entry, idx);
+        if (charKeySet.has(k)) return focusedSet.has(k);
+        // Keep acting_rules & general non-character worldbuilding
+        return cls === 'acting_rules' || (!looksLikeSingleCharacterEntry(entry) && !isWorldbookEntryDisabled(entry));
+      });
+    } else if (Array.isArray(charContext.selectedWorldEntries)) {
+      // Inspect whether user manually checked 1–3 specific character entries inside selectedWorldEntries
+      const checkedCharEntries = multiInfo.characterEntries.filter((c) => !c.disabled);
+      if (checkedCharEntries.length >= 1 && checkedCharEntries.length <= 3 && multiInfo.characterEntries.length >= 4) {
+        focusedCharacterNames = checkedCharEntries.map((c) => c.name);
+      } else {
+        // Global ensemble mode: card overview + worldbuilding + acting_rules + compact 1-line roster summary
+        rosterSummaryText = buildEnsembleRosterSummary(multiInfo.characterEntries, 450);
+        entriesForContext = allEntries.filter((entry) => {
+          const cls = classifyWorldbookEntry(entry);
+          if (cls === 'system_format' && entry.forceInclude !== true) return false;
+          if (isWorldbookEntryDisabled(entry) && entry.forceInclude !== true) return false;
+          return !looksLikeSingleCharacterEntry(entry);
+        });
+      }
+    } else {
+      // Global ensemble mode when no specific sub-chars selected
+      rosterSummaryText = buildEnsembleRosterSummary(multiInfo.characterEntries, 450);
+      entriesForContext = allEntries.filter((entry) => {
+        const cls = classifyWorldbookEntry(entry);
+        if (cls === 'system_format' && entry.forceInclude !== true) return false;
+        if (isWorldbookEntryDisabled(entry) && entry.forceInclude !== true) return false;
+        return !looksLikeSingleCharacterEntry(entry);
+      });
+    }
+  }
+
+  const resolvedRealName =
+    focusedCharacterNames.length === 1
+      ? focusedCharacterNames[0]
+      : String(charContext.realName ?? '').trim() ||
+        resolveCharacterRealName({
+          name: charContext.name,
+          description: effectiveDescription,
+          firstMessage: charContext.firstMessage,
+          worldEntries: entriesForContext || allEntries,
+        }).realName;
+
   const fields = [
-    ['角色名称', charContext.name],
-    ['角色简介', charContext.description],
+    ['角色卡名称', charContext.name],
+    ['角色真名', resolvedRealName && resolvedRealName !== charContext.name ? resolvedRealName : ''],
+    ['聚焦目标角色', focusedCharacterNames.length > 0 ? focusedCharacterNames.join('、') : ''],
+    ['角色简介', effectiveDescription],
     ['性格设定', charContext.personality],
     ['当前场景', charContext.scenario],
     ['开场白参考', charContext.firstMessage],
@@ -1057,10 +1630,19 @@ function formatCharContextBlock(charContext) {
     }
   }
 
-  if (Array.isArray(charContext.selectedWorldEntries)) {
+  if (rosterSummaryText) {
+    lines.push(`卡内人物名册摘要（群像舞台参考，仅列名称与定位）：\n${rosterSummaryText}`);
+  }
+
+  if (Array.isArray(entriesForContext)) {
+    const hasExplicitSelection = Array.isArray(charContext.selectedWorldEntries);
     const entryLines = [];
-    for (const entry of charContext.selectedWorldEntries) {
+    for (const entry of entriesForContext) {
       if (!entry || typeof entry !== 'object') continue;
+      if (isNoiseWorldbookEntry(entry) && entry.forceInclude !== true) continue;
+      if (!hasExplicitSelection && isWorldbookEntryDisabled(entry) && entry.forceInclude !== true && explicitSubKeys.length === 0) {
+        continue;
+      }
       const body = String(entry.content ?? '').trim();
       if (!body) continue;
       const label = String(entry.comment ?? '').trim() || (Array.isArray(entry.keys) ? entry.keys[0] : '') || '设定';
@@ -1068,7 +1650,7 @@ function formatCharContextBlock(charContext) {
       entryLines.push(`- ${label}${keys}：${body}`);
     }
     if (entryLines.length > 0) {
-      lines.push(`世界观设定参考：\n${entryLines.join('\n')}`);
+      lines.push(`世界观与演绎守则参考：\n${entryLines.join('\n')}`);
     }
   } else {
     const summaryText = String(charContext.worldSummary ?? '').trim();
@@ -1080,7 +1662,7 @@ function formatCharContextBlock(charContext) {
   if (lines.length === 0) return '';
   return [
     '【当前角色卡公开背景参考】',
-    '（仅用于对齐时代背景、基调与开场关系；不得抄袭角色卡私有秘密，也不要写系统说教口号）',
+    '（仅用于对齐时代背景、基调、演绎边界与开场关系；不得抄袭角色卡私有秘密，也不要写系统说教口号）',
     lines.join('\n\n'),
   ].join('\n');
 }
@@ -1097,10 +1679,29 @@ function buildDualLayerDirective(scheme) {
   ].join('\n');
 }
 
+export function detectConcealmentSignals(text) {
+  const s = String(text ?? '');
+  if (!s.trim()) return false;
+  return /(?:隐瞒|瞒着|不让.{0,8}知道|暗自|暗中|私下打算|心里打算|表面不说|嘴上不说|想分手|提分手|暗恋|单恋|藏着|秘密|不敢说|假装|伪装|马甲|隐藏身份|潜伏|卧底|双面|债务|负债|病情|心事|苦衷|难言之隐|不为人知|未公开)/u.test(s);
+}
+
+export function detectJointUpbringingSignals(text) {
+  const s = String(text ?? '');
+  if (!s.trim()) return false;
+  return /(?:青梅竹马|从小一起|一起长大|自幼|养父|养母|养兄|养姐|养亲|师徒|师父|徒弟|养成|多年共生|相依为命|多年旧识|伴随成长|发小)/u.test(s);
+}
+
 function buildVisibilityTagsDirective() {
   return [
-    '【信息可见度标注（已按需开启）】',
-    `当前故事涉及阵营试探、悬疑或明显信息差，请按需使用 ${VISIBILITY_MARKERS.join(' / ')} 简要区分旁人一眼可见的特征、开场双方已知的共识与尚未公开的私密信息；普通日常细节仍保持自然行文，无需逐句机械打标。`,
+    '【信息可见度与认知边界（已按需开启）】',
+    `当前故事涉及情感暗流（如想分手、暗恋、隐瞒近况或未说出口的心事）、隐藏秘密或阵营信息差，请按需使用 ${VISIBILITY_MARKERS.join(' / ')} 清晰区分 {{char}} 表面可观察到的表现、开场已知共识与 {{user}} 未宣之于口的内心隐瞒，严防 {{char}} 读心直接看穿；普通日常细节仍保持自然行文，无需逐句机械打标。`,
+  ].join('\n');
+}
+
+function buildConcealmentBoundaryDirective() {
+  return [
+    '【隐瞒与认知边界（防读心）】',
+    '检测到本次设定包含内心隐瞒、暗自打算或未宣之于口的心事：请写明 {{user}} 日常待人如常的可观察外在表现，同时单独交代内心真实打算或隐情仅限于本人知晓；严防 {{char}} 在缺乏可见线索时凭空读心看穿。',
   ].join('\n');
 }
 
@@ -1111,7 +1712,7 @@ function buildBackstoryDirective(backstoryMode = 'light_vibe') {
   if (backstoryMode === 'rich_arc') {
     return '【经历尺度：补全成长经历】结合人物特质与世界观，自然补全合理的成长环境与习惯成因，让人物来处清晰有血肉。';
   }
-  return '【经历尺度：轻底色防套皮】已写明的经历完整保留；未提及过往处仅用宽泛生活氛围托底，不擅自编造具体父母亲属或童年创伤。';
+  return '【经历尺度：轻底色留余地】已写明的经历完整保留；未提及过往处仅用宽泛生活氛围托底，不擅自编造具体父母亲属或童年创伤。';
 }
 
 function buildSpotlightDirective(spotlightMode = 'balanced') {
@@ -1122,6 +1723,690 @@ function buildSpotlightDirective(spotlightMode = 'balanced') {
     return '【元素与伏笔戏份：轻盈纯日常】不额外铺设复杂沉重的身世暗线，职业与小习惯轻巧点缀，专注当下相处氛围。';
   }
   return '';
+}
+
+export function buildGenerationSectionDirective(sectionsConfig = {}, context = {}) {
+  const cfg = normalizeGenerationSectionsConfig(sectionsConfig);
+  const ctx = context && typeof context === 'object' ? context : {};
+  const backstoryMode = VALID_BACKSTORY_MODES.has(ctx.backstoryMode) ? ctx.backstoryMode : '';
+  const companions = Array.isArray(ctx.companions) ? ctx.companions.filter((c) => c && typeof c === 'object') : [];
+
+  const effectiveEnabledSet = new Set(cfg.enabledIds);
+  if (backstoryMode === 'blank_self') {
+    effectiveEnabledSet.delete('backstory_growth');
+  }
+
+  const lines = [];
+  if (cfg.layoutStyle === 'structured') {
+    lines.push(
+      '【输出版式：结构化清单版（浅层中文分栏 + 平实大白话）】',
+      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块输出二级小标题（## 板块名），其下直接写 1～2 层的浅层中文键值（字段名：内容）或简洁短句；只输出契合当前世界观且有实质内容的字段，不留空壳占位格（例如古风或校园题材不硬套现代商务装，未启用的过往经历不硬写童年阶段）。`,
+      '全程使用平实直白的大白话写具体事实、习惯、外显情绪表现与个人目标短板，禁堆砌华丽比喻句；各条目短句默认省略主语（严禁每行开头机械重复 {{user}} 浪费 Token），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧；严禁使用代码块或 XML 标签包裹。'
+    );
+  } else {
+    lines.push(
+      '【输出版式：自然分段版（平实分段叙述）】',
+      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语避免通篇重复刷 {{user}}（仅在双人关系消歧处点明），禁比喻堆砌、禁代码块与 XML 标签。`
+    );
+  }
+
+  const enabledGuideLines = [];
+  for (const group of GENERATION_SECTION_GROUPS) {
+    for (const item of group.items) {
+      if (effectiveEnabledSet.has(item.id)) {
+        enabledGuideLines.push(`- ${item.label}：${item.guidance}`);
+      }
+    }
+  }
+  for (const cs of cfg.customSections) {
+    enabledGuideLines.push(`- ${cs.name}：${cs.guidance || '按玩家指定要求平实写清该板块核心事实。'}`);
+  }
+  if (enabledGuideLines.length > 0) {
+    lines.push('【本次生成的板块与填写指引】\n' + enabledGuideLines.join('\n'));
+  }
+
+  const disabledLabels = [];
+  for (const group of GENERATION_SECTION_GROUPS) {
+    for (const item of group.items) {
+      if (!effectiveEnabledSet.has(item.id)) {
+        disabledLabels.push(item.label);
+      }
+    }
+  }
+
+  const anyIntimateEnabled = Array.from(INTIMATE_SECTION_IDS).some((id) => effectiveEnabledSet.has(id));
+  const forbidParts = [];
+  if (disabledLabels.length > 0) {
+    forbidParts.push(`以下未勾选板块本次严禁擅自生成（禁止生成未勾选内容）：${disabledLabels.join('、')}。`);
+  }
+  if (backstoryMode === 'blank_self') {
+    forbidParts.push('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历。');
+  }
+  if (!anyIntimateEnabled) {
+    forbidParts.push('亲密设定板块未开启：严禁生成任何成人向、情色或越界亲密描写内容。');
+  }
+  if (companions.length > 0) {
+    const compNames = companions
+      .map((c) => String(c.realName || c.name || '').trim())
+      .filter(Boolean)
+      .join('、');
+    forbidParts.push(
+      `已携带客串角色时${compNames ? `（携伴客串：${compNames}）` : ''}，亲友关系网应与客串名单及时间线协调衔接、避免冲突，不重复编写或冲突覆盖客串角色设定。`
+    );
+  }
+  if (forbidParts.length > 0) {
+    lines.push('【未勾选板块约束（严禁擅自生成）】\n' + forbidParts.join('\n'));
+  }
+
+  return lines.join('\n\n');
+}
+
+function stripOuterContainerShells(rawText) {
+  let out = String(rawText ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!out) return '';
+  out = out.replace(/^```[a-zA-Z0-9_-]*[ \t]*\n?/gm, '').replace(/\n?```[ \t]*$/gm, '');
+  out = out.replace(/<\/?\s*(?:info|character|character_information|profile|user_persona)\b[^>]*>/gi, '');
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripBodyConflicts(rawText, strippedSet) {
+  let out = stripOuterContainerShells(rawText);
+  if (!out) return '';
+
+  const xmlBlockRe = /<\s*(style|status(?:bar)?|format|system|ooc|instructions|thinking|cot|writingspec|initvar)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
+  if (xmlBlockRe.test(out)) {
+    strippedSet.add('statusBarDirective');
+    strippedSet.add('status_directive');
+    out = out.replace(xmlBlockRe, '');
+  }
+  const openTagRe = /<\/?\s*(style|status(?:bar)?|format|system|ooc|instructions|thinking|cot|writingspec|initvar)\b[^>]*>/gi;
+  if (openTagRe.test(out)) {
+    strippedSet.add('statusBarDirective');
+    strippedSet.add('status_directive');
+    out = out.replace(openTagRe, '');
+  }
+
+  const filteredLines = [];
+  for (const line of out.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      filteredLines.push('');
+      continue;
+    }
+    if (
+      /^(?:[-*•]\s*)?(?:【\s*(?:状态栏|输出格式|格式控制)\s*】|\[?(?:状态栏|Status\s*Bar|输出格式(?:要求|控制)?|格式要求|格式控制|排版要求|字数要求|系统指令|System\s*Prompt)\]?|每次回复(?:末尾|结尾)?(?:必须|请)?(?:输出|附带|控制在)|回复末尾(?:必须|请)?附上|(?:输出)?字数控制在\s*\d+|并更新状态栏)/iu.test(
+        trimmed
+      )
+    ) {
+      strippedSet.add('statusBarDirective');
+      strippedSet.add('status_directive');
+      continue;
+    }
+    if (
+      /(?:开场(?:时|处境|阶段|剧情)|初遇时|当前剧情开端|本局开局)[^\n]*?(?:\{\{user\}\}|<user>|玩家)/iu.test(trimmed) ||
+      /^(?:[-*•]\s*)?(?:与\s*(?:\{\{user\}\}|<user>)\s*的?(?:旧关系|初始关系|原关系)|\{\{user\}\}\s*(?:初始身份|开场身份|原身份))[:：]/iu.test(
+        trimmed
+      ) ||
+      /(?:我是|身为|作为)\s*(?:\{\{user\}\}|<user>)\s*的\s*(?:未婚[夫妻]|男朋?友|女朋?友|丈夫|妻子|前任|前夫|前妻|老公|老婆|伴侣|恋人)/iu.test(
+        trimmed
+      ) ||
+      /\byou\s+are\s+(?:\{\{user\}\}|<user>)'?s\s+(?:ex-)?(?:husband|wife|boyfriend|girlfriend|fianc[eé]+|partner|lover)\b/iu.test(
+        trimmed
+      )
+    ) {
+      strippedSet.add('oldUserRelation');
+      strippedSet.add('user_relation');
+      continue;
+    }
+    filteredLines.push(line);
+  }
+
+  return filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function stripCompanionConflicts(cardContext = {}) {
+  const ctx = cardContext && typeof cardContext === 'object' ? cardContext : {};
+  const strippedSet = new Set();
+
+  const rawFirstMes = String(ctx.firstMessage ?? ctx.first_mes ?? '').trim();
+  if (rawFirstMes) {
+    strippedSet.add('firstMessage');
+    strippedSet.add('first_mes');
+  }
+
+  const rawScenario = String(ctx.scenario ?? '').trim();
+  if (rawScenario) strippedSet.add('scenario');
+
+  const rawDesc = String(ctx.mergedDescription ?? ctx.description ?? '');
+  const name = String(ctx.name ?? '').trim();
+  const description = stripBodyConflicts(rawDesc, strippedSet);
+  const personality = stripBodyConflicts(ctx.personality, strippedSet);
+  const mesExamples = stripBodyConflicts(ctx.mesExamples ?? ctx.mes_example ?? '', strippedSet);
+
+  const worldCleanItems = [];
+  if (Array.isArray(ctx.selectedWorldEntries)) {
+    for (const entry of ctx.selectedWorldEntries) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (isNoiseWorldbookEntry(entry) && entry.forceInclude !== true) continue;
+      const cleanedEntry = stripBodyConflicts(entry.content, strippedSet);
+      if (cleanedEntry) {
+        worldCleanItems.push({
+          key: String(entry.comment || 'worldEntry'),
+          content: cleanedEntry,
+        });
+      }
+    }
+  }
+
+  const cleanSections = [];
+  if (description) cleanSections.push({ key: 'description', content: description });
+  if (personality) cleanSections.push({ key: 'personality', content: personality });
+  if (mesExamples) cleanSections.push({ key: 'mesExamples', content: mesExamples });
+  for (const w of worldCleanItems) cleanSections.push(w);
+
+  Object.defineProperties(cleanSections, {
+    name: { value: name, enumerable: false, configurable: true },
+    description: { value: description, enumerable: false, configurable: true },
+    personality: { value: personality, enumerable: false, configurable: true },
+    mesExamples: { value: mesExamples, enumerable: false, configurable: true },
+  });
+
+  return {
+    cleanSections,
+    strippedTypes: Array.from(strippedSet),
+  };
+}
+
+function truncateVerbatimAtBoundary(text, tokenBudget) {
+  const clean = String(text ?? '').trim();
+  if (!clean || tokenBudget <= 0) return { text: '', truncated: Boolean(clean) };
+  if (estimateTokens(clean) <= tokenBudget) return { text: clean, truncated: false };
+
+  const targetRatio = Math.max(0.05, Math.min(0.98, tokenBudget / Math.max(1, estimateTokens(clean))));
+  let approxChars = Math.max(16, Math.floor(clean.length * targetRatio));
+
+  const trySlice = (endIdx) => {
+    const candidate = clean.slice(0, endIdx).trim();
+    return candidate && estimateTokens(candidate) <= tokenBudget ? candidate : '';
+  };
+
+  while (approxChars >= 16) {
+    const windowSlice = clean.slice(0, approxChars);
+    const paraBreak = windowSlice.lastIndexOf('\n\n');
+    if (paraBreak >= 24) {
+      const res = trySlice(paraBreak);
+      if (res) return { text: res, truncated: true };
+    }
+    const lineBreak = windowSlice.lastIndexOf('\n');
+    if (lineBreak >= 20) {
+      const res = trySlice(lineBreak);
+      if (res) return { text: res, truncated: true };
+    }
+    const sentMatch = [...windowSlice.matchAll(/[。！？!?]/g)].pop();
+    if (sentMatch && sentMatch.index >= 16) {
+      const res = trySlice(sentMatch.index + 1);
+      if (res) return { text: res, truncated: true };
+    }
+    const clauseMatch = [...windowSlice.matchAll(/[，；,;]/g)].pop();
+    if (clauseMatch && clauseMatch.index >= 12) {
+      const res = trySlice(clauseMatch.index);
+      if (res) return { text: res, truncated: true };
+    }
+    const hardRes = trySlice(approxChars);
+    if (hardRes) return { text: hardRes, truncated: true };
+    approxChars = Math.floor(approxChars * 0.78);
+  }
+
+  return { text: '', truncated: true };
+}
+
+export function extractVerbatimCompanionSlices(cardContext = {}, selectedWorldEntries = [], tokenBudget = 1200) {
+  const budget = Math.max(0, Math.round(Number.isFinite(Number(tokenBudget)) ? Number(tokenBudget) : 1200));
+  const { cleanSections } = stripCompanionConflicts(cardContext);
+  const candidates = [];
+
+  if (cleanSections.description) {
+    candidates.push({ source: 'description', label: '原卡外貌与简介', text: cleanSections.description });
+  }
+  if (cleanSections.personality) {
+    candidates.push({ source: 'personality', label: '原卡性格设定', text: cleanSections.personality });
+  }
+  if (cleanSections.mesExamples) {
+    candidates.push({ source: 'mesExamples', label: '原卡代表台词', text: cleanSections.mesExamples });
+  }
+
+  if (Array.isArray(selectedWorldEntries)) {
+    const dummySet = new Set();
+    for (const entry of selectedWorldEntries) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (isNoiseWorldbookEntry(entry) && entry.forceInclude !== true) continue;
+      const cleaned = stripBodyConflicts(entry.content, dummySet);
+      if (!cleaned) continue;
+      const label =
+        String(entry.comment ?? '').trim() ||
+        (Array.isArray(entry.keys) && entry.keys[0] ? String(entry.keys[0]).trim() : '') ||
+        '原卡关联设定';
+      candidates.push({ source: 'worldbook', label, text: cleaned });
+    }
+  }
+
+  const slices = [];
+  let remaining = budget;
+  let truncated = false;
+
+  for (const item of candidates) {
+    if (remaining < 24) {
+      truncated = true;
+      break;
+    }
+    const itemTokens = estimateTokens(item.text);
+    if (itemTokens <= remaining) {
+      slices.push({
+        source: item.source,
+        label: item.label,
+        text: item.text,
+        tokens: itemTokens,
+      });
+      remaining -= itemTokens;
+    } else {
+      const partial = truncateVerbatimAtBoundary(item.text, remaining);
+      if (partial.text) {
+        const partTokens = estimateTokens(partial.text);
+        slices.push({
+          source: item.source,
+          label: item.label,
+          text: partial.text,
+          tokens: partTokens,
+        });
+        remaining -= partTokens;
+      }
+      truncated = true;
+      break;
+    }
+  }
+
+  const text = slices.map((s) => `[${s.label}]\n${s.text}`).join('\n\n');
+  return {
+    slices,
+    text,
+    usedTokens: estimateTokens(text),
+    truncated,
+  };
+}
+
+export function computeCompanionTokenPlan({
+  personaText = '',
+  mainCharContext = null,
+  mainSelectedWorldEntries = [],
+  companions = [],
+  maxContextTokens = 16000,
+} = {}) {
+  const totalBudget = clampInt(maxContextTokens, 256, 128000, 16000);
+  const personaTokens = estimateTokens(personaText);
+
+  let mainCharTokens = 0;
+  if (mainCharContext && typeof mainCharContext === 'object') {
+    mainCharTokens += estimateTokens(mainCharContext.mergedDescription || mainCharContext.description);
+    mainCharTokens += estimateTokens(mainCharContext.personality);
+    mainCharTokens += estimateTokens(mainCharContext.scenario);
+    mainCharTokens += estimateTokens(mainCharContext.firstMessage);
+    const entriesSource = Array.isArray(mainSelectedWorldEntries)
+      ? mainSelectedWorldEntries
+      : Array.isArray(mainCharContext.selectedWorldEntries)
+        ? mainCharContext.selectedWorldEntries
+        : null;
+    if (entriesSource) {
+      for (const e of entriesSource) {
+        if (e && typeof e === 'object' && (!isNoiseWorldbookEntry(e) || e.forceInclude === true)) {
+          mainCharTokens += estimateTokens(e.content);
+        }
+      }
+    } else if (mainCharContext.worldSummary) {
+      mainCharTokens += estimateTokens(mainCharContext.worldSummary);
+    }
+  } else if (Array.isArray(mainSelectedWorldEntries)) {
+    for (const e of mainSelectedWorldEntries) {
+      if (e && typeof e === 'object' && (!isNoiseWorldbookEntry(e) || e.forceInclude === true)) {
+        mainCharTokens += estimateTokens(e.content);
+      }
+    }
+  }
+
+  const baseUsedTokens = personaTokens + mainCharTokens;
+  const rawRemaining = totalBudget - baseUsedTokens;
+  const remainingTokens = Math.max(0, rawRemaining);
+  const promptReserve =
+    rawRemaining > 0
+      ? Math.min(1200, Math.round(totalBudget * 0.1), Math.floor(rawRemaining * 0.35))
+      : 0;
+  const allocatable = Math.max(0, rawRemaining - promptReserve);
+
+  const activeCompanions = (Array.isArray(companions) ? companions : [])
+    .filter((c) => c && typeof c === 'object')
+    .slice(0, 3);
+
+  const resolveCompTier = (c) => {
+    const raw = c?.frequencyTier ?? c?.frequency;
+    return VALID_COMPANION_TIER_IDS.has(raw) ? raw : 'occasional';
+  };
+
+  const totalWeight =
+    activeCompanions.reduce((sum, c) => {
+      const tier = resolveCompTier(c);
+      return sum + (COMPANION_TIER_WEIGHTS[tier] || 1.0);
+    }, 0) || 1;
+
+  const perCompanionBudgets = activeCompanions.map((c, idx) => {
+    const tierId = resolveCompTier(c);
+    const carryMode = VALID_COMPANION_CARRY_MODES.has(c.carryMode) ? c.carryMode : 'inline';
+    const weight = COMPANION_TIER_WEIGHTS[tierId] || 1.0;
+    const cardCtx = c.cardContext && typeof c.cardContext === 'object' ? c.cardContext : c;
+    const selectedEntries = Array.isArray(c.selectedWorldEntries) ? c.selectedWorldEntries : [];
+    const { cleanSections } = stripCompanionConflicts(cardCtx);
+    let estimatedSourceTokens =
+      estimateTokens(cleanSections.description) +
+      estimateTokens(cleanSections.personality) +
+      estimateTokens(cleanSections.mesExamples);
+    const dummySet = new Set();
+    for (const e of selectedEntries) {
+      if (e && typeof e === 'object' && (!isNoiseWorldbookEntry(e) || e.forceInclude === true)) {
+        estimatedSourceTokens += estimateTokens(stripBodyConflicts(e.content, dummySet));
+      }
+    }
+
+    const weightedShare = allocatable > 0 ? Math.floor((allocatable * weight) / totalWeight) : 0;
+    const tierCap = Math.round(2800 * weight);
+    const allocatedTokens = Math.min(tierCap, weightedShare);
+
+    return {
+      id: String(c.id || c.avatar || c.name || `comp_${idx}`),
+      name: String(c.name || cleanSections.name || `客串角色${idx + 1}`).trim(),
+      frequencyTier: tierId,
+      carryMode,
+      weight,
+      allocatedTokens,
+      estimatedSourceTokens,
+    };
+  });
+
+  let headroomStatus = 'ok';
+  let warningMessage = '';
+  if (rawRemaining <= 0 || (activeCompanions.length > 0 && allocatable < activeCompanions.length * 40)) {
+    headroomStatus = 'over';
+    warningMessage =
+      '当前用户设定与主角色上下文已接近或超出预算上限，建议精简主世界书勾选条目，或改用世界书承载客串设定。';
+  } else if (
+    rawRemaining < totalBudget * 0.25 ||
+    perCompanionBudgets.some((b) => b.estimatedSourceTokens > b.allocatedTokens)
+  ) {
+    headroomStatus = 'tight';
+    warningMessage =
+      '可用上下文余量偏紧，已按出场频率自动分配各客串角色的原文切片配额，优先保留外貌、性格与代表台词。';
+  }
+
+  return {
+    totalBudget,
+    baseUsedTokens,
+    personaTokens,
+    mainCharTokens,
+    remainingTokens,
+    headroomStatus,
+    perCompanionBudgets,
+    warningMessage,
+  };
+}
+
+function resolveCompanionSliceSource(c, cardCtx) {
+  const rawEntries = Array.isArray(c.selectedWorldEntries) ? c.selectedWorldEntries : [];
+  const subKey = String(c.subCharKey ?? '').trim();
+  const hasExplicitSub = Boolean(subKey) || c.isolateSubChar === true;
+
+  if (!hasExplicitSub) {
+    return { effectiveCardCtx: cardCtx, effectiveEntries: rawEntries, subCharName: '' };
+  }
+
+  const pool = rawEntries.length > 0
+    ? rawEntries
+    : Array.isArray(cardCtx.worldEntries)
+      ? cardCtx.worldEntries
+      : [];
+  const multiAll = detectMultiCharacterCard(
+    cardCtx,
+    Array.isArray(cardCtx.worldEntries) && cardCtx.worldEntries.length > 0 ? cardCtx.worldEntries : pool
+  );
+  const multi = multiAll.characterEntries.length > 0 ? multiAll : detectMultiCharacterCard(cardCtx, pool);
+  const matchedSub = subKey
+    ? multi.characterEntries.find((ce) => ce.key === subKey || ce.name === subKey)
+    : multi.characterEntries.length === 1
+      ? multi.characterEntries[0]
+      : null;
+
+  const filteredEntries = pool.filter((entry, idx) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const cls = classifyWorldbookEntry(entry);
+    if (cls === 'system_format' && entry.forceInclude !== true) return false;
+    if (cls === 'acting_rules') return !isWorldbookEntryDisabled(entry) || entry.forceInclude === true;
+    const k = getWorldbookEntryIdentityKey(entry, idx);
+    if (subKey) return k === subKey || String(entry.comment ?? '').trim() === subKey;
+    return matchedSub ? k === matchedSub.key : true;
+  });
+
+  const subCharName = matchedSub?.name || '';
+  const effectiveCardCtx = {
+    name: subCharName || cardCtx.name,
+    description: '',
+    personality: '',
+    mesExamples: '',
+  };
+  return { effectiveCardCtx, effectiveEntries: filteredEntries, subCharName };
+}
+
+export function buildCompanionWorldbookEntries({
+  companions = [],
+  companionPlans = null,
+  targetPersonaName = '',
+} = {}) {
+  const activeCompanions = (Array.isArray(companions) ? companions : [])
+    .filter((c) => c && typeof c === 'object')
+    .slice(0, 3);
+  if (activeCompanions.length === 0) return [];
+
+  const personaLabel = String(targetPersonaName ?? '').trim() || '{{user}}';
+  const planList = Array.isArray(companionPlans)
+    ? companionPlans
+    : Array.isArray(companionPlans?.perCompanionBudgets)
+      ? companionPlans.perCompanionBudgets
+      : [];
+  const usedSlotKeys = new Set();
+
+  return activeCompanions.map((c, idx) => {
+    const cardCtx = c.cardContext && typeof c.cardContext === 'object' ? c.cardContext : c;
+    const { effectiveCardCtx, effectiveEntries, subCharName } = resolveCompanionSliceSource(c, cardCtx);
+    const rawCardName = String(c.cardName || cardCtx.name || c.name || '').trim();
+    const resolvedNameInfo = resolveCharacterRealName({
+      name: subCharName || rawCardName,
+      description: effectiveCardCtx.mergedDescription || effectiveCardCtx.description,
+      firstMessage: effectiveCardCtx.firstMessage || effectiveCardCtx.first_mes,
+      worldEntries: effectiveEntries.length > 0 ? effectiveEntries : cardCtx.worldEntries,
+    });
+    const compName =
+      String(c.realName ?? '').trim() ||
+      subCharName ||
+      (c.name && !isTitleLikeCardName(c.name) ? String(c.name).trim() : '') ||
+      resolvedNameInfo.realName ||
+      rawCardName ||
+      `客串角色${idx + 1}`;
+    const rawId = String(c.id || c.avatar || compName || `comp_${idx}`).trim();
+    const baseSafeId = rawId.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || `comp_${idx}`;
+    let safeId = baseSafeId;
+    let suffix = 2;
+    while (usedSlotKeys.has(`ups:companion:${safeId}`)) {
+      safeId = `${baseSafeId}_${suffix}`;
+      suffix += 1;
+    }
+    const slotKey = `ups:companion:${safeId}`;
+    usedSlotKeys.add(slotKey);
+
+    const rawTier = c.frequencyTier ?? c.frequency;
+    const tierId = VALID_COMPANION_TIER_IDS.has(rawTier) ? rawTier : 'occasional';
+    const tier = COMPANION_TIER_BY_ID.get(tierId) || COMPANION_FREQUENCY_TIERS[1];
+
+    const matchedPlan =
+      planList.find((p) => p && (p.id === rawId || p.name === compName || p.name === rawCardName)) ||
+      planList[idx] ||
+      null;
+    const budget =
+      matchedPlan && Number.isFinite(matchedPlan.allocatedTokens) && matchedPlan.allocatedTokens > 0
+        ? matchedPlan.allocatedTokens
+        : 1200;
+
+    const explicitVerbatim =
+      matchedPlan && typeof matchedPlan.verbatimText === 'string' && matchedPlan.verbatimText.trim()
+        ? matchedPlan.verbatimText.trim()
+        : '';
+    const verbatimText = explicitVerbatim || extractVerbatimCompanionSlices(effectiveCardCtx, effectiveEntries, budget).text;
+
+    const relationToUser = String(c.relationToUser ?? '').trim() || '亲友';
+    const knowsMainChar = Boolean(c.knowsMainChar);
+    const relationToMainChar = String(c.relationToMainChar ?? '').trim();
+    const mainRelText = knowsMainChar
+      ? relationToMainChar || '彼此相识'
+      : '互不相识（暂不认识，互无直接交集）';
+
+    const keys = [];
+    const pushKey = (k) => {
+      const clean = String(k ?? '').trim();
+      if (clean && !keys.includes(clean)) keys.push(clean);
+    };
+    pushKey(compName);
+    if (/^[\u4e00-\u9fff]{3}$/.test(compName)) {
+      pushKey(compName.slice(1));
+    }
+    if (Array.isArray(c.triggerKeys)) {
+      for (const k of c.triggerKeys) pushKey(k);
+    }
+    if (relationToUser && relationToUser !== '亲友') {
+      pushKey(relationToUser);
+    }
+    if (rawCardName && rawCardName !== compName && !isTitleLikeCardName(rawCardName)) {
+      pushKey(rawCardName);
+    }
+
+    const contentParts = [
+      `【客串角色：${compName}】`,
+      `与 ${personaLabel} 的关系：${relationToUser}`,
+      `与当前主角色的关系：${mainRelText}`,
+      `出场频率（${tier.label}）：${tier.promptRule}`,
+    ];
+    if (verbatimText) {
+      contentParts.push(`【原卡原文设定（严格保真，禁止擅自改写或编造）】\n${verbatimText}`);
+    }
+
+    return {
+      key: keys,
+      comment: `客串角色：${compName}`,
+      content: contentParts.join('\n'),
+      constant: false,
+      selective: true,
+      disable: false,
+      addMemo: true,
+      position: 0,
+      order: tier.worldbookOrder,
+      extensions: {
+        [UPS_EXT_KEY]: {
+          managed: true,
+          slotKey,
+          companionId: rawId,
+          frequencyTier: tier.id,
+        },
+      },
+    };
+  });
+}
+
+function formatCompanionPromptBlock(companions = [], companionPlans = null) {
+  const activeCompanions = (Array.isArray(companions) ? companions : [])
+    .filter((c) => c && typeof c === 'object')
+    .slice(0, 3);
+  if (activeCompanions.length === 0) return '';
+
+  const planList = Array.isArray(companionPlans)
+    ? companionPlans
+    : Array.isArray(companionPlans?.perCompanionBudgets)
+      ? companionPlans.perCompanionBudgets
+      : [];
+
+  const blocks = [
+    '【携伴客串与人物关系网（1～3 位低干扰客串）】',
+    '核心要求：客串角色的外貌、性格、习惯与台词风格必须严格忠于原卡原文切片（原样保留原文，不得改写洗稿或编造原卡没有的设定）；已自动剥离冲突的旧开场与格式指令，始终保持当前主角色 {{char}} 为剧情核心主角，绝不喧宾夺主抢戏，按各自出场频率自然呼应。',
+  ];
+
+  activeCompanions.forEach((c, idx) => {
+    const cardCtx = c.cardContext && typeof c.cardContext === 'object' ? c.cardContext : c;
+    const { effectiveCardCtx, effectiveEntries, subCharName } = resolveCompanionSliceSource(c, cardCtx);
+    const rawCardName = String(c.cardName || cardCtx.name || c.name || '').trim();
+    const resolvedNameInfo = resolveCharacterRealName({
+      name: subCharName || rawCardName,
+      description: effectiveCardCtx.mergedDescription || effectiveCardCtx.description,
+      firstMessage: effectiveCardCtx.firstMessage || effectiveCardCtx.first_mes,
+      worldEntries: effectiveEntries.length > 0 ? effectiveEntries : cardCtx.worldEntries,
+    });
+    const compName =
+      String(c.realName ?? '').trim() ||
+      subCharName ||
+      (c.name && !isTitleLikeCardName(c.name) ? String(c.name).trim() : '') ||
+      resolvedNameInfo.realName ||
+      rawCardName ||
+      `客串角色${idx + 1}`;
+    const rawTier = c.frequencyTier ?? c.frequency;
+    const tierId = VALID_COMPANION_TIER_IDS.has(rawTier) ? rawTier : 'occasional';
+    const tier = COMPANION_TIER_BY_ID.get(tierId) || COMPANION_FREQUENCY_TIERS[1];
+    const carryMode = VALID_COMPANION_CARRY_MODES.has(c.carryMode) ? c.carryMode : 'inline';
+    const relationToUser = String(c.relationToUser ?? '').trim() || '亲友';
+    const knowsMainChar = Boolean(c.knowsMainChar);
+    const relationToMainChar = String(c.relationToMainChar ?? '').trim();
+    const mainRelText = knowsMainChar ? relationToMainChar || '彼此认识' : '互不相识（暂不认识，互无交集）';
+
+    const matchedPlan =
+      planList.find((p) => p && (p.id === String(c.id || '') || p.name === compName || p.name === rawCardName)) ||
+      planList[idx] ||
+      null;
+    const budget =
+      matchedPlan && Number.isFinite(matchedPlan.allocatedTokens) && matchedPlan.allocatedTokens > 0
+        ? matchedPlan.allocatedTokens
+        : 1200;
+
+    const lines = [
+      `▸ 客串 ${idx + 1}：${compName}`,
+      `- 与 {{user}} 关系：${relationToUser}`,
+      `- 与主角色关系：${mainRelText}`,
+      `- 出场频率（${tier.label}）：${tier.promptRule}`,
+    ];
+
+    if (carryMode === 'inline') {
+      const explicitVerbatim =
+        matchedPlan && typeof matchedPlan.verbatimText === 'string' && matchedPlan.verbatimText.trim()
+          ? matchedPlan.verbatimText.trim()
+          : '';
+      const slicedText = explicitVerbatim || extractVerbatimCompanionSlices(effectiveCardCtx, effectiveEntries, budget).text;
+      if (slicedText) {
+        lines.push(
+          '- 承载方式：随本次人设正文精简锚定（下方为原卡原文切片，必须原样参考、不得改写措辞或添油加醋）：\n' +
+            slicedText
+        );
+      } else {
+        lines.push('- 承载方式：随本次人设正文精简写入关系锚点。');
+      }
+    } else {
+      lines.push(
+        `- 承载方式：${carryMode === 'persona_book' ? '绑定人设专属世界书' : '写入指定已有世界书'}（详细人物档案将写入世界书，本正文只需在关系板块简明交代其与 {{user}} / {{char}} 的关系与出场节奏，不堆砌重复长设定）。`
+      );
+    }
+
+    blocks.push(lines.join('\n'));
+  });
+
+  return blocks.join('\n\n');
 }
 
 export function inferOptimalTailMode(modelHint = {}) {
@@ -1178,8 +2463,19 @@ export function buildGenerationMessages(options = {}) {
   const targetSection = String(opts.targetSection ?? '').trim();
   const useVisibilityTags = opts.visibilityTags === true;
   const useDraftAudit = opts.draftAudit === true && !targetSection;
-  const charBlock = formatCharContextBlock(opts.charContext);
+  const resolvedSubCharKeys = Array.isArray(opts.selectedSubCharKeys)
+    ? opts.selectedSubCharKeys
+    : Array.isArray(opts.selectedSubCharacterKeys)
+      ? opts.selectedSubCharacterKeys
+      : undefined;
+  const charBlock = formatCharContextBlock(opts.charContext, {
+    selectedSubCharKeys: resolvedSubCharKeys,
+  });
   const budget = computeLengthBudget(scheme.targetChars);
+  const ratios = normalizeModuleRatios(opts.moduleRatios);
+  const companions = (Array.isArray(opts.companions) ? opts.companions : [])
+    .filter((c) => c && typeof c === 'object')
+    .slice(0, 3);
 
   if (mode === 'create') {
     taskParts.push(`【任务模式：新建 {{user}} 人设（目标约 ${budget.chars} 字）】`);
@@ -1237,6 +2533,39 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
+  if (opts.charContext && typeof opts.charContext === 'object') {
+    const cardName = String(opts.charContext.name ?? '').trim();
+    const explicitSubKeys = Array.isArray(resolvedSubCharKeys)
+      ? resolvedSubCharKeys.map((k) => String(k ?? '').trim()).filter(Boolean)
+      : [];
+    const poolEntries = opts.charContext.selectedWorldEntries || opts.charContext.worldEntries || [];
+    const multiInfo = Array.isArray(poolEntries) && poolEntries.length > 0
+      ? detectMultiCharacterCard(opts.charContext, poolEntries)
+      : { isMultiChar: false, characterEntries: [] };
+    let focusedSubRealName = '';
+    if (multiInfo.isMultiChar && explicitSubKeys.length > 0) {
+      const focusedSet = new Set(explicitSubKeys.slice(0, 3));
+      const matched = multiInfo.characterEntries.filter((c) => focusedSet.has(c.key));
+      if (matched.length === 1) {
+        focusedSubRealName = matched[0].name;
+      }
+    }
+    const resolvedMainRealName =
+      focusedSubRealName ||
+      String(opts.charContext.realName ?? '').trim() ||
+      resolveCharacterRealName({
+        name: cardName,
+        description: opts.charContext.mergedDescription || opts.charContext.description,
+        firstMessage: opts.charContext.firstMessage,
+        worldEntries: opts.charContext.selectedWorldEntries || opts.charContext.worldEntries,
+      }).realName;
+    if (resolvedMainRealName && cardName && resolvedMainRealName !== cardName) {
+      taskParts.push(
+        `【角色真名指代规范】\n当前角色卡卡名为「${cardName}」，角色真实姓名为「${resolvedMainRealName}」。生成正文中凡涉及该角色时，必须直接称呼「${resolvedMainRealName}」，严禁机械输出 {{char}} 或将作品卡名当作人名！`
+      );
+    }
+  }
+
   const backstoryMode = VALID_BACKSTORY_MODES.has(opts.backstoryMode) ? opts.backstoryMode : '';
   const spotlightMode = VALID_SPOTLIGHT_MODES.has(opts.spotlightMode) ? opts.spotlightMode : '';
 
@@ -1249,6 +2578,56 @@ export function buildGenerationMessages(options = {}) {
     if (spText) taskParts.push(spText);
   }
 
+  if (!targetSection && (opts.generationSections || subMode !== 'cross_card_adapt')) {
+    taskParts.push(
+      buildGenerationSectionDirective(opts.generationSections, {
+        backstoryMode: backstoryMode || 'light_vibe',
+        companions,
+      })
+    );
+  }
+
+  if (!targetSection && (ratios.mode === 'custom' || ratios.private > 0)) {
+    const ratioParts = [
+      `外貌气质约 ${ratios.appearance}%`,
+      `性格习惯约 ${ratios.personality}%`,
+      `过往经历约 ${ratios.backstory}%`,
+      `当前背景与关系约 ${ratios.relationship}%`,
+    ];
+    if (ratios.private > 0) {
+      ratioParts.push(`私密心事或暗线约 ${ratios.private}%`);
+    }
+    taskParts.push(
+      `【人设构成占比指导】\n请按以下篇幅比重分配各维度细节（优先满足玩家明确指定的要求）：${ratioParts.join('，')}。${
+        ratios.private === 0 ? '未额外分配私密暗线比重，日常设定保持坦荡自然即可。' : ''
+      }`
+    );
+  }
+
+  const combinedText = [
+    inspiration,
+    userMustHaves,
+    existingDraft,
+    lockedCore,
+    opts.charContext?.description,
+    opts.charContext?.scenario,
+    ...companions.map((c) => `${c.relationToUser || ''} ${c.relationToMainChar || ''}`),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  if (!targetSection) {
+    if (opts.pureCrossCardReuse === true) {
+      taskParts.push(
+        `【纯通用跨卡复用】\n本次需要跨卡通用复用：请保持${CORE_SECTION_HEADER}独立通用，剥离特定角色或旧卡专属绑定，仅在${SHELL_SECTION_HEADER}衔接当前角色卡。`
+      );
+    } else if (opts.sharedUpbringing === true || detectJointUpbringingSignals(combinedText)) {
+      taskParts.push(
+        `【基础人设与共同成长融合】\n检测到与 {{char}} 或客串亲友存在青梅竹马、家人养亲、师徒养成或多年共生关系：请将塑造 {{user}} 性格底色、生活习惯与安全感边界的共同成长印记自然融入${CORE_SECTION_HEADER}，不要机械割裂；同时将当下所处时间点、现居状态与开场矛盾写入${SHELL_SECTION_HEADER}，保持年龄与时间线前后一致。`
+      );
+    }
+  }
+
   const combinedInputForExamples = `${inspiration}\n${userMustHaves}\n${existingDraft}\n${lockedCore}`;
   if (opts.antiParrot !== false && !targetSection && hasReplayRiskExamples(combinedInputForExamples)) {
     taskParts.push(
@@ -1258,6 +2637,24 @@ export function buildGenerationMessages(options = {}) {
 
   if (useVisibilityTags) {
     taskParts.push(buildVisibilityTagsDirective());
+  } else if (!targetSection && (detectConcealmentSignals(combinedInputForExamples) || ratios.private > 0)) {
+    taskParts.push(buildConcealmentBoundaryDirective());
+  }
+
+  if (companions.length > 0 && !targetSection) {
+    const companionPlans =
+      opts.companionPlans ||
+      computeCompanionTokenPlan({
+        personaText: existingDraft || lockedCore || inspiration,
+        mainCharContext: opts.charContext,
+        mainSelectedWorldEntries: opts.charContext?.selectedWorldEntries,
+        companions,
+        maxContextTokens: opts.maxContextTokens,
+      });
+    const compBlock = formatCompanionPromptBlock(companions, companionPlans);
+    if (compBlock) {
+      taskParts.push(compBlock);
+    }
   }
 
   if (opts.dualLayer && !targetSection) {
@@ -1546,7 +2943,7 @@ export function exportSillyTavernPreset(options = {}) {
     prompts.push(
       makeCustomPromptEntry({
         identifier: auditId,
-        name: '【草稿自检净化】先扫除套话禁词再输出成稿',
+        name: '【草稿自检】先自检规范再输出成稿',
         role: 'system',
         content: buildDraftAuditInstruction(scheme),
       })
@@ -1964,7 +3361,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
         index: m.index ?? 0,
         line: findLineNumber(m.index ?? 0),
         message: `包含面向模型或叙事规则的系统说教「${m[0]}」`,
-        suggestion: '请删去系统说教口号；若有未公开的私事直接用平实中文说明（如“此事平时未向外人提起”），悬疑阵营题材可按需开启可见度标注。',
+        suggestion: '请删去系统说教口号；若有未公开的心事或秘密直接用平实中文说明（如“此事平时未向外人提起”），涉及情感暗流、秘密隐瞒或阵营信息差时可按需开启可见度标注。',
       });
     }
   }
@@ -2052,7 +3449,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
       match: '',
       line: 0,
       message: '已开启信息可见度标注，但正文中尚未检测到标记（如 [外表可见]、[私密未公开]）',
-      suggestion: '涉及悬疑或阵营信息差时，可按需补充标记区分公开特征与私密心事。',
+      suggestion: '涉及情感暗流、隐瞒秘密或阵营信息差时，可按需补充标记区分公开表象与私密内心，避免被轻易读心看穿。',
     });
   }
 
@@ -2147,19 +3544,19 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
 
   // 3. Strong explicit section-level classification (prevents prose words inside a named section from drifting)
   if (
-    /(?:当前身份|当前背景|当前处境|目前处境|当前状态|剧场壳|开场|与.*关系|居住地|当前住址|住址|职业或身份|当前职业)/i.test(
+    /(?:当前身份|当前背景|当前处境|目前处境|当前状态|剧场壳|开场|与.*关系|居住地|当前住址|住址|职业或身份|当前职业|职业与经济|关系网|亲友|父母|兄弟姐妹|朋友|前任|重要伙伴)/i.test(
       sec
     )
   ) {
     return { category: '当前身份与关系', keepByDefault: false };
   }
-  if (/(?:外貌|体貌|面容|穿搭|衣着|外表|appearance)/i.test(sec)) {
+  if (/(?:外貌|体貌|面容|穿搭|衣着|外表|身体特征|身高体型|声音\/气味|appearance)/i.test(sec)) {
     return { category: '外貌与印象', keepByDefault: true };
   }
-  if (/(?:生活习惯|习惯与喜好|喜好|偏好|饮食|作息|爱好|preferences|hobby)/i.test(sec)) {
+  if (/(?:生活习惯|生活与做事习惯|习惯与喜好|喜好|偏好|饮食|作息|爱好|亲密设定|亲密关系|preferences|hobby)/i.test(sec)) {
     return { category: '习惯与喜好', keepByDefault: true };
   }
-  if (/(?:成长经历|过往|经历|背景|技能|特长|能力|术式|background|history|technique)/i.test(sec)) {
+  if (/(?:成长经历|过往|经历|背景|技能|特长|能力|术式|体质|background|history|technique)/i.test(sec)) {
     return { category: '经历与技能', keepByDefault: true };
   }
   if (/(?:性格|行为逻辑|底色|性情|人格|personality)/i.test(sec)) {
@@ -2639,6 +4036,35 @@ export function extractPersonaPoints(text, maxPoints = 24) {
   }
 
   return points;
+}
+
+export function groupPersonaPoints(points = []) {
+  const list = Array.isArray(points) ? points : [];
+  const buckets = new Map();
+  for (const cat of CANONICAL_POINT_CATEGORIES) {
+    buckets.set(cat, []);
+  }
+  const extraCategories = [];
+
+  for (const pt of list) {
+    if (!pt || typeof pt !== 'object') continue;
+    const category = String(pt.category ?? '').trim() || '其他';
+    if (!buckets.has(category)) {
+      buckets.set(category, []);
+      extraCategories.push(category);
+    }
+    buckets.get(category).push(pt);
+  }
+
+  const orderedCats = [...CANONICAL_POINT_CATEGORIES, ...extraCategories];
+  const groups = [];
+  for (const category of orderedCats) {
+    const items = buckets.get(category);
+    if (items && items.length > 0) {
+      groups.push({ category, items });
+    }
+  }
+  return groups;
 }
 
 export function splitDualLayerOutput(text) {
@@ -3506,4 +4932,61 @@ export function parseChatCompletionChunkOrJson(rawText) {
   }
 
   return { text, done, error, usage };
+}
+
+// ============================================================================
+// H. Bounded Generation History Queue (Follow-up 2)
+// ============================================================================
+
+export function pushGenerationHistory(historyList = [], entry = {}, options = {}) {
+  const maxItems = clampInt(options?.maxItems, 1, 50, MAX_GENERATION_HISTORY);
+  const maxChars = clampInt(options?.maxChars, 200, 100000, MAX_HISTORY_ENTRY_CHARS);
+
+  const normalizeExistingItem = (item) => {
+    if (!item || typeof item !== 'object') return null;
+    const raw = String(item.text ?? '').trim();
+    if (!raw) return null;
+    const capped = raw.length > maxChars ? raw.slice(0, maxChars) : raw;
+    return {
+      id: String(item.id || '').trim() || generateId('hist'),
+      text: capped,
+      timestamp: Number.isFinite(Number(item.timestamp)) ? Number(item.timestamp) : Date.now(),
+      mode: String(item.mode || 'A').trim(),
+      charName: String(item.charName || '').trim(),
+      personaName: String(item.personaName || '').trim(),
+      chars: Number.isFinite(Number(item.chars)) ? Number(item.chars) : countReadableChars(capped),
+    };
+  };
+
+  const cleanExisting = (Array.isArray(historyList) ? historyList : [])
+    .map(normalizeExistingItem)
+    .filter(Boolean)
+    .slice(0, maxItems);
+
+  const rawText = String(typeof entry === 'string' ? entry : entry?.text ?? '').trim();
+  if (!rawText) {
+    return { list: cleanExisting, added: false };
+  }
+
+  const text = rawText.length > maxChars ? rawText.slice(0, maxChars) : rawText;
+  if (cleanExisting.length > 0 && cleanExisting[0].text.trim() === text) {
+    return { list: cleanExisting, added: false };
+  }
+
+  const dedupedOlder = cleanExisting.filter((item) => item.text.trim() !== text);
+  const meta = entry && typeof entry === 'object' ? entry : {};
+  const nextItem = {
+    id: String(meta.id || '').trim() || generateId('hist'),
+    text,
+    timestamp: Number.isFinite(Number(meta.timestamp)) ? Number(meta.timestamp) : Date.now(),
+    mode: String(meta.mode || 'A').trim(),
+    charName: String(meta.charName || '').trim(),
+    personaName: String(meta.personaName || '').trim(),
+    chars: countReadableChars(text),
+  };
+
+  return {
+    list: [nextItem, ...dedupedOlder].slice(0, maxItems),
+    added: true,
+  };
 }

@@ -35,6 +35,343 @@ export const VIBE_ANCHOR_EXAMPLES = Object.freeze([
   '直白率性',
 ]);
 
+// 100% sanitized, general-purpose setting lexicon (7 categories, 98 terms)
+export const COMMON_PERSONA_LEXICON_CATEGORIES = Object.freeze([
+  Object.freeze({
+    id: 'animal_archetype',
+    label: '动物系',
+    terms: Object.freeze(['猫系', '犬系', '狐系', '狼系', '兔系', '鹿系', '小羊系', '豹系', '天鹅系', '企鹅系']),
+  }),
+  Object.freeze({
+    id: 'vibe_aura',
+    label: '气质氛围',
+    terms: Object.freeze([
+      '沉稳可靠', '外冷内热', '松弛感', '清冷克制', '矜贵疏离', '少年意气',
+      '慵懒散漫', '温柔知性', '冷脸萌', '明艳张扬', '温润如玉', '低调内敛',
+      '反差感', '神秘难测',
+    ]),
+  }),
+  Object.freeze({
+    id: 'personality',
+    label: '性格特质',
+    terms: Object.freeze([
+      '嘴硬心软', '理智果断', '慢热寡言', '阳光直球', '风趣犀利', '温和腹黑',
+      '天然呆', '钝感力', '单纯不蠢', '重行动少空话', '傲娇', '白切黑',
+      '直白率性', '古灵精怪', '倔强护短', '嘴毒心软',
+    ]),
+  }),
+  Object.freeze({
+    id: 'interaction_style',
+    label: '相处模式',
+    terms: Object.freeze([
+      '慢热稳重', '克制守礼', '依恋粘人', '口嫌体正直', '爱吐槽接梗', '社交伪装',
+      '熟人话多生人冷', '护短偏心', '直球坦荡', '边界感清晰', '外柔内刚', '回避依恋',
+      '嘴甜会哄人', '细心照顾人',
+    ]),
+  }),
+  Object.freeze({
+    id: 'role_archetype',
+    label: '人设定位',
+    terms: Object.freeze([
+      '普通上班族', '自由职业/画师', '在校学生', '世家出身', '隐退高手', '行业新人',
+      '独立手艺人', '科研/技术从业者', '医护/救援从业者', '文艺创作者', '旅行者', '带伤隐忍',
+      '隐瞒身份', '跨界穿越',
+    ]),
+  }),
+  Object.freeze({
+    id: 'appearance',
+    label: '外貌特征',
+    terms: Object.freeze([
+      '黑长直', '短发利落', '长卷发', '淡颜清秀', '浓颜明艳', '冷白皮',
+      '暖调肤色', '上挑眼尾', '温和下垂眼', '浅色瞳', '眼角泪痣', '身形高挑',
+      '娇小纤细', '声线清润', '低沉磁性嗓音', '偏爱极简通勤', '偏爱舒适休闲', '偏爱新中式',
+    ]),
+  }),
+  Object.freeze({
+    id: 'habits_details',
+    label: '习惯与细节',
+    terms: Object.freeze([
+      '低精力宅家', '规律养生', '爱吃辣', '嗜甜', '咖啡/茶饮不离手', '轻度洁癖',
+      '熬夜夜猫子', '动手能力强', '专注时忽略周遭', '记仇但好哄', '情绪稳定少内耗', '习惯留后手',
+    ]),
+  }),
+]);
+
+export const COMPANION_FREQUENCY_TIERS = Object.freeze([
+  Object.freeze({
+    id: 'background',
+    label: '仅作背景底色',
+    description: '平时不主动介入，仅在提及相关经历或话题时自然浮现',
+    worldbookOrder: 60,
+    promptRule: '该角色仅作 {{user}} 的背景关系底色存在，不主动介入主线日常，仅当剧情提及相关人际或话题时自然呼应。',
+  }),
+  Object.freeze({
+    id: 'occasional',
+    label: '偶尔自然联络',
+    description: '按生活节点偶尔联络或照面，不抢主角色戏份',
+    worldbookOrder: 80,
+    promptRule: '该角色保持低干扰客串频率，仅在生活节点或剧情需要时偶尔联络或被提及，不抢占 {{char}} 主线。',
+  }),
+  Object.freeze({
+    id: 'active_circle',
+    label: '同圈常驻互动',
+    description: '处于同一生活或工作圈层，随场景自然同框但仍以主角色为中心',
+    worldbookOrder: 100,
+    promptRule: '该角色与 {{user}} 或 {{char}} 处于同一生活或社交圈层，在对应场景自然互动，始终作为配角客串推进氛围。',
+  }),
+]);
+
+export const COMPANION_CARRY_MODES = Object.freeze([
+  Object.freeze({ id: 'inline', label: '写入人设正文' }),
+  Object.freeze({ id: 'persona_book', label: '绑定人设专属世界书' }),
+  Object.freeze({ id: 'target_book', label: '写入指定已有世界书' }),
+]);
+
+export const COMPANION_RELATION_PRESETS = Object.freeze([
+  '哥哥', '姐姐', '弟弟', '妹妹', '父亲', '母亲',
+  '挚友', '青梅竹马', '前任', '师长', '搭档', '同门', '室友', '监护人',
+]);
+
+export const MODULE_RATIO_KEYS = Object.freeze([
+  'appearance',
+  'personality',
+  'backstory',
+  'relationship',
+  'private',
+]);
+
+export const MODULE_RATIO_DEFAULTS = Object.freeze({
+  appearance: 25,
+  personality: 35,
+  backstory: 20,
+  relationship: 20,
+  private: 0,
+});
+
+export const GENERATION_LAYOUT_STYLES = Object.freeze([
+  Object.freeze({
+    id: 'structured',
+    label: '结构化清单版',
+    description: '浅层中文分栏与平实白话，条目直观好检索',
+  }),
+  Object.freeze({
+    id: 'natural',
+    label: '自然分段版',
+    description: '按小节分段叙述，语感连贯自然',
+  }),
+]);
+
+export const GENERATION_SECTION_GROUPS = Object.freeze([
+  Object.freeze({
+    id: 'core',
+    label: '核心板块',
+    defaultExpanded: true,
+    items: Object.freeze([
+      Object.freeze({
+        id: 'basic_identity',
+        label: '基本身份',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '交代姓名、常用称呼或小名、年龄、性别、身高及当前身份定位；用平实白话直写，贴合世界观时代背景自适应子项，不留空壳占位格。',
+      }),
+      Object.freeze({
+        id: 'appearance_outfit',
+        label: '外貌与穿搭',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '写清发色发型、眉眼五官、肤色气质、体态比例与辨识特征，以及贴合当下题材的日常或特定场合穿搭；不用空泛吹捧套话。',
+      }),
+      Object.freeze({
+        id: 'personality_logic',
+        label: '性格与行为逻辑',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '用大白话写清核心性情、感情与亲密态度、高兴/生气/动摇时的情绪表现、行事原则、个人目标与短板弱点，不堆砌比喻句。',
+      }),
+      Object.freeze({
+        id: 'habits_tastes',
+        label: '生活与做事习惯',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '写出日常起居作息、工作或学业习惯、擅长技能与盲区、喜好与雷点；琐碎偏好点到即止，并按人物性格自然呈现外显度。',
+      }),
+      Object.freeze({
+        id: 'backstory_growth',
+        label: '成长经历与现状',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '严格遵循所选经历尺度：开启经历时梳理与主角色及客串角色时间线自洽的成长脉络与现状；纯留白时省略过往阶段，仅保留当下生活状态。',
+      }),
+      Object.freeze({
+        id: 'career_finance',
+        label: '职业与经济状况',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '写清职业或学业分工、经济来源、消费观与社会处境；古风或架空题材自动采用对应时代定位，不硬套现代商务词汇。',
+      }),
+      Object.freeze({
+        id: 'relation_to_char',
+        label: '与当前角色的关系',
+        group: 'core',
+        defaultEnabled: true,
+        guidance: '写明与主角色的相识渊源、相识时间线、当前关系阶段与相处张力；仅在双人互动容易产生指代歧义时点一次 {{user}} 或角色真名消歧，避免每句重复主语。',
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: 'npc_network',
+    label: '关系网与亲友',
+    defaultExpanded: false,
+    items: Object.freeze([
+      Object.freeze({
+        id: 'parents_family',
+        label: '父母/家人',
+        group: 'npc_network',
+        defaultEnabled: false,
+        guidance: '简明交代父母或核心家人的身份现状、家庭氛围与对 {{user}} 性格或处境的影响；不无端编造狗血创伤。',
+      }),
+      Object.freeze({
+        id: 'siblings',
+        label: '兄弟姐妹',
+        group: 'npc_network',
+        defaultEnabled: false,
+        guidance: '交代兄弟姐妹的排行与平日来往状态；若已作为客串角色携带，则保持简述而不重复展开。',
+      }),
+      Object.freeze({
+        id: 'friends_circle',
+        label: '朋友/社交圈',
+        group: 'npc_network',
+        defaultEnabled: false,
+        guidance: '写清交友广度与常联系的圈层或少数真实好友定位，保持配角分寸不抢主线。',
+      }),
+      Object.freeze({
+        id: 'ex_partner',
+        label: '前任',
+        group: 'npc_network',
+        defaultEnabled: false,
+        guidance: '如有前任设定，交代曾处的阶段、分开原因以及当前是否仍有交集与态度边界。',
+      }),
+      Object.freeze({
+        id: 'key_npc_pet',
+        label: '重要伙伴/宠物',
+        group: 'npc_network',
+        defaultEnabled: false,
+        guidance: '写明除主角色与已选客串角色外的关键师友、熟人或饲养宠物及日常相处细节。',
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: 'body_traits',
+    label: '身体特征',
+    defaultExpanded: false,
+    items: Object.freeze([
+      Object.freeze({
+        id: 'height_build',
+        label: '身高体型与比例',
+        group: 'body_traits',
+        defaultEnabled: false,
+        guidance: '用客观平实的尺度描述身高、肩颈腰腿比例、体态轮廓与力量感或纤细度。',
+      }),
+      Object.freeze({
+        id: 'voice_scent_marks',
+        label: '声音/气味与特殊印记',
+        group: 'body_traits',
+        defaultEnabled: false,
+        guidance: '写明说话声线音色、日常习惯使用的淡香或干净体味，以及疤痕、胎记、泪痣等具体位置印记。',
+      }),
+      Object.freeze({
+        id: 'constitution_ability',
+        label: '体质或特殊能力/限制',
+        group: 'body_traits',
+        defaultEnabled: false,
+        guidance: '客观交代体能耐受、易疲劳或怕冷热等体质特点，或特定世界观下的能力代价与使用限制。',
+      }),
+    ]),
+  }),
+  Object.freeze({
+    id: 'intimate',
+    label: '亲密设定',
+    defaultExpanded: false,
+    items: Object.freeze([
+      Object.freeze({
+        id: 'intimate_dynamic',
+        label: '亲密关系倾向',
+        group: 'intimate',
+        defaultEnabled: false,
+        guidance: '用平实克制的语言写明在亲密互动中的经验深浅、情感取向与主导或被动位阶倾向。',
+      }),
+      Object.freeze({
+        id: 'intimate_preference',
+        label: '偏好与氛围节奏',
+        group: 'intimate',
+        defaultEnabled: false,
+        guidance: '简明写清喜欢的亲密氛围、互动节奏与核心偏好，不堆砌低俗空洞的感官词。',
+      }),
+      Object.freeze({
+        id: 'intimate_sensitivity',
+        label: '身体敏感与反应',
+        group: 'intimate',
+        defaultEnabled: false,
+        guidance: '平实描述亲密接触时的敏感部位、自然生理反应与情绪微表现。',
+      }),
+      Object.freeze({
+        id: 'intimate_boundary',
+        label: '边界与事后相处',
+        group: 'intimate',
+        defaultEnabled: false,
+        guidance: '明确不可触碰的底线禁区，以及亲密结束后的相处习惯与安抚需求。',
+      }),
+    ]),
+  }),
+]);
+
+export const GENERATION_SECTION_PRESETS = Object.freeze({
+  minimal: Object.freeze({
+    id: 'minimal',
+    label: '极简核心',
+    enabledIds: Object.freeze([
+      'basic_identity',
+      'appearance_outfit',
+      'personality_logic',
+      'relation_to_char',
+    ]),
+  }),
+  standard: Object.freeze({
+    id: 'standard',
+    label: '标准日常',
+    enabledIds: Object.freeze([
+      'basic_identity',
+      'appearance_outfit',
+      'personality_logic',
+      'habits_tastes',
+      'backstory_growth',
+      'career_finance',
+      'relation_to_char',
+    ]),
+  }),
+  full: Object.freeze({
+    id: 'full',
+    label: '完整故事',
+    enabledIds: Object.freeze([
+      'basic_identity',
+      'appearance_outfit',
+      'personality_logic',
+      'habits_tastes',
+      'backstory_growth',
+      'career_finance',
+      'relation_to_char',
+      'parents_family',
+      'siblings',
+      'friends_circle',
+      'ex_partner',
+      'key_npc_pet',
+      'height_build',
+      'voice_scent_marks',
+      'constitution_ability',
+    ]),
+  }),
+});
+
 export const DEFAULT_MUST_HAVE_TEMPLATES = Object.freeze([
   Object.freeze({
     id: 'tpl_work_off',
@@ -62,7 +399,7 @@ export const SPOTLIGHT_MODES = Object.freeze([
   {
     id: 'balanced',
     label: '自然融入（推荐）',
-    description: '职业、特色属性与生活小喜好自然收放不刷屏打卡；暗线伏笔日常表象自洽，不被无端强行看穿。',
+    description: '职业、特色属性与生活小喜好自然收放，不反复硬塞；若有未公开背景或心事，平时表象自然自洽，不被无端强行看穿。',
   },
   {
     id: 'featured',
@@ -80,7 +417,7 @@ export const BACKSTORY_MODES = Object.freeze([
   {
     id: 'light_vibe',
     label: '轻底色（推荐）',
-    description: '写了经历就顺着展开；没提过往时只用宽泛生活氛围托底，不擅自编造具体父母亲属或童年创伤，防代入出戏。',
+    description: '写了经历就顺着展开；没提过往时只用宽泛生活氛围托底，不额外添设具体家庭出身或童年经历。',
   },
   {
     id: 'blank_self',
@@ -117,7 +454,7 @@ export const DISLIKE_REASON_PRESETS = Object.freeze([
   { id: 'too_oily', label: '太油腻 / 端着', reason: '腔调油腻做作，不够平实自然' },
   { id: 'too_label', label: '贴标签 / 太笼统', reason: '直接贴性格标签或空泛概括，缺少具体成因与表现' },
   { id: 'overstep_user', label: '替我抢话 / 写心理', reason: '越界预设了玩家的台词、心理活动或固定动作' },
-  { id: 'easy_checkin', label: '易导致剧情反复打卡', reason: '写成了过于琐碎固定的小剧本或口头禅，容易导致正文每轮机械重复' },
+  { id: 'easy_checkin', label: '易导致剧情机械重复', reason: '写成了过于琐碎固定的小剧本或口头禅，容易导致正文每轮机械重复' },
   { id: 'out_of_vibe', label: '不贴合人设', reason: '与当前想塑造的人物气质不符' },
 ]);
 
@@ -181,11 +518,11 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
   }),
   Object.freeze({
     id: 'persona_tic_lock',
-    name: '易引发每轮打卡的固定微动作套话',
-    description: '写死在人设里的单一五官抽动或随身道具打卡，会导致强遵循模型每轮对话机械复读',
+    name: '易导致每轮机械重复的固定微动作',
+    description: '写死在人设里的单一五官抽动或随身道具习惯，会导致对话每轮机械重复',
     scope: 'all',
     rules: Object.freeze([
-      '不规定“每次紧张必摸某物/每次说话必推眼镜”式打卡小动作，改写为通用的情绪反应倾向',
+      '不规定“每次紧张必摸某物/每次说话必推眼镜”式固定小动作，改写为通用的情绪反应倾向',
     ]),
     phrases: Object.freeze([
       '嘴角勾起一抹意味深长的弧度',
@@ -367,7 +704,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: true,
         content:
-          '你是一位擅长塑造立体人物的设定作者，负责撰写服务于“允许 AI 自然代演 {{user}} 说话语气与临场反应”的人设档案：言行逻辑鲜活清晰，同时保有呼吸留白，不把人物写成机械复读的提线木偶。',
+          '你是一位擅长塑造立体人物的设定作者，负责撰写服务于“允许 AI 自然代演 {{user}} 说话语气与临场反应”的人设档案：用平实直白的大白话写出具体事实、生活习惯与真实情绪表现，不堆砌比喻句，也不把人物写成机械复读的提线木偶。',
       },
       {
         id: 'lf_context',
@@ -378,23 +715,23 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '按本次任务类型处理输入材料：',
-          '1. 新建人设：顺着玩家的题材基调（轻松日常、情感拉扯或带身世暗线）立住鲜活人物。',
+          '1. 新建人设：顺着玩家的题材基调立住鲜活人物；若 {{char}} 或客串亲友与 {{user}} 存在青梅竹马、家人养亲、师徒养成或多年共生关系，允许将塑造性格底色与习惯的共同成长印记自然融入' + CORE_SECTION_HEADER + '，同时将当下时间点、现居状态与开场矛盾写入' + SHELL_SECTION_HEADER + '。',
           '2. 整理排版去噪：完整保留原稿全部设定事实、萌点与伏笔，仅清理混乱格式与空泛套话。',
-          '3. 扩写细节：沿原稿性格走向补足说话口吻、处事习惯与日常相处质感，不篡改核心设定。',
-          `4. 换卡改背景：锁死${CORE_SECTION_HEADER}不变，仅结合新角色卡重写${SHELL_SECTION_HEADER}的身份与开场落点。`,
+          '3. 扩写细节：沿原稿性格走向补足说话口吻、处事习惯与日常相处质感，核对年龄与关系时间线前后自洽，不篡改核心设定。',
+          `4. 换卡改背景：守住${CORE_SECTION_HEADER}核心底色，结合新角色卡重写${SHELL_SECTION_HEADER}的身份与开场落点；若原人与新角色或客串人物共享过往成长背景，可保留共同成长底色，仅当明确选择纯通用跨卡复用时才剥离特定角色绑定。`,
         ].join('\n'),
       },
       {
         id: 'lf_craft',
-        name: '人物塑造四准则（本色/防打卡/稳伏笔/防照抄）',
+        name: '人物塑造四准则（本色/节奏/伏笔/示例）',
         slotType: 'craft',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于本色落细节：删去干瘪形容词排比，保留传神的气质锚点词，顺着人物自身走向落到具体言行与取舍（内外如一或分场合不同表现皆可自然成立，玩家指明方向就顺着写，不预设固定性格套路）。',
-          '2. 职业与特色元素去打卡化：职业习惯（如博主、医生）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必刷屏的打卡项。',
-          '3. 暗线伏笔常态潜伏：未公开身世（如隐藏出身或过往秘密）、隐情或心事须具备自洽合理的日常表象，本人待人如常，不写成刻意的“神色慌乱怕露馅”，把揭晓契机留给剧情推进与玩家选择。',
+          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语（严禁每行开头重复堆砌 {{user}} 浪费 Token），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧。',
+          '2. 职业与特色元素自然收放：职业习惯（如医生、画师）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必提的固定习惯。',
+          '3. 暗线心事按需自然安放：默认不硬塞未公开秘密或暗线；仅当玩家设定了隐瞒、暗自打算或感情暗流时，清晰区分日常表象与未说出口的真实想法，本人待人如常，不写成刻意的“神色慌乱怕露馅”，把揭晓契机留给剧情推进与玩家选择。',
           '4. 写底层思维防照抄：反应与习惯优先提炼通用思维规律；若保留具体“例如/比如”片段辅助理解，简短注明仅作思维参考、日常随情境自然反应不复刻原桥段。',
         ].join('\n'),
       },
@@ -406,7 +743,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '玩家的审美偏好优先融入气质与处事细节；饮食忌口、居住习惯等琐碎喜好点到即止不列长单，并顺着人物性格自然呈现外显度（平时直白表露在外，或较少提及、随他人留心观察与相处深浅自然感知），不替对手角色强行规定必定全知或必定猜错。',
+          '玩家的审美偏好优先融入气质与处事细节；饮食忌口、居住习惯等琐碎喜好点到即止不列长单，并按人物性格自然体现外显度（平时直白表露在外，或较少提及、随他人留心观察与相处深浅自然感知），不替对手角色强行规定必定全知或必定猜错。',
       },
       {
         id: 'lf_banned',
@@ -416,19 +753,19 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '行文平实耐读，剔除悬浮赋魅自夸、“看似…实则…”简历式对仗、固定五官打卡微动作，以及“禁止NPC读心/严禁OOC”等与正文预设重复的系统命令口号。',
+          '行文平实耐读，剔除悬浮赋魅自夸、“看似…实则…”简历式对仗、固定五官重复微动作，以及“禁止NPC读心/严禁OOC”等与正文预设重复的系统命令口号。',
       },
       {
         id: 'lf_pacing',
-        name: '字数预算与比重',
+        name: '字数预算与板块比重',
         slotType: 'pacing',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
-          '全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens）：',
-          `- ${CORE_SECTION_HEADER}约占 60%：外貌穿搭印象、性格神韵与思维习惯、说话口吻，以及按经历尺度保留的个人背景或潜伏心事（选择留白经历时将篇幅集中于当下质感）；`,
-          `- ${SHELL_SECTION_HEADER}约占 40%：当前身份与生活状态、与 {{char}} 的相识渊源及开场相处氛围。`,
+          '全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），篇幅重心放在玩家启用的板块上：',
+          `- ${CORE_SECTION_HEADER}：涵盖基本身份、外貌穿搭、性格行为逻辑、生活做事习惯及按需保留的成长经历与共同成长底色；`,
+          `- ${SHELL_SECTION_HEADER}：涵盖当前职业与处境、与 {{char}}（及客串人物）的现阶段关系与开场相处氛围；不按固定百分比硬塞未启用的秘密暗线。`,
         ].join('\n'),
       },
       {
@@ -439,7 +776,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          `只用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题配简洁二级小标题（## 小节名）分段，禁嵌套缩进、YAML/XML 标签、代码块或寒暄说明，默认不加行首方括号可见度前缀。`,
+          `使用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题，下方按启用板块输出简洁二级小标题（## 板块名）配浅层中文键值（字段名：内容）或平实短段，只写有实质内容的有效字段不留空壳；严禁深层缩进、XML 标签、代码块或寒暄说明，默认不加行首方括号可见度前缀。`,
           '标点干净利落：全文不使用破折号连接或插入分句，改用逗号、冒号或句号，防止后续对话模仿引发破折号增殖。',
           `仅当开启【长设定自动拆出世界书】时，在文末另起一行写 \`${WORLDBOOK_DIVIDER}\`，按 [条目：标题] / 关键词： / 内容： 附 2～4 条补充背景。`,
         ].join('\n'),
@@ -453,7 +790,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     style: 'objective',
     builtin: true,
     favorite: false,
-    description: '精炼客观，只写外貌、身份与既有事实，不替你说话或决定心理活动，全程自己手控。',
+    description: '精炼客观，只写外貌、身份与既有事实，不替你说话或决定心理活动，全程不抢话。',
     targetChars: 600,
     targetTokens: { min: 720, max: 900 },
     tailMode: 'auto',
@@ -464,13 +801,13 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     entries: [
       {
         id: 'pc_role',
-        name: '纯手控客观定位',
+        name: '不抢话客观定位',
         slotType: 'role',
         role: 'system',
         enabled: true,
         locked: true,
         content:
-          '你是一位简练克制的设定整理者，为“玩家全程手控台词与行动”的故事撰写客观 {{user}} 档案：只记录外貌、身份、能力与既有关系事实，把临场台词、心理活动与情绪反应完全留给玩家。',
+          '你是一位简练克制的设定整理者，为“玩家自主掌控台词与行动（不抢话）”的故事撰写客观 {{user}} 档案：只用平实白话记录外貌、身份、能力、客观习惯与既有关系事实，各特征短句默认省略主语不重复刷 {{user}}（仅在双人关系消歧处点明），把临场台词、心理活动与情绪反应完全留给玩家。',
       },
       {
         id: 'pc_context',
@@ -481,13 +818,13 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '按本次任务整理客观事实：',
-          '- 新建或扩写：提炼外貌穿着、身份履历、能力边界与开场关系；气质词仅作外在印象记录，不转化为自动触发的情绪或口癖。',
-          `- 排版去噪或换卡：去噪时保留全部客观设定洗净套话；换卡时锁死${CORE_SECTION_HEADER}，仅重写${SHELL_SECTION_HEADER}的当前身份与开场关系。`,
+          `- 新建或扩写：提炼外貌穿着、身份履历、能力边界与开场关系；气质词仅作外在印象记录，不转化为自动触发的情绪或口癖；若与 {{char}} 或客串亲友有青梅竹马、养亲或师徒等共同成长经历，允许客观写进${CORE_SECTION_HEADER}，当下处境写入${SHELL_SECTION_HEADER}。`,
+          `- 排版去噪或换卡：去噪时保留全部客观设定洗净套话；换卡时守住${CORE_SECTION_HEADER}，结合新卡背景重写${SHELL_SECTION_HEADER}，仅当明确选择纯通用跨卡复用时才剥离特定角色绑定。`,
         ].join('\n'),
       },
       {
         id: 'pc_craft',
-        name: '不抢话与防打卡准则',
+        name: '不抢话与日常分寸准则',
         slotType: 'craft',
         role: 'system',
         enabled: true,
@@ -495,7 +832,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         content: [
           '1. 零代演越界：不写口头禅、说话腔调模板、受惊害羞等固定反应或内心独白。',
           '2. 职业与特殊属性背景化：职业或体弱、穿越等属性只平实记录客观事实与日常平稳常态，不写高频发作或时刻挂嘴边的表述。',
-          '3. 暗线客观潜伏：未公开身世或隐情直接写明日常外在表现自洽如常、知情范围有限，不写诱发每轮猜疑试探的露馅描写。',
+          '3. 暗线按需客观潜伏：默认不额外编造秘密暗线；仅当玩家给出隐瞒或未宣之于口的心事时，直接写明日常外在表现自洽如常、知情范围有限，不写诱发每轮猜疑试探的露馅描写。',
         ].join('\n'),
       },
       {
@@ -516,19 +853,19 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '删去悬浮赋魅自夸、“看似…实则…”空话、打卡式微动作、心理抒情，以及与正文预设重复的系统禁令口号。',
+          '删去悬浮赋魅自夸、“看似…实则…”空话、固定重复微动作、心理抒情，以及与正文预设重复的系统禁令口号。',
       },
       {
         id: 'pc_pacing',
-        name: '字数预算与比重',
+        name: '字数预算与板块比重',
         slotType: 'pacing',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
           '全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens）：',
-          `- ${CORE_SECTION_HEADER}约占 55%：外貌体态、穿搭特征、客观能力与按需保留的过往履历；`,
-          `- ${SHELL_SECTION_HEADER}约占 45%：当前身份、日常节奏与开场既有关系共识。`,
+          `- ${CORE_SECTION_HEADER}：客观记录基本身份、外貌体态、穿搭特征、能力边界与按需保留的过往或共同成长事实；`,
+          `- ${SHELL_SECTION_HEADER}：简明写清当前身份、日常节奏与开场既有关系共识。`,
         ].join('\n'),
       },
       {
@@ -539,7 +876,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          `只用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 搭配简洁二级小标题（## 小节名），禁嵌套缩进、XML、代码块或额外说明。`,
+          `只用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 搭配简洁二级小标题（## 板块名）与浅层中文键值（字段名：内容）或短句，不留空壳字段，禁嵌套缩进、XML、代码块或额外说明。`,
           '全文不使用破折号连接分句，改用逗号、冒号或句号。',
           `开启【长设定自动拆出世界书】时，在文末写 \`${WORLDBOOK_DIVIDER}\`，按 [条目：标题] / 关键词： / 内容： 附 2～3 条客观补充条目。`,
         ].join('\n'),
@@ -553,7 +890,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     style: 'refactor',
     builtin: true,
     favorite: false,
-    description: '专为旧人设去套话、柔化易打卡烦人元素、稳埋身世心事伏笔或换卡重写当前关系而调校。',
+    description: '适合为旧人设整理排版、去掉套话、柔化易重复元素，或结合新角色卡调整当前身份与关系。',
     targetChars: 1500,
     targetTokens: { min: 1780, max: 2270 },
     tailMode: 'auto',
@@ -570,7 +907,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: true,
         content:
-          '你是一位懂互动叙事痛点的人设精修编辑：完整守住原稿的外貌、性格本色、萌点与暗线设定，同时修掉易导致正文“机械复读例子、频繁打卡职业癖好或强行露馅”的隐患表述。',
+          '你是一位细腻克制的人设精修编辑：完整守住原稿的外貌、性格本色、特点与已有暗线设定，将空洞比喻或套话改写为平实大白话，各特征短句默认省略主语（去掉每行开头机械重复的 {{user}}，仅在双人关系消歧处保留），同时修掉易导致正文“机械复读例子、反复刷职业存在感或强行露馅”的隐患表述。',
       },
       {
         id: 'pr_context',
@@ -582,8 +919,8 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         content: [
           '严格按本次指定的改写方向执行：',
           '1. 整理排版去套话：100% 保留原稿事实与关系，洗净乱缩进、赋魅套话与系统口号，柔化高频触发词。',
-          '2. 扩写细节：忠于原稿人物基调补足言行细节与情绪界线，绝不擅自捏造原稿没有的家世变故。',
-          `3. 换卡改背景：原样锁死${CORE_SECTION_HEADER}，剥离旧卡头衔人际，结合新卡世界观重写${SHELL_SECTION_HEADER}。`,
+          '2. 扩写细节：忠于原稿人物基调补足言行细节、情绪表现与时间线一致性，绝不擅自捏造原稿没有的家世变故。',
+          `3. 换卡改背景：守住${CORE_SECTION_HEADER}核心性格与外貌，结合新卡世界观重写${SHELL_SECTION_HEADER}；若原人与新主角色或客串人物具有青梅竹马、养亲或师徒等共同成长设定，可自然保留其成长底色，仅在明确选择纯通用跨卡复用时彻底剥离旧卡人际绑定。`,
         ].join('\n'),
       },
       {
@@ -594,9 +931,9 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于原稿走向拆空词：保留原稿传神的气质锚点词，顺着原稿自身的性格走向落到具体言行（原稿纯粹一致就保持一致，原稿有多面性就理顺衔接，不改写成固定套路），仅删去无信息量的形容词堆砌。',
-          '2. 高频元素降敏防打卡：原稿含鲜明职业或体弱、穿越等属性时，删去“总是/时刻/稍微…就…”等绝对化高频词，区分工作与私下平稳常态，好玩却不喧宾夺主。',
-          '3. 暗线伏笔补齐常态表象：原稿含隐藏身世或心事时，去掉刻意“生怕露馅”的诱导词，写明日常见惯自然自洽、静默潜伏待契机揭晓。',
+          '1. 忠于原稿走向拆空词：保留原稿传神的气质锚点词，顺着原稿自身的性格走向落到具体言行（原稿纯粹一致就保持一致，原稿有多面性就理顺衔接，不改写成固定套路），仅删去无信息量的形容词堆砌与比喻套话。',
+          '2. 高频元素自然收放：原稿含鲜明职业或体弱、穿越等属性时，删去“总是/时刻/稍微…就…”等绝对化高频词，区分工作与私下平稳常态，生动却不喧宾夺主。',
+          '3. 暗线伏笔补齐常态表象：仅当原稿本身含隐藏身世或未公开心事时，去掉刻意“生怕露馅”的诱导词，写明日常见惯自然自洽、静默潜伏；原稿没有暗线时不凭空强塞秘密。',
           '4. 具象举例提炼脑回路：原稿含“例如/比如”具体桥段时，先提炼底层思维规律；若保留简短示例，顺手括注仅作理解思维参考、日常随情境反应不复刻原例。',
         ].join('\n'),
       },
@@ -608,7 +945,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '玩家勾选保留的设定点与修改要求优先级最高；原稿若罗列过多吃穿小喜好则精简收束避免吃饭打卡，顺着原稿性格自然保留其直白表露或内敛少提的状态，不锁死旁人能否猜中。',
+          '玩家勾选保留的设定点与修改要求优先级最高；原稿若罗列过多吃穿小喜好则精简收束避免饮食细节每轮重复，顺着原稿性格自然保留其直白表露或内敛少提的状态，不锁死旁人能否猜中。',
       },
       {
         id: 'pr_banned',
@@ -618,19 +955,19 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '彻底洗去原稿混入的系统命令口号（如禁止NPC读心）、悬浮玛丽苏自夸、“看似…实则…”空话及固定打卡微动作。',
+          '彻底洗去原稿混入的系统命令口号（如禁止NPC读心）、悬浮玛丽苏自夸、“看似…实则…”空话及固定重复微动作。',
       },
       {
         id: 'pr_pacing',
-        name: '字数预算与比重',
+        name: '字数预算与板块比重',
         slotType: 'pacing',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
           '重构全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens）：',
-          `- ${CORE_SECTION_HEADER}约占 60%：外貌声音、性格神韵与思维规律、适度收束的生活习惯及既有过往心事；`,
-          `- ${SHELL_SECTION_HEADER}约占 40%：当前故事下的身份日常与和 {{char}} 的开场关系。`,
+          `- ${CORE_SECTION_HEADER}：保留外貌声音、性格神韵与思维规律、适度收束的生活习惯及既有过往或共同成长底色；`,
+          `- ${SHELL_SECTION_HEADER}：聚焦当前故事下的身份日常、与 {{char}}（及客串人物）的现阶段关系与开场氛围。`,
         ].join('\n'),
       },
       {
@@ -641,7 +978,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          `归入 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题配简洁二级小标题（## 小节名），禁嵌套缩进、YAML/XML、代码块或修改总结。`,
+          `归入 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题配简洁二级小标题（## 板块名）与浅层中文键值（字段名：内容）或自然段落，只写有效字段不留空壳，禁嵌套缩进、XML、代码块或修改总结。`,
           '全文不使用破折号连接分句，并将原稿泛滥的破折号顺手整理为逗号、冒号或短句。',
           `开启【长设定自动拆出世界书】时，在文末写 \`${WORLDBOOK_DIVIDER}\`，拆出 2～4 条 [条目：标题] / 关键词： / 内容： 补充条目。`,
         ].join('\n'),

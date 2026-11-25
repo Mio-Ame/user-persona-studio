@@ -12,6 +12,15 @@ import {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  COMMON_PERSONA_LEXICON_CATEGORIES,
+  COMPANION_FREQUENCY_TIERS,
+  COMPANION_CARRY_MODES,
+  COMPANION_RELATION_PRESETS,
+  MODULE_RATIO_KEYS,
+  MODULE_RATIO_DEFAULTS,
+  GENERATION_LAYOUT_STYLES,
+  GENERATION_SECTION_GROUPS,
+  GENERATION_SECTION_PRESETS,
   DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
@@ -27,6 +36,8 @@ import {
 import {
   DEFAULT_PREFILL,
   DEFAULT_TRIGGER,
+  MAX_GENERATION_HISTORY,
+  MAX_HISTORY_ENTRY_CHARS,
   ST_SENSITIVE_FIELDS,
   createDefaultSettings,
   sanitizeSettingsForExport,
@@ -47,6 +58,23 @@ import {
   applyTargetCharsToScheme,
   inferOptimalTailMode,
   extractPersonaPoints,
+  groupPersonaPoints,
+  pushGenerationHistory,
+  normalizeModuleRatios,
+  normalizeGenerationSectionsConfig,
+  buildGenerationSectionDirective,
+  detectConcealmentSignals,
+  detectJointUpbringingSignals,
+  classifyWorldbookEntry,
+  isWorldbookEntryDisabled,
+  isNoiseWorldbookEntry,
+  resolveCharacterRealName,
+  detectMultiCharacterCard,
+  buildEnsembleRosterSummary,
+  stripCompanionConflicts,
+  extractVerbatimCompanionSlices,
+  computeCompanionTokenPlan,
+  buildCompanionWorldbookEntries,
   buildDraftAuditInstruction,
   buildGenerationMessages,
   applyTailRoleStrategy,
@@ -211,6 +239,10 @@ test('Group 1.4: Pure ESM isolation & sanitization check on src/presets.js and s
   const serializedPresets = JSON.stringify({
     BUILTIN_USAGE_GUIDE,
     VIBE_ANCHOR_EXAMPLES,
+    COMMON_PERSONA_LEXICON_CATEGORIES,
+    COMPANION_FREQUENCY_TIERS,
+    COMPANION_CARRY_MODES,
+    COMPANION_RELATION_PRESETS,
     BUILTIN_BANNED_CATEGORIES,
     DEFAULT_BANNED_PHRASES,
     QUALITATIVE_LABEL_PATTERNS: QUALITATIVE_LABEL_PATTERNS.map(({ id, label, category, hint }) => ({
@@ -220,11 +252,21 @@ test('Group 1.4: Pure ESM isolation & sanitization check on src/presets.js and s
       hint,
     })),
     BUILTIN_PRESET_SCHEMES,
+    GENERATION_LAYOUT_STYLES,
+    GENERATION_SECTION_GROUPS,
+    GENERATION_SECTION_PRESETS,
   });
 
-  // Zero XML tags or explicit third-party preset/author patterns
+  // Zero XML tags, zero jailbreak terms, and zero NSFW/18+ tokens in default presets & guides
   assert.equal(/<\/?[a-zA-Z][a-zA-Z0-9_-]*>/.test(serializedPresets), false);
-  assert.equal(/(?:越狱|破限|nsfw|18\+|R18)/i.test(serializedPresets), false);
+  assert.equal(/(?:越狱|破限)/i.test(serializedPresets), false);
+  assert.equal(/(?:nsfw|18\+|R18)/i.test(serializedPresets), false);
+
+  // R8/R9 sanitization: zero dev-talk phrases, zero forced 20% secret quota, zero 纯手控 in presets
+  const forbiddenR9 = /(?:防套皮|每轮打卡|易引发每轮打卡|反复打卡|防代入出戏|不刷屏打卡|懂互动叙事痛点|先扫除套话禁词|纯手控零代演|纯手控|手控客观|未公开私事 \/ 旁人无从知晓)/;
+  assert.equal(forbiddenR9.test(presetsSrc), false, 'presets.js must not contain R9 forbidden phrases');
+  assert.equal(forbiddenR9.test(buildDraftAuditInstruction(BUILTIN_PRESET_SCHEMES.player_controlled)), false);
+  assert.equal(forbiddenR9.test(buildGenerationMessages({ mode: 'create' }).assembledPromptText), false);
 });
 
 // ============================================================================
@@ -1734,4 +1776,602 @@ test('Group 11.4 (R3 regression): explicit core sections resist greedy prose heu
     assert.equal(relPt.category, '当前身份与关系');
     assert.equal(relPt.keepByDefault, false);
   }
+});
+
+// ============================================================================
+// Group 12: R8 Categorized Lexicon, `不抢话` Terminology & 0% Default Private Quota
+// ============================================================================
+
+test('Group 12 (R8): COMMON_PERSONA_LEXICON_CATEGORIES has 7 deep-frozen sanitized categories (98 terms) & VIBE_ANCHOR_EXAMPLES compat', () => {
+  assert.equal(Object.isFrozen(COMMON_PERSONA_LEXICON_CATEGORIES), true);
+  assert.equal(COMMON_PERSONA_LEXICON_CATEGORIES.length, 7);
+  assert.deepEqual(
+    COMMON_PERSONA_LEXICON_CATEGORIES.map((c) => c.id),
+    ['animal_archetype', 'vibe_aura', 'personality', 'interaction_style', 'role_archetype', 'appearance', 'habits_details']
+  );
+
+  let totalTerms = 0;
+  const uniqueTerms = new Set();
+  for (const cat of COMMON_PERSONA_LEXICON_CATEGORIES) {
+    assert.equal(Object.isFrozen(cat), true);
+    assert.equal(Object.isFrozen(cat.terms), true);
+    assert.ok(cat.label && cat.terms.length >= 10);
+    for (const term of cat.terms) {
+      assert.equal(typeof term, 'string');
+      assert.ok(term.trim().length > 0);
+      totalTerms += 1;
+      uniqueTerms.add(term);
+    }
+  }
+  assert.equal(totalTerms, 98);
+  assert.equal(uniqueTerms.size, 98);
+  assert.ok(uniqueTerms.has('猫系'));
+  assert.ok(uniqueTerms.has('沉稳可靠'));
+  assert.equal(VIBE_ANCHOR_EXAMPLES.length, 20);
+  assert.ok(VIBE_ANCHOR_EXAMPLES.includes('沉稳可靠'));
+});
+
+test('Group 12.2 (R8/R9): 不抢话 unified wording & 0% default private quota with legacy migration preserved', () => {
+  const objScheme = BUILTIN_PRESET_SCHEMES.player_controlled;
+  assert.equal(objScheme.name, '适合不抢话党');
+  assert.ok(objScheme.description.includes('不抢话'));
+  assert.equal(objScheme.description.includes('手控'), false);
+
+  const joinedSchemes = JSON.stringify(BUILTIN_PRESET_SCHEMES);
+  assert.equal(joinedSchemes.includes('手控'), false);
+  assert.equal(joinedSchemes.includes('非抢话'), false);
+  assert.equal(joinedSchemes.includes('20%'), false);
+  assert.equal(joinedSchemes.includes('未公开私事 / 旁人无从知晓'), false);
+
+  const settings = createDefaultSettings();
+  assert.equal(settings.ui.moduleRatios.mode, 'auto');
+  assert.equal(settings.ui.moduleRatios.private, 0);
+});
+
+// ============================================================================
+// Group 13: R7 & Follow-up 3 Modular Generation Sections, Structured Layout & Ratios
+// ============================================================================
+
+test('Group 13.1 (Follow-up 3): GENERATION_LAYOUT_STYLES defaults to structured, clean Chinese labels, 4 groups & all intimate default off', () => {
+  assert.deepEqual(GENERATION_LAYOUT_STYLES.map((s) => s.id), ['structured', 'natural']);
+  assert.deepEqual(
+    GENERATION_SECTION_GROUPS.map((g) => ({ id: g.id, label: g.label })),
+    [
+      { id: 'core', label: '核心板块' },
+      { id: 'npc_network', label: '关系网与亲友' },
+      { id: 'body_traits', label: '身体特征' },
+      { id: 'intimate', label: '亲密设定' },
+    ]
+  );
+
+  const intimateGroup = GENERATION_SECTION_GROUPS.find((g) => g.id === 'intimate');
+  assert.equal(intimateGroup.items.length, 4);
+  for (const item of intimateGroup.items) {
+    assert.equal(item.defaultEnabled, false);
+  }
+
+  const npcGroup = GENERATION_SECTION_GROUPS.find((g) => g.id === 'npc_network');
+  assert.ok(npcGroup.items.some((i) => i.id === 'key_npc_pet' && i.label === '重要伙伴/宠物'));
+
+  assert.deepEqual(Object.keys(GENERATION_SECTION_PRESETS), ['minimal', 'standard', 'full']);
+  for (const preset of Object.values(GENERATION_SECTION_PRESETS)) {
+    for (const item of intimateGroup.items) {
+      assert.equal(preset.enabledIds.includes(item.id), false);
+    }
+  }
+});
+
+test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDirective handle structured layout, backstory blank_self, opt-in intimate & custom sections', () => {
+  const defCfg = normalizeGenerationSectionsConfig();
+  assert.equal(defCfg.layoutStyle, 'structured');
+  assert.equal(defCfg.presetId, 'standard');
+  assert.deepEqual(defCfg.enabledIds, GENERATION_SECTION_PRESETS.standard.enabledIds);
+  assert.deepEqual(defCfg.customSections, []);
+
+  // Default directive: structured shallow Chinese layout, zero code fences/XML, forbids adult content without nsfw token
+  const defDirective = buildGenerationSectionDirective(defCfg, { backstoryMode: 'light_vibe' });
+  assert.ok(defDirective.includes('结构化清单版'));
+  assert.ok(defDirective.includes('浅层中文键值'));
+  assert.ok(defDirective.includes('严禁生成任何成人向、情色或越界亲密描写内容'));
+  assert.equal(/\bnsfw\b/i.test(defDirective), false);
+  assert.equal(defDirective.includes('```'), false);
+
+  // blank_self suppresses backstory_growth even if enabled
+  const blankDir = buildGenerationSectionDirective(defCfg, { backstoryMode: 'blank_self' });
+  assert.ok(blankDir.includes('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历'));
+  assert.equal(blankDir.includes('- 成长经历与现状：'), false);
+
+  // Opt-in intimate sections + natural layout + custom sections + companions non-duplication
+  const customCfg = normalizeGenerationSectionsConfig({
+    layoutStyle: 'natural',
+    enabledIds: ['basic_identity', 'intimate_dynamic', 'intimate_boundary'],
+    customSections: [
+      { name: '修仙灵根与境界', guidance: '写明水木双灵根与筑基初期修为' },
+      { name: '   ' },
+    ],
+  });
+  assert.equal(customCfg.layoutStyle, 'natural');
+  assert.equal(customCfg.presetId, 'custom');
+  assert.equal(customCfg.customSections.length, 1);
+
+  const optInDir = buildGenerationSectionDirective(customCfg, {
+    companions: [{ id: 'c1', name: '林栖' }],
+  });
+  assert.ok(optInDir.includes('自然分段版'));
+  assert.ok(optInDir.includes('亲密关系倾向'));
+  assert.ok(optInDir.includes('边界与事后相处'));
+  assert.ok(optInDir.includes('修仙灵根与境界'));
+  assert.ok(optInDir.includes('已携带客串角色时'));
+  assert.equal(optInDir.includes('严禁生成任何成人向、情色或越界亲密描写内容'), false);
+
+  // Structured output generated per directive parses 100% cleanly via extractPersonaPoints
+  const sampleStructured = [
+    CORE_SECTION_HEADER,
+    '## 基本身份',
+    '姓名：沈砚',
+    '年龄：25',
+    '## 外貌与穿搭',
+    '发色：黑发偏短，平时略微散落额前',
+    '## 生活与做事习惯',
+    '作息：习惯清晨泡一壶热茶再去书房',
+    SHELL_SECTION_HEADER,
+    '## 与当前角色的关系',
+    '相识渊源：三年前同在港务档案室整理旧卷宗时相识',
+  ].join('\n');
+  const parsedPoints = extractPersonaPoints(sampleStructured, 24);
+  assert.ok(parsedPoints.some((p) => p.fullText === '姓名：沈砚' && p.category === '基础信息'));
+  assert.ok(parsedPoints.some((p) => p.fullText.includes('黑发偏短') && p.category === '外貌与印象'));
+  assert.ok(parsedPoints.some((p) => p.fullText.includes('热茶') && p.category === '习惯与喜好'));
+  assert.ok(parsedPoints.some((p) => p.fullText.includes('港务档案室') && p.category === '当前身份与关系' && p.keepByDefault === false));
+});
+
+test('Group 13.3: MODULE_RATIO_KEYS, normalizeModuleRatios, buildGenerationMessages & sanitizeSettingsForExport integration', () => {
+  assert.deepEqual(MODULE_RATIO_KEYS, ['appearance', 'personality', 'backstory', 'relationship', 'private']);
+  assert.equal(MODULE_RATIO_DEFAULTS.private, 0);
+
+  const autoRatios = normalizeModuleRatios();
+  assert.equal(autoRatios.mode, 'auto');
+  assert.equal(autoRatios.private, 0);
+
+  const customRatios = normalizeModuleRatios({ appearance: 40, private: 99 });
+  assert.equal(customRatios.mode, 'custom');
+  assert.equal(customRatios.appearance, 40);
+  assert.equal(customRatios.private, 40);
+
+  // Default prompt omits custom ratio block & adult content
+  const defPrompt = buildGenerationMessages({ mode: 'create', inspiration: '咖啡店店主' }).assembledPromptText;
+  assert.equal(defPrompt.includes('【人设构成占比指导】'), false);
+  assert.equal(defPrompt.includes('严禁生成任何成人向、情色或越界亲密描写内容'), true);
+
+  // Custom ratios + settings export preservation
+  const customPrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '表面平和的书店老板',
+    moduleRatios: { mode: 'custom', appearance: 30, personality: 35, backstory: 10, relationship: 15, private: 10 },
+  }).assembledPromptText;
+  assert.ok(customPrompt.includes('【人设构成占比指导】'));
+  assert.ok(customPrompt.includes('私密心事或暗线约 10%'));
+
+  const settings = createDefaultSettings({
+    ui: {
+      moduleRatios: customRatios,
+      generationSections: { layoutStyle: 'natural', presetId: 'full' },
+    },
+  });
+  const exported = sanitizeSettingsForExport(settings);
+  assert.equal(exported.ui.moduleRatios.private, 40);
+  assert.equal(exported.ui.generationSections.layoutStyle, 'natural');
+  assert.equal(exported.ui.generationSections.presetId, 'full');
+});
+
+// ============================================================================
+// Group 14: R7 Concealment, Joint Upbringing, Subject-Omission Token Economy & RealName
+// ============================================================================
+
+test('Group 14.1 (R7): detectConcealmentSignals, anti-mind-reading & joint upbringing fusion vs pureCrossCardReuse', () => {
+  assert.equal(detectConcealmentSignals('清冷感，私下是个拍照博主'), false);
+  assert.equal(detectConcealmentSignals('表面笑脸迎人，其实心里打算找机会分手'), true);
+  assert.equal(detectConcealmentSignals('一直暗恋对方却不敢说'), true);
+  assert.equal(detectConcealmentSignals('背负一笔隐瞒未说的债务'), true);
+
+  assert.equal(detectJointUpbringingSignals('两人是青梅竹马，从小一起长大'), true);
+  assert.equal(detectJointUpbringingSignals('初来乍到的外地旅人'), false);
+
+  // Concealment signal without visibilityTags emits natural-prose anti-mind-reading WITHOUT [外表可见] brackets
+  const concealRes = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '表面和平相处，其实心里暗自打算下个月提出分手',
+    charContext: { name: '陆清宴' },
+  });
+  assert.ok(concealRes.assembledPromptText.includes('【隐瞒与认知边界（防读心）】'));
+  assert.equal(concealRes.assembledPromptText.includes('[外表可见]'), false);
+
+  // visibilityTags: true covers everyday emotional undercurrents
+  const tagRes = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '暗恋多年',
+    visibilityTags: true,
+  });
+  assert.ok(tagRes.assembledPromptText.includes('想分手、暗恋'));
+  assert.ok(tagRes.assembledPromptText.includes('[私密未公开]'));
+
+  // Joint upbringing blends into 【基础人设】; pureCrossCardReuse: true decouples 【基础人设】
+  const jointRes = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '与对方是青梅竹马，从小习惯替他收好雨伞',
+    charContext: { name: '周恪' },
+  });
+  assert.ok(jointRes.assembledPromptText.includes('【基础人设与共同成长融合】'));
+
+  const pureReuseRes = buildGenerationMessages({
+    mode: 'optimize',
+    subMode: 'cross_card_adapt',
+    existingDraft: `${CORE_SECTION_HEADER}\n## 性格\n沉稳。\n${SHELL_SECTION_HEADER}\n## 关系\n青梅竹马。`,
+    charContext: { name: '新角色' },
+    pureCrossCardReuse: true,
+  });
+  assert.ok(pureReuseRes.assembledPromptText.includes('【纯通用跨卡复用】'));
+  assert.equal(pureReuseRes.assembledPromptText.includes('【基础人设与共同成长融合】'), false);
+});
+
+test('Group 14.2: Subject-omission Token-economy rules & resolveCharacterRealName across XML/YAML/title-cards', () => {
+  const promptText = buildGenerationMessages({ mode: 'create', inspiration: '画师日常' }).assembledPromptText;
+  assert.ok(promptText.includes('默认省略主语'));
+  assert.equal(promptText.includes('尽量用 {{user}} 指代'), false);
+
+  // 1. XML attribute extraction
+  const rXml = resolveCharacterRealName({
+    name: '《海港往事》',
+    description: '<character_information character="沈砚">\n身高: 183cm',
+  });
+  assert.equal(rXml.realName, '沈砚');
+  assert.equal(rXml.source, 'description');
+
+  // 2. Top-level YAML person key inside fenced/container shell
+  const rYamlTop = resolveCharacterRealName({
+    name: '《冬夜旧信》',
+    description: '```yaml\n<info>\n<character>\n周恪:\n  年龄: 27\n  性格: 冷静克制\n```',
+  });
+  assert.equal(rYamlTop.realName, '周恪');
+  assert.equal(rYamlTop.source, 'description');
+
+  // 3. KV field inside worldEntries (skipping noise entries)
+  const rWorld = resolveCharacterRealName({
+    name: '✨【春日集】',
+    description: '',
+    worldEntries: [
+      { comment: '状态栏', content: '姓名: 不该取的噪音名' },
+      { comment: '人物档案', content: 'Chinese name: 林知意\n年龄: 22' },
+    ],
+  });
+  assert.equal(rWorld.realName, '林知意');
+  assert.equal(rWorld.source, 'worldbook');
+
+  // 4. Stripped title fallback
+  const rFallback = resolveCharacterRealName({
+    name: '《夜航船》',
+    description: '船舱里的灯火微弱。',
+  });
+  assert.equal(rFallback.realName, '夜航船');
+  assert.equal(rFallback.source, 'stripped_title');
+
+  // 5. buildGenerationMessages instructs using realName & forbids {{char}} when realName !== card.name
+  const realNamePrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '书店店员',
+    charContext: {
+      name: '《海港往事》',
+      realName: '沈砚',
+      description: '姓名: 沈砚\n港务局调度员',
+    },
+  }).assembledPromptText;
+  assert.ok(realNamePrompt.includes('【角色真名指代规范】'));
+  assert.ok(realNamePrompt.includes('沈砚'));
+  assert.ok(realNamePrompt.includes('严禁机械输出 {{char}}'));
+});
+
+// ============================================================================
+// Group 15: R2/R3/R4 Companion Engine, Global Token Planner & 84-Card Noise Compatibility
+// ============================================================================
+
+test('Group 15.1 (R2/R3/R4): isNoiseWorldbookEntry, stripCompanionConflicts & extractVerbatimCompanionSlices preserve author prose verbatim', () => {
+  assert.equal(isNoiseWorldbookEntry({ comment: '状态栏规范', content: '<status>HP:100</status>' }), true);
+  assert.equal(isNoiseWorldbookEntry({ comment: 'COT思维链', content: 'step 1' }), true);
+  assert.equal(isNoiseWorldbookEntry({ comment: 'initvar', content: '// initvar' }), true);
+  assert.equal(isNoiseWorldbookEntry({ comment: 'writingspec', content: '写作规范' }), true);
+  assert.equal(isNoiseWorldbookEntry({ comment: '人物档案', content: '姓名: 程屿\n习惯喝黑咖啡。' }), false);
+
+  const card = {
+    name: '《旧城烟火》',
+    description: '```yaml\n<info>\n<character_information character="程屿">\n外貌：短发利落，左腕戴着一只旧表。\n与{{user}}的旧关系：本局开局时刚分手。\n</character_information>\n</info>\n```\n<status>时间：周一</status>',
+    personality: '说话简短直接，习惯先动手解决问题。\n每次回复末尾必须输出状态栏。',
+    scenario: '旧公寓走廊',
+    firstMessage: '他把钥匙放在玄关柜上。',
+    mesExamples: '<START>\n程屿：别站着，进来喝水。',
+  };
+
+  const stripped = stripCompanionConflicts(card);
+  assert.ok(stripped.strippedTypes.includes('firstMessage'));
+  assert.ok(stripped.strippedTypes.includes('scenario'));
+  assert.ok(stripped.strippedTypes.includes('statusBarDirective'));
+  assert.ok(stripped.strippedTypes.includes('oldUserRelation'));
+  assert.ok(stripped.cleanSections.description.includes('外貌：短发利落，左腕戴着一只旧表。'));
+  assert.equal(stripped.cleanSections.description.includes('<character_information'), false);
+  assert.equal(stripped.cleanSections.description.includes('```'), false);
+  assert.equal(stripped.cleanSections.description.includes('刚分手'), false);
+  assert.equal(stripped.cleanSections.personality.includes('每次回复末尾'), false);
+  assert.ok(stripped.cleanSections.mesExamples.includes('别站着，进来喝水'));
+
+  const sliced = extractVerbatimCompanionSlices(
+    card,
+    [
+      { comment: '状态栏模板', content: '<status>时间：周一</status>' },
+      { comment: '令行禁止', content: '说话不带儿化音，吵架绝不暴戾失控。\n输出格式要求：每轮附带状态栏' },
+      { comment: '日常习惯', content: '程屿在厨房备菜时总是顺手把案板擦干净。' },
+    ],
+    600
+  );
+  assert.ok(sliced.text.includes('外貌：短发利落，左腕戴着一只旧表。'));
+  assert.ok(sliced.text.includes('说话不带儿化音，吵架绝不暴戾失控。'));
+  assert.equal(sliced.text.includes('每轮附带状态栏'), false);
+  assert.ok(sliced.text.includes('程屿在厨房备菜时总是顺手把案板擦干净。'));
+  assert.equal(sliced.text.includes('状态栏模板'), false);
+  assert.equal(sliced.truncated, false);
+
+  const tightSliced = extractVerbatimCompanionSlices(
+    {
+      name: '程屿',
+      description: '第一段作者原话：他每天清晨六点半准时出门晨跑，沿河道跑完五公里才回家煮豆浆。\n\n第二段作者原话：性格沉稳少言，对朋友极其护短，遇到突发状况总是先确认身边人是否安全。',
+    },
+    [],
+    45
+  );
+  assert.equal(tightSliced.truncated, true);
+  assert.ok(tightSliced.usedTokens <= 65);
+  assert.ok(tightSliced.text.includes('第一段作者原话'));
+});
+
+test('Group 15.2 (R2/R3/R4): computeCompanionTokenPlan, buildCompanionWorldbookEntries & 1-3 companions in buildGenerationMessages', () => {
+  assert.deepEqual(COMPANION_FREQUENCY_TIERS.map((t) => t.id), ['background', 'occasional', 'active_circle']);
+  assert.deepEqual(COMPANION_CARRY_MODES.map((m) => m.id), ['inline', 'persona_book', 'target_book']);
+  assert.ok(COMPANION_RELATION_PRESETS.includes('哥哥'));
+
+  const companions = [
+    {
+      id: 'comp_1',
+      cardName: '《夜巷来信》',
+      realName: '顾淮',
+      relationToUser: '哥哥',
+      knowsMainChar: true,
+      relationToMainChar: '同窗旧识',
+      frequencyTier: 'active_circle',
+      carryMode: 'persona_book',
+      cardContext: {
+        name: '《夜巷来信》',
+        description: '姓名: 顾淮\n常穿深蓝衬衫，性格温和守礼。',
+        personality: '做事有条理。',
+      },
+      selectedWorldEntries: [{ comment: '茶室习惯', content: '偏爱乌龙茶。' }],
+    },
+    {
+      id: 'comp_2',
+      name: '苏棠',
+      relationToUser: '挚友',
+      knowsMainChar: false,
+      frequencyTier: 'background',
+      carryMode: 'inline',
+      cardContext: {
+        name: '苏棠',
+        description: '外貌：齐耳短发，笑起来有虎牙。',
+      },
+    },
+  ];
+
+  const planOk = computeCompanionTokenPlan({
+    personaText: '普通上班族人设。',
+    mainCharContext: { name: '沈砚', description: '港务调度员。' },
+    companions,
+    maxContextTokens: 16000,
+  });
+  assert.equal(planOk.headroomStatus, 'ok');
+  assert.equal(planOk.perCompanionBudgets.length, 2);
+  assert.ok(planOk.perCompanionBudgets[0].allocatedTokens > planOk.perCompanionBudgets[1].allocatedTokens);
+
+  const planTight = computeCompanionTokenPlan({
+    personaText: '超长人设内容。'.repeat(220),
+    mainCharContext: { name: '沈砚', description: '超长主卡背景。'.repeat(220) },
+    companions,
+    maxContextTokens: 2000,
+  });
+  assert.equal(planTight.headroomStatus, 'over');
+  assert.ok(planTight.warningMessage.length > 0);
+
+  const wbEntries = buildCompanionWorldbookEntries({
+    companions,
+    companionPlans: planOk,
+    targetPersonaName: '宁雨眠',
+  });
+  assert.equal(wbEntries.length, 2);
+  assert.equal(wbEntries[0].extensions.user_persona_studio.slotKey, 'ups:companion:comp_1');
+  assert.equal(wbEntries[0].extensions.user_persona_studio.managed, true);
+  assert.equal(wbEntries[0].order, 100);
+  assert.equal(wbEntries[1].order, 60);
+  assert.ok(wbEntries[0].key.includes('顾淮'));
+  assert.equal(wbEntries[0].key.includes('《夜巷来信》'), false);
+  assert.ok(wbEntries[0].content.includes('偏爱乌龙茶'));
+
+  const genRes = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '在港城经营旧书店',
+    charContext: { name: '沈砚', description: '港务局调度员' },
+    companions,
+  });
+  assert.ok(genRes.assembledPromptText.includes('【携伴客串与人物关系网'));
+  assert.ok(genRes.assembledPromptText.includes('顾淮'));
+  assert.ok(genRes.assembledPromptText.includes('同窗旧识'));
+  assert.ok(genRes.assembledPromptText.includes('苏棠'));
+  assert.ok(genRes.assembledPromptText.includes('齐耳短发，笑起来有虎牙'));
+  assert.ok(genRes.assembledPromptText.includes('绑定人设专属世界书'));
+});
+
+test('Group 15.3 (Three-Way Classification, disable:true & Multi-Character Card 3 Modes)', () => {
+  // 1. Three-way worldbook classification & acting_rules preservation
+  assert.equal(classifyWorldbookEntry({ comment: '角色档案：陆砚', content: '姓名：陆砚' }), 'character_lore');
+  assert.equal(classifyWorldbookEntry({ comment: '令行禁止', content: '绝不公开炫富，说话不带儿化音。' }), 'acting_rules');
+  assert.equal(classifyWorldbookEntry({ comment: '人设修正', content: '吵架绝不暴戾失控，线上打字句尾不加句号。' }), 'acting_rules');
+  assert.equal(classifyWorldbookEntry({ comment: '防霸总与剧情守则', content: '遇到分歧冷静沟通。' }), 'acting_rules');
+  assert.equal(classifyWorldbookEntry({ comment: '状态栏', content: '<status>HP</status>' }), 'system_format');
+  assert.equal(classifyWorldbookEntry({ comment: '思维链COT', content: '思考流程' }), 'system_format');
+  assert.equal(classifyWorldbookEntry({ comment: 'initvar', content: '// initvar' }), 'system_format');
+
+  assert.equal(isNoiseWorldbookEntry({ comment: '令行禁止', content: '说话不带儿化音' }), false);
+  assert.equal(isNoiseWorldbookEntry({ comment: '人设修正', content: '绝不油腻' }), false);
+  assert.equal(isNoiseWorldbookEntry({ comment: '状态栏', content: 'HP:100' }), true);
+
+  // disable: true flag
+  assert.equal(isWorldbookEntryDisabled({ comment: 'IF分支', disable: true }), true);
+  assert.equal(isWorldbookEntryDisabled({ comment: '常驻', disable: false }), false);
+
+  // 2. Multi-character / ensemble card detection (10-char synthetic ensemble card)
+  const ensembleEntries = [
+    { entryKey: 'w::0', comment: '世界观总纲', content: '江南水乡商帮背景，各家行会并立。', defaultEnabled: true },
+    { entryKey: 'w::1', comment: '令行禁止', content: '所有角色言行克制守礼，不写夸张霸总台词。', defaultEnabled: true },
+    { entryKey: 'w::2', comment: '状态栏', content: '<status>日期</status>', defaultEnabled: true },
+    { entryKey: 'c::1', comment: '柳明川', content: '身份：茶行掌柜\n性格：温和细心。详情：' + '长档案'.repeat(40), defaultEnabled: true },
+    { entryKey: 'c::2', comment: '谢知微', content: '身份：绸缎庄东家\n性格：干练果决。详情：' + '长档案'.repeat(40), defaultEnabled: true },
+    { entryKey: 'c::3', comment: '温景和', content: '身份：书院先生\n性格：慢热寡言。详情：' + '长档案'.repeat(40), defaultEnabled: true },
+    { entryKey: 'c::4', comment: '唐舒云', content: '身份：船运东家\n性格：爽朗直率。详情：' + '长档案'.repeat(40), defaultEnabled: true },
+    { entryKey: 'c::5', comment: '许鹤年', content: '身份：药铺大夫\n性格：细心严谨。详情：' + '长档案'.repeat(40), defaultEnabled: true },
+    { entryKey: 'c::6', comment: '沈念（IF线）', content: '身份：隐藏分支角色\n性格：神秘。', defaultEnabled: false, disable: true },
+  ];
+  const ensembleCard = {
+    name: '《江南百景录》',
+    description: '水乡商帮群像舞台。',
+    worldEntries: ensembleEntries,
+  };
+
+  const multiInfo = detectMultiCharacterCard(ensembleCard, ensembleEntries);
+  assert.equal(multiInfo.isMultiChar, true);
+  assert.equal(multiInfo.characterEntries.length, 6);
+  assert.equal(multiInfo.characterEntries.find((c) => c.key === 'c::6').disabled, true);
+
+  // Mode A: Global ensemble mode (0 sub-chars selected) -> compact roster summary, omits full 500-char bios & disabled branch
+  const ensemblePrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '新来的瓷器匠人',
+    charContext: ensembleCard,
+  }).assembledPromptText;
+  assert.ok(ensemblePrompt.includes('卡内人物名册摘要'));
+  assert.ok(ensemblePrompt.includes('柳明川（茶行掌柜）'));
+  assert.ok(ensemblePrompt.includes('所有角色言行克制守礼'));
+  assert.equal(ensemblePrompt.includes('长档案长档案长档案'), false);
+  assert.equal(ensemblePrompt.includes('隐藏分支角色'), false);
+  assert.equal(ensemblePrompt.includes('<status>'), false);
+
+  // Mode B: Focused target mode (1 sub-char selected) -> deep read ONLY selected sub-char + acting_rules, auto-targets realName
+  const focusedPrompt = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '隔壁茶楼的伙计',
+    charContext: ensembleCard,
+    selectedSubCharKeys: ['c::2'],
+  }).assembledPromptText;
+  assert.ok(focusedPrompt.includes('聚焦目标角色：\n谢知微'));
+  assert.ok(focusedPrompt.includes('角色真名：\n谢知微'));
+  assert.ok(focusedPrompt.includes('严禁机械输出 {{char}}'));
+  assert.ok(focusedPrompt.includes('绸缎庄东家'));
+  assert.ok(focusedPrompt.includes('所有角色言行克制守礼'));
+  assert.equal(focusedPrompt.includes('书院先生'), false);
+  assert.equal(focusedPrompt.includes('药铺大夫'), false);
+
+  // Mode C: Companion single sub-character extraction from multi-character card
+  const compWb = buildCompanionWorldbookEntries({
+    companions: [
+      {
+        id: 'comp_ensemble_sub',
+        subCharKey: 'c::3',
+        relationToUser: '师长',
+        knowsMainChar: true,
+        relationToMainChar: '旧友',
+        frequencyTier: 'occasional',
+        carryMode: 'persona_book',
+        cardContext: ensembleCard,
+        selectedWorldEntries: [ensembleEntries[5], ensembleEntries[1]],
+      },
+    ],
+    targetPersonaName: '林清',
+  });
+  assert.equal(compWb.length, 1);
+  assert.ok(compWb[0].key.includes('温景和'));
+  assert.equal(compWb[0].key.includes('《江南百景录》'), false);
+  assert.ok(compWb[0].content.includes('书院先生'));
+  assert.ok(compWb[0].content.includes('所有角色言行克制守礼'));
+  assert.equal(compWb[0].content.includes('水乡商帮群像舞台'), false);
+  assert.equal(compWb[0].content.includes('茶行掌柜'), false);
+});
+
+// ============================================================================
+// Group 16: R6 Semantic Point Grouping & Follow-up 2 Bounded Generation History Queue
+// ============================================================================
+
+test('Group 16 (R6 & Follow-up 2): groupPersonaPoints groups cleanly and pushGenerationHistory enforces bounded deduplicated FIFO', () => {
+  const sampleText = [
+    CORE_SECTION_HEADER,
+    '## 基本身份',
+    '姓名：林栖',
+    '## 外貌与穿搭',
+    '黑长直，常穿浅灰毛衣。',
+    '## 性格与行为逻辑',
+    '说话简洁，遇到突发状况先稳住局面。',
+    SHELL_SECTION_HEADER,
+    '## 与当前角色的关系',
+    '当前与{{char}}关系：同一研究组同事',
+  ].join('\n');
+
+  const points = extractPersonaPoints(sampleText, 24);
+  const grouped = groupPersonaPoints(points);
+  assert.ok(grouped.length >= 3);
+  assert.equal(grouped[0].category, '基础信息');
+  assert.equal(grouped.at(-1).category, '当前身份与关系');
+  for (const g of grouped) {
+    assert.ok(g.items.length > 0);
+  }
+
+  assert.equal(MAX_GENERATION_HISTORY, 8);
+  assert.equal(MAX_HISTORY_ENTRY_CHARS, 12000);
+
+  let queue = [];
+  const emptyRes = pushGenerationHistory(queue, { text: '   ' });
+  assert.equal(emptyRes.added, false);
+  assert.equal(emptyRes.list.length, 0);
+
+  for (let i = 1; i <= 10; i += 1) {
+    const res = pushGenerationHistory(queue, {
+      text: `第 ${i} 版人设内容`,
+      mode: 'A',
+      charName: '沈砚',
+      timestamp: 1000 + i,
+    });
+    assert.equal(res.added, true);
+    queue = res.list;
+  }
+  assert.equal(queue.length, 8);
+  assert.equal(queue[0].text, '第 10 版人设内容');
+  assert.equal(queue[7].text, '第 3 版人设内容');
+
+  // Adjacent duplicate rejected
+  const dupTop = pushGenerationHistory(queue, { text: '  第 10 版人设内容  ' });
+  assert.equal(dupTop.added, false);
+  assert.equal(dupTop.list.length, 8);
+
+  // Older identical text promotes to top without duplicating
+  const promoteRes = pushGenerationHistory(queue, { text: '第 5 版人设内容' });
+  assert.equal(promoteRes.added, true);
+  assert.equal(promoteRes.list.length, 8);
+  assert.equal(promoteRes.list[0].text, '第 5 版人设内容');
+  assert.equal(promoteRes.list.filter((x) => x.text === '第 5 版人设内容').length, 1);
+
+  // Char capping
+  const hugeRes = pushGenerationHistory([], { text: '甲'.repeat(15000) });
+  assert.equal(hugeRes.added, true);
+  assert.equal(hugeRes.list[0].text.length, MAX_HISTORY_ENTRY_CHARS);
 });

@@ -1041,18 +1041,6 @@ export const SHADOW_CSS = String.raw`
   min-width: 0;
 }
 
-.ups-narrow-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 9px;
-  border: 1px solid var(--ups-border);
-  background-color: var(--ups-surface);
-  box-shadow: var(--ups-card-shadow);
-}
-
 @container plugin-win (min-width: 720px) {
   .ups-body.is-studio-tab {
     overflow: hidden;
@@ -1065,10 +1053,6 @@ export const SHADOW_CSS = String.raw`
     min-height: 0;
     height: 100%;
     overflow: hidden;
-  }
-
-  .ups-narrow-nav {
-    display: none;
   }
 
   .ups-workbench {
@@ -1157,7 +1141,7 @@ export const SHADOW_CSS = String.raw`
   line-height: 1.45;
 }
 
-/* Extracted Persona Points Checklist (2-column clean alignment, bounded height) */
+/* Extracted Persona Points Checklist (Semantic groups, spacious bounded height) */
 .ups-points-box {
   border: 1px solid var(--ups-border);
   border-left: 3px solid var(--ups-accent);
@@ -1167,11 +1151,11 @@ export const SHADOW_CSS = String.raw`
   padding: 9px 11px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .ups-points-list {
-  max-height: 288px;
+  max-height: 320px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -1182,15 +1166,52 @@ export const SHADOW_CSS = String.raw`
   background-color: var(--ups-input-bg);
 }
 
-.ups-point-item {
-  display: grid;
-  grid-template-columns: auto 84px minmax(0, 1fr);
+.ups-point-group {
+  border-bottom: 1px solid var(--ups-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.ups-point-group:last-child {
+  border-bottom: 0;
+}
+
+.ups-point-group-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 6px 9px;
+  background-color: var(--ups-bg-elevated);
   border-bottom: 1px solid var(--ups-border);
   font-size: 12px;
-  line-height: 1.4;
+  font-weight: 600;
+  color: var(--ups-fg);
+}
+
+.ups-point-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ups-point-group-items {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--ups-surface);
+}
+
+.ups-point-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 5px 10px 5px 22px;
+  border-bottom: 1px solid var(--ups-border);
+  font-size: 12px;
+  line-height: 1.42;
   cursor: pointer;
 }
 
@@ -1508,11 +1529,10 @@ export const SHADOW_CSS = String.raw`
 
 .ups-footer-status {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   min-height: 30px;
-  max-height: 32px;
-  padding: 0 10px;
+  padding: 5px 10px;
   border-radius: 7px;
   border: 1px solid var(--ups-border-strong);
   background-color: var(--ups-surface);
@@ -1529,15 +1549,19 @@ export const SHADOW_CSS = String.raw`
 .ups-status-dot {
   width: 7px;
   height: 7px;
+  margin-top: 5px;
   border-radius: 50%;
   background-color: var(--ups-accent);
   flex-shrink: 0;
 }
 
 .ups-status-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.42;
+  max-height: 54px;
+  overflow-y: auto;
   min-width: 0;
 }
 
@@ -1654,8 +1678,182 @@ export const SHADOW_CSS = String.raw`
   flex-shrink: 0;
 }
 
-.ups-footer-name-input {
-  width: 148px;
+/* Unified 32px Word-Count Editable Combo */
+.ups-word-count-combo {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-input-bg);
+  overflow: hidden;
+}
+
+.ups-word-count-combo:focus-within {
+  outline: 2px solid var(--ups-accent-soft);
+  border-color: var(--ups-accent);
+  background-color: var(--ups-surface);
+}
+
+.ups-word-count-combo > .ups-word-count-input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0 8px;
+}
+
+.ups-word-count-combo > .ups-word-count-input:focus {
+  outline: none;
+  background: transparent;
+}
+
+.ups-word-count-menu-btn {
+  width: 28px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--ups-border);
+  border-radius: 0;
+  background-color: var(--ups-surface);
+  color: var(--ups-fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ups-word-count-menu-btn:hover {
+  background-color: var(--ups-surface-hover);
+  color: var(--ups-fg);
+}
+
+/* Categorized Lexicon, Sections/Ratios, Companion Slots & History Popover */
+.ups-lexicon-panel,
+.ups-sections-panel {
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.ups-lexicon-cat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ups-lexicon-cat-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ups-fg-muted);
+}
+
+.ups-lexicon-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ups-sec-group {
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-surface);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ups-sec-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.ups-ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ups-companion-section {
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ups-companion-slot {
+  border: 1px solid var(--ups-border);
+  border-left: 3px solid var(--ups-accent);
+  border-radius: 7px;
+  background-color: var(--ups-surface);
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-split-hint {
+  border-color: var(--ups-accent);
+  background-color: var(--ups-accent-soft);
+  color: var(--ups-accent);
+  font-weight: 500;
+}
+
+.ups-history-popover {
+  position: fixed;
+  z-index: 2147483016;
+  width: min(360px, calc(100vw - 20px));
+  max-height: min(400px, 76dvh);
+  overflow-y: auto;
+  padding: 10px 12px;
+  background-color: var(--ups-surface);
+  background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
+  color: var(--ups-fg);
+  border: 1px solid var(--ups-border-strong);
+  border-radius: 10px;
+  box-shadow: var(--ups-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: auto;
+}
+
+.ups-history-item {
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-input-bg);
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ups-wb-group-title {
+  padding: 5px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ups-fg-muted);
+  background-color: var(--ups-bg-elevated);
+  border-bottom: 1px solid var(--ups-border);
 }
 
 /* Rows, Grids & Inputs */
@@ -2654,11 +2852,6 @@ export const SHADOW_CSS = String.raw`
     gap: 5px;
   }
 
-  .ups-footer-name-input {
-    flex: 1 1 130px;
-    width: auto;
-  }
-
   .ups-footer-actions > button {
     flex: 1 1 auto;
     min-width: 0;
@@ -2723,13 +2916,6 @@ export const SHADOW_CSS = String.raw`
 
   .ups-footer {
     padding: 6px 10px;
-  }
-
-  .ups-footer-name-input {
-    height: 28px;
-    min-height: 28px;
-    max-height: 28px;
-    font-size: 11.5px;
   }
 
   .ups-footer-actions > button {
@@ -2813,17 +2999,28 @@ export const SHADOW_CSS = String.raw`
 @media (max-width: 680px), (pointer: coarse) {
   .ups-input,
   .ups-textarea,
-  .ups-input.ups-input-sm,
-  .ups-footer-name-input {
+  .ups-input.ups-input-sm {
     font-size: 16px;
   }
 
-  .ups-input,
-  .ups-footer-name-input {
+  .ups-input {
     height: 36px;
     min-height: 36px;
     max-height: 36px;
     line-height: 34px;
+  }
+
+  .ups-word-count-combo {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+  }
+
+  .ups-word-count-combo > .ups-word-count-input,
+  .ups-word-count-menu-btn {
+    height: 34px;
+    min-height: 34px;
+    max-height: 34px;
   }
 
   .ups-input.ups-input-sm {

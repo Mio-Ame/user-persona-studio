@@ -19,6 +19,7 @@ import {
   getActivePersona,
   listPersonas,
   listCharacters,
+  listWorldbooks,
   getCharacterContext,
   getActiveCharacterContext,
   loadCharacterWorldbookEntries,
@@ -70,7 +71,7 @@ test('M1: manifest.json matches SillyTavern extension contract', () => {
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.4.0');
+  assert.equal(manifest.version, '1.5.0');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');
@@ -3069,4 +3070,258 @@ test('H7 (R1): listCharacters, getCharacterContext & loadCharacterWorldbookEntri
   assert.equal(shallowResult.personality, '沉稳克制');
   assert.equal(shallowResult.scenario, '雨夜码头');
   assert.equal(shallowResult.firstMessage, '你比约定时间晚了五分钟。');
+});
+
+test('H19 (R1): listWorldbooks reads and deduplicates sorted names read-only without mutating host or calling updateWorldInfoList', async () => {
+  let updateCalls = 0;
+  const rawInput = ['  雾港主书 ', '冬夜书目', '雾港主书', '', '  ', null, 42, '安平镇'];
+  const snapshot = [...rawInput];
+
+  const fromDeps = await listWorldbooks({
+    worldNames: rawInput,
+    updateWorldInfoList: () => {
+      updateCalls += 1;
+    },
+    skipDynamicImport: true,
+  });
+  assert.deepEqual(rawInput, snapshot);
+  assert.equal(updateCalls, 0);
+  assert.equal(fromDeps.length, 4);
+  assert.ok(fromDeps.includes('雾港主书'));
+  assert.ok(fromDeps.includes('42'));
+
+  const fromCtx = await listWorldbooks({
+    ctx: { worldInfo: { world_names: ['乙书', '甲书', '乙书'] } },
+    skipDynamicImport: true,
+  });
+  assert.deepEqual(fromCtx, ['甲书', '乙书']);
+
+  const prevGlobal = globalThis.world_names;
+  try {
+    globalThis.world_names = ['全局书B', '全局书A'];
+    const fromGlobal = await listWorldbooks({ skipDynamicImport: true });
+    assert.deepEqual(fromGlobal, ['全局书A', '全局书B']);
+  } finally {
+    if (prevGlobal === undefined) {
+      delete globalThis.world_names;
+    } else {
+      globalThis.world_names = prevGlobal;
+    }
+  }
+});
+
+test('H20 (R4): getCharacterContext attaches mesExamples only when includeDialogueExamples is true and supports (target, deps, options)', async () => {
+  let selectCalls = 0;
+  const ctx = {
+    characterId: 0,
+    chatId: 'chat-active-1',
+    selectCharacterById: () => {
+      selectCalls += 1;
+    },
+    characters: [
+      {
+        avatar: 'main.png',
+        name: '主角色',
+        shallow: false,
+        data: { description: '主角色简介' },
+      },
+      {
+        avatar: 'comp.png',
+        name: '客串甲',
+        shallow: false,
+        data: {
+          description: '姓名: 客串甲\n身高 180cm',
+          mes_example: '<START>\n客串甲：先把茶端过去吧。',
+        },
+      },
+    ],
+  };
+
+  // Default omitted -> mesExamples MUST NOT exist
+  const withoutExamples = await getCharacterContext({ chid: '1' }, {}, { ctx, skipDynamicImport: true });
+  assert.equal(Object.hasOwn(withoutExamples, 'mesExamples'), false);
+  assert.equal(ctx.characterId, 0);
+  assert.equal(ctx.chatId, 'chat-active-1');
+  assert.equal(selectCalls, 0);
+
+  // Canonical (target, options, deps) with includeDialogueExamples: true
+  const withExamples = await getCharacterContext(
+    { chid: '1' },
+    { includeDialogueExamples: true },
+    { ctx, skipDynamicImport: true }
+  );
+  assert.equal(withExamples.mesExamples, '<START>\n客串甲：先把茶端过去吧。');
+
+  // Tolerant (target, deps, options) order
+  const swappedOrder = await getCharacterContext(
+    { chid: '1' },
+    { ctx, skipDynamicImport: true },
+    { includeDialogueExamples: true }
+  );
+  assert.equal(swappedOrder.mesExamples, '<START>\n客串甲：先把茶端过去吧。');
+  assert.equal(ctx.characterId, 0);
+  assert.equal(selectCalls, 0);
+});
+
+test('H21 (R1): saveSupplementaryWorldbook supports idempotent in-place upsert and managed-only pruneManaged', async () => {
+  const store = {
+    '用户专属世界书': {
+      entries: {
+        10: {
+          uid: 10,
+          key: ['旧角色'],
+          comment: '用户手写条目',
+          content: '玩家自己写的世界观条目，不能被删。',
+          constant: false,
+          selective: true,
+          disable: false,
+          extensions: { other_plugin: { keep: 1 } },
+        },
+        11: {
+          uid: 11,
+          key: ['老客串'],
+          comment: '客串角色：老客串',
+          content: '旧版托管内容',
+          extensions: {
+            [EXTENSION_SETTINGS_KEY]: { managed: true, slotKey: 'ups:companion:old_comp' },
+          },
+        },
+      },
+    },
+  };
+
+  let nextUid = 20;
+  const deps = {
+    skipDynamicImport: true,
+    loadWorldInfo: async (name) => structuredClone(store[name] || { entries: {} }),
+    saveWorldInfo: async (name, data) => {
+      store[name] = structuredClone(data);
+    },
+    createWorldInfoEntry: (_name, data) => {
+      const uid = nextUid++;
+      const entry = { uid, key: [], comment: '', content: '' };
+      data.entries[uid] = entry;
+      return entry;
+    },
+    updateWorldInfoList: async () => {},
+  };
+
+  // First upsert + pruneManaged: creates c1, updates/prunes old_comp, keeps user entry 10 untouched
+  const res1 = await saveSupplementaryWorldbook(
+    {
+      worldName: '用户专属世界书',
+      upsert: true,
+      pruneManaged: true,
+      entries: [
+        {
+          key: ['顾淮', '哥哥'],
+          comment: '客串角色：顾淮',
+          content: '第一版客串设定',
+          order: 100,
+          extensions: {
+            [EXTENSION_SETTINGS_KEY]: { managed: true, slotKey: 'ups:companion:c1' },
+          },
+        },
+      ],
+    },
+    deps
+  );
+  assert.equal(res1.createdCount, 1);
+  assert.equal(res1.updatedCount, 0);
+  assert.equal(res1.prunedCount, 1);
+
+  const savedEntries1 = Object.values(store['用户专属世界书'].entries);
+  assert.equal(savedEntries1.length, 2);
+  assert.ok(savedEntries1.some((e) => e.uid === 10 && e.extensions?.other_plugin?.keep === 1));
+  const c1Uid = savedEntries1.find((e) => e.extensions?.[EXTENSION_SETTINGS_KEY]?.slotKey === 'ups:companion:c1').uid;
+
+  // Second upsert: updates in-place preserving uid, zero duplicates
+  const res2 = await saveSupplementaryWorldbook(
+    {
+      worldName: '用户专属世界书',
+      upsert: true,
+      pruneManaged: true,
+      entries: [
+        {
+          key: ['顾淮', '二哥'],
+          comment: '客串角色：顾淮',
+          content: '更新后的客串设定',
+          order: 80,
+          extensions: {
+            [EXTENSION_SETTINGS_KEY]: { managed: true, slotKey: 'ups:companion:c1' },
+          },
+        },
+      ],
+    },
+    deps
+  );
+  assert.equal(res2.createdCount, 0);
+  assert.equal(res2.updatedCount, 1);
+  assert.equal(res2.prunedCount, 0);
+  const savedEntries2 = Object.values(store['用户专属世界书'].entries);
+  assert.equal(savedEntries2.length, 2);
+  const updatedC1 = savedEntries2.find((e) => e.uid === c1Uid);
+  assert.equal(updatedC1.content, '更新后的客串设定');
+  assert.equal(updatedC1.order, 80);
+
+  // Removing all managed entries with pruneManaged: true leaves non-managed entry 10 intact
+  const res3 = await saveSupplementaryWorldbook(
+    {
+      worldName: '用户专属世界书',
+      upsert: true,
+      pruneManaged: true,
+      entries: [],
+    },
+    deps
+  );
+  assert.equal(res3.prunedCount, 1);
+  assert.deepEqual(Object.keys(store['用户专属世界书'].entries), ['10']);
+});
+
+test('H22: getCharacterContext resolves realName, flags disabled entries & merges character_lore + acting_rules when description < 300 chars', async () => {
+  const ctx = {
+    characterId: 0,
+    characters: [
+      {
+        avatar: 'title_card.png',
+        name: '《青石巷往事》',
+        shallow: false,
+        data: {
+          description: '',
+          extensions: { world: '青石巷世界书' },
+        },
+      },
+    ],
+  };
+
+  const result = await getCharacterContext(
+    { chid: '0' },
+    { includeWorldSummary: true, includeWorldEntries: true },
+    {
+      ctx,
+      loadWorldInfo: async () => ({
+        entries: {
+          0: { uid: 0, disable: false, comment: '人物档案', content: '姓名: 陆停云\n性格温和但极有原则。' },
+          1: { uid: 1, disable: false, comment: '令行禁止', content: '说话不带儿化音，遇事不轻易失控。' },
+          2: { uid: 2, disable: false, comment: '状态栏', content: '<status>日期</status>' },
+          3: { uid: 3, disable: true, comment: 'IF分支档案', content: '未启用的分支设定，不该自动合并。' },
+        },
+      }),
+      skipDynamicImport: true,
+    }
+  );
+
+  assert.equal(result.realName, '陆停云');
+  assert.ok(result.description.includes('性格温和但极有原则'));
+  assert.ok(result.description.includes('说话不带儿化音'));
+  assert.equal(result.description.includes('<status>'), false);
+  assert.equal(result.description.includes('未启用的分支设定'), false);
+
+  const ifEntry = result.worldEntries.find((e) => e.comment === 'IF分支档案');
+  assert.equal(ifEntry.disabled, true);
+  assert.equal(ifEntry.category, 'character_lore');
+  const ruleEntry = result.worldEntries.find((e) => e.comment === '令行禁止');
+  assert.equal(ruleEntry.category, 'acting_rules');
+  const sysEntry = result.worldEntries.find((e) => e.comment === '状态栏');
+  assert.equal(sysEntry.category, 'system_format');
 });

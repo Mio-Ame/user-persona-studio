@@ -7,7 +7,7 @@ import {
 } from './src/host.js';
 import { createStudioUI } from './src/ui.js';
 
-export const EXTENSION_VERSION = '1.4.0';
+export const EXTENSION_VERSION = '1.5.0';
 
 function createDomEl(doc, tag, props = {}, children = []) {
   const node = doc.createElement(tag);
@@ -187,7 +187,7 @@ export async function createStudioController(options = {}) {
       const btn = createDomEl(doc, 'button', {
         type: 'button',
         className: 'menu_button interactable ups-char-adapt-btn',
-        title: '基于此角色卡适配 User 人设（不切换当前对话）',
+        title: '基于此角色卡适配 User 人设',
         'data-ups-char-adapt': 'true',
         'aria-label': '基于此角色卡适配 User 人设',
         text: '人设适配',

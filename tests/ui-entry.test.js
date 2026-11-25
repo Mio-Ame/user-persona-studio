@@ -1053,13 +1053,10 @@ test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/
   sr.querySelector('[data-ups-points-close]').click();
   assert.equal(pointsBox.hidden, true);
 
-  // 5. Custom char count live-links to scheme.maxTokens & framed status box flashes
-  const wcSel = sr.querySelector('[data-ups-word-count]');
-  wcSel.value = 'custom';
-  wcSel.dispatchEvent({ type: 'change', bubbles: true });
-  const customCharsIn = sr.querySelector('[data-ups-custom-chars]');
-  customCharsIn.value = '2400';
-  customCharsIn.dispatchEvent({ type: 'input', bubbles: true });
+  // 5. Unified 32px word-count input live-links to scheme.maxTokens & framed status box flashes
+  const wcIn = sr.querySelector('[data-ups-word-count-input]');
+  wcIn.value = '2400';
+  wcIn.dispatchEvent({ type: 'change', bubbles: true });
   const activeScheme = ui.getState().settings.schemes.find((s) => s.id === ui.getState().settings.activeSchemeId);
   assert.equal(activeScheme.targetChars, 2400);
   assert.ok(activeScheme.maxTokens >= 7000);
@@ -1696,17 +1693,21 @@ test('Tier 5 | Gap 3: saveCurrentPersona preserves lorebook before refresh, avoi
     '内容：北港灯塔旧事。',
   ].join('\n');
   srB.querySelector('[data-ups-draft]').dispatchEvent({ type: 'input', bubbles: true });
-  srB.querySelector('[data-ups-save-name]').value = '沈渡';
 
   // First create with dualLayer=false -> lorebook must be '' (not 'old_person_wb')
-  srB.querySelector('[data-ups-save-new]').click();
+  srB.querySelector('[data-ups-save-as-btn]').click();
+  const saveSubB = srB.querySelector('[data-ups-save-name-submodal]');
+  saveSubB.querySelector('input').value = '沈渡';
+  saveSubB.querySelector('[data-ups-save-name-confirm]').click();
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(opLog, [{ op: 'persona', mode: 'create', lorebook: '' }]);
 
   // Enable dualLayer -> worldbook saved FIRST, then persona saved with final lorebook name
   opLog.length = 0;
   srB.querySelector('[data-ups-popover]').querySelectorAll('input[type="checkbox"]')[1].click();
-  srB.querySelector('[data-ups-save-new]').click();
+  srB.querySelector('[data-ups-save-as-btn]').click();
+  saveSubB.querySelector('input').value = '沈渡';
+  saveSubB.querySelector('[data-ups-save-name-confirm]').click();
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(opLog, [
     { op: 'wb', worldName: '沈渡_补充设定' },
@@ -1902,13 +1903,17 @@ test('Tier 5 | R1: saveCurrentPersona acquires concurrency lock, disables save b
   const sr = ui.shadow;
   const draft = sr.querySelector('[data-ups-draft]');
   draft.value = '完整人设正文';
-  const saveNewBtn = sr.querySelector('[data-ups-save-new]');
+  const saveNewBtn = sr.querySelector('[data-ups-save-as-btn]');
   const saveOverwriteBtn = sr.querySelector('[data-ups-save-overwrite]');
   const footerSaveBtn = sr.querySelector('[data-ups-footer-save]');
 
   // Double-click while in-flight -> only 1 save call, buttons disabled
   saveNewBtn.click();
-  saveNewBtn.click();
+  const saveSub = sr.querySelector('[data-ups-save-name-submodal]');
+  saveSub.querySelector('input').value = '林清_新建';
+  const confirmSaveBtn = saveSub.querySelector('[data-ups-save-name-confirm]');
+  confirmSaveBtn.click();
+  confirmSaveBtn.click();
   saveOverwriteBtn.click();
   assert.equal(saveNewBtn.disabled, true);
   assert.equal(saveOverwriteBtn.disabled, true);
@@ -2157,10 +2162,10 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   assert.equal(footer.querySelector('[data-ups-export-preset]'), null);
   assert.ok(sr.querySelector('[data-ups-tab-panel="presets"]').querySelector('[data-ups-export-preset]'));
 
-  // 3. Word count selector updates active scheme & dual char/token badge
-  const wcSel = sr.querySelector('[data-ups-word-count]');
-  wcSel.value = '1000';
-  wcSel.dispatchEvent({ type: 'change', bubbles: true });
+  // 3. Word count combo input updates active scheme & dual char/token badge
+  const wcIn = sr.querySelector('[data-ups-word-count-input]');
+  wcIn.value = '1000';
+  wcIn.dispatchEvent({ type: 'change', bubbles: true });
   const activeScheme = ui.getState().settings.schemes.find((s) => s.id === ui.getState().settings.activeSchemeId);
   assert.equal(activeScheme.targetChars, 1000);
   assert.match(sr.querySelector('[data-ups-status]').textContent, /约 1000 字/);
@@ -2170,7 +2175,7 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   sr.querySelector('[data-ups-load-persona]').click();
   const pointsBox = sr.querySelector('[data-ups-points-box]');
   assert.equal(pointsBox.hidden, false);
-  const pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  const pointCbs = pointsBox.querySelectorAll('[data-ups-point-cb]');
   assert.equal(pointCbs.length, 3);
   assert.equal(pointCbs[0].checked, true);
   assert.equal(pointCbs[1].checked, true);
@@ -2629,26 +2634,23 @@ test('R4 & R5: undo/redo/copy sit beside draft editor with clear labels; footer 
   assert.equal(footer.querySelector('[data-ups-redo]'), null);
   assert.equal(footer.querySelector('[data-ups-copy]'), null);
 
-  // R4: Footer save controls shown on studio tab, hidden on presets/taste/settings tabs
-  const saveName = footer.querySelector('[data-ups-save-name]');
+  // R4: Footer save controls shown on studio tab, hidden on presets/taste/settings tabs (no permanent footer name input)
+  assert.equal(footer.querySelector('[data-ups-save-name]'), null);
   const saveOverwrite = footer.querySelector('[data-ups-save-overwrite]');
-  const saveNew = footer.querySelector('[data-ups-save-new]');
+  const saveNew = footer.querySelector('[data-ups-save-as-btn]');
   const statusEl = footer.querySelector('[data-ups-status]');
 
-  assert.equal(saveName.hidden, false);
   assert.equal(saveOverwrite.hidden, false);
   assert.equal(saveNew.hidden, false);
 
   for (const tabId of ['presets', 'taste', 'settings']) {
     ui.switchTab(tabId);
-    assert.equal(saveName.hidden, true, `saveName must be hidden on ${tabId}`);
     assert.equal(saveOverwrite.hidden, true, `saveOverwrite must be hidden on ${tabId}`);
     assert.equal(saveNew.hidden, true, `saveNew must be hidden on ${tabId}`);
     assert.equal(statusEl.hidden, false, `statusEl remains visible on ${tabId}`);
   }
 
   ui.switchTab('studio');
-  assert.equal(saveName.hidden, false);
   assert.equal(saveOverwrite.hidden, false);
   assert.equal(saveNew.hidden, false);
 
@@ -2758,7 +2760,7 @@ test('R1 & R2 regression: empty worldbook selection persists across refreshConte
   subSel.dispatchEvent({ type: 'change', bubbles: true });
   sr.querySelector('[data-ups-load-persona]').click();
   await new Promise((r) => setTimeout(r, 15));
-  let pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  let pointCbs = pointsBox.querySelectorAll('[data-ups-point-cb]');
   assert.equal(pointCbs.length, 3);
   assert.equal(pointCbs.filter((c) => c.checked).length, 3);
 
@@ -2766,14 +2768,14 @@ test('R1 & R2 regression: empty worldbook selection persists across refreshConte
   charSel.dispatchEvent({ type: 'change', bubbles: true });
   await new Promise((r) => setTimeout(r, 25));
   assert.equal(ui.getState().isCharAdaptFlow, true);
-  pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  pointCbs = pointsBox.querySelectorAll('[data-ups-point-cb]');
   assert.equal(pointCbs.filter((c) => c.checked).length, 0);
 
   // Order B: While non-active character '1' is selected, switching subModeSelect to core_expand keeps isCharAdaptFlow=true and 0 checked
   subSel.value = 'core_expand';
   subSel.dispatchEvent({ type: 'change', bubbles: true });
   assert.equal(ui.getState().isCharAdaptFlow, true);
-  pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  pointCbs = pointsBox.querySelectorAll('[data-ups-point-cb]');
   assert.equal(pointCbs.filter((c) => c.checked).length, 0);
 
   // Clicking 全不选 on character '1' worldbook stays empty across refreshContext()
@@ -2797,7 +2799,7 @@ test('R1 & R2 regression: empty worldbook selection persists across refreshConte
   await new Promise((r) => setTimeout(r, 25));
   assert.equal(ui.getState().isCharAdaptFlow, false);
   assert.deepEqual(ui.getState().selectedWorldEntryKeys, ['world::甲世界书::1']);
-  assert.equal(pointsBox.querySelectorAll('input[type="checkbox"]').filter((c) => c.checked).length, 3);
+  assert.equal(pointsBox.querySelectorAll('[data-ups-point-cb]').filter((c) => c.checked).length, 3);
 
   ui.destroy();
 });
