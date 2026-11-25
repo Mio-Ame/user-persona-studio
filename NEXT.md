@@ -19,9 +19,9 @@
 - 宿主兼容：SillyTavern `eventSource` 仅提供 `removeListener`，清理监听器时优先调用 `removeListener` 再回退 `off`。
 
 ## 4. 已知坑与未解决阻塞
-- 本地独立 Git 仓库已在 `dev` 分支完成初始化与首提交（当前未创建或推送任何远程仓库），临时验证产物已清理。
+- 独立 Git 仓库已关联公开远程仓库 `https://github.com/Mio-Ame/user-persona-studio` 并推送 `dev` 分支，临时验证产物已清理。
 - 真实 SillyTavern / TauriTavern 宿主环境（含 iOS WKWebView）下的在线生成、原生预设导出导入及真机排版表现，尚待通过 `dev` 分支完成真机冒烟实测确认。
 
 ## 5. 下一步最小动作
-1. 在真实 SillyTavern / TauriTavern（覆盖桌面端与 iOS WKWebView）加载当前 `dev` 分支，完成 Mode A/B 生成、旧人设重构、双层世界书绑定、原生预设导出、自定义 API 连通与 `ups:persona-saved` 事件联动冒烟实测。
-2. 真机实测确认无误后，将 `dev` 分支合并至 `main` 正式版并按需创建远程仓库发布。
+1. 在真实 SillyTavern / TauriTavern（覆盖桌面端与 iOS WKWebView）通过 `https://github.com/Mio-Ame/user-persona-studio`（`dev` 分支）拉取安装，完成 Mode A/B 生成、旧人设重构、双层世界书绑定、原生预设导出、自定义 API 连通与 `ups:persona-saved` 事件联动冒烟实测。
+2. 真机实测确认无误后，将 `dev` 分支合并推送至 `main` 正式版。

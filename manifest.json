@@ -5,8 +5,9 @@
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "User Persona Studio Contributors",
+  "author": "Mio-Ame",
   "version": "1.0.0",
-  "auto_update": false,
+  "homePage": "https://github.com/Mio-Ame/user-persona-studio",
+  "auto_update": true,
   "minimum_client_version": "1.12.0"
 }

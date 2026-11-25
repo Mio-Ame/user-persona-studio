@@ -40,7 +40,10 @@
 
 ## 安装与打开方式
 
-1. 将本插件目录放置于酒馆的第三方扩展目录并刷新页面（或在扩展管理界面通过仓库地址安装）。
+1. 在 SillyTavern / TauriTavern「扩展 -> 安装扩展（Install extension）」填入仓库地址安装（开发测试期分支填 `dev`）：
+   - 仓库地址：`https://github.com/Mio-Ame/user-persona-studio`
+   - 分支名称：`dev`
+   （或直接将本插件目录放置于酒馆的 `public/scripts/extensions/third-party/user-persona-studio` 目录并刷新页面。）
 2. 打开方式任选其一：
    - 点击人设管理面板工具栏中的「工坊」按钮；
    - 点击扩展菜单（魔棒图标）中的「User 人设工坊」；
