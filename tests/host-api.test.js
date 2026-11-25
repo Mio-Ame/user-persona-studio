@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import {
   EXTENSION_SETTINGS_KEY,
   HOST_CUSTOM_EVENTS,
+  LIVE_PERSONA_AVATAR_ID,
+  buildImportCandidates,
   getHostContext,
   resolveHostContext,
   getHostRequestHeaders,
@@ -65,7 +67,7 @@ test('M1: manifest.json matches SillyTavern extension contract', () => {
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.1.0');
+  assert.equal(manifest.version, '1.3.0');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');
@@ -130,7 +132,7 @@ test('H2: loadSettings & saveSettings initialize defaults, preserve partial over
   const initial = await loadSettings({ ctx, skipDynamicImport: true });
   assert.equal(initial.version, 1);
   assert.equal(initial.palette, 'paper');
-  assert.equal(initial.schemes.length, 2);
+  assert.equal(initial.schemes.length, 3);
   assert.equal(extensionSettings[EXTENSION_SETTINGS_KEY], initial);
 
   // Partial legacy merge preserves custom palette and taste entries while keeping built-in schemes
@@ -142,7 +144,7 @@ test('H2: loadSettings & saveSettings initialize defaults, preserve partial over
   };
   const merged = await loadSettings({ ctx, skipDynamicImport: true });
   assert.equal(merged.palette, 'ink');
-  assert.equal(merged.schemes.length, 2);
+  assert.equal(merged.schemes.length, 3);
   assert.equal(merged.tasteProfile.anchors.length, 1);
   assert.equal(merged.tasteProfile.anchors[0].text, '偏爱安静手冲咖啡馆的清晨节奏');
 
@@ -190,11 +192,14 @@ test('H3: getActivePersona, listPersonas, and getActiveCharacterContext handle C
     persona_description_lorebook: 'wb_alpha',
   };
 
-  // Empty user_avatar returns null for getActivePersona
+  // Absent powerUser + empty DOM returns null; present powerUser with empty user_avatar falls back to default_persona
   assert.equal(
-    await getActivePersona({ powerUser, userAvatar: '', skipDynamicImport: true }),
+    await getActivePersona({ powerUser: null, document: null, userAvatar: '', skipDynamicImport: true }),
     null
   );
+  const fallbackDefault = await getActivePersona({ powerUser, document: null, userAvatar: '', skipDynamicImport: true });
+  assert.equal(fallbackDefault.avatarId, 'beta.png');
+  assert.equal(fallbackDefault.isDefault, true);
 
   const active = await getActivePersona({ powerUser, userAvatar: 'alpha.png', skipDynamicImport: true });
   assert.equal(active.avatarId, 'alpha.png');
@@ -2546,4 +2551,350 @@ test('A25: runStudioGeneration auto-recovers when upstream rejects trailing assi
     },
   });
   assert.equal(resPrefillOk.text, '【基础人设】\n## 外貌与印象\n短发清爽。');
+});
+
+// ============================================================================
+// v1.3.0 Host Persona Reading & API Token Headroom Regression Tests
+// ============================================================================
+
+test('H16: ctx.powerUserSettings (real SillyTavern getContext shape) and buildImportCandidates multi-depth specifiers', async () => {
+  const scriptCandidates = buildImportCandidates('personas.js');
+  assert.ok(scriptCandidates.includes('../../../personas.js'));
+  assert.ok(scriptCandidates.includes('../../../../personas.js'));
+  assert.ok(scriptCandidates.includes('../../../../../personas.js'));
+  assert.ok(scriptCandidates.includes('/scripts/personas.js'));
+
+  const rootCandidates = buildImportCandidates('script.js', true);
+  assert.ok(rootCandidates.includes('../../../script.js'));
+  assert.ok(rootCandidates.includes('../../../../script.js'));
+  assert.ok(rootCandidates.includes('../../../../../script.js'));
+  assert.ok(rootCandidates.includes('/script.js'));
+
+  const powerUserSettings = {
+    personas: {
+      'st_real.png': '沈初',
+    },
+    persona_descriptions: {
+      'st_real.png': {
+        description: '常年在档案馆夜班整理旧卷宗。',
+        title: '馆员',
+        lorebook: 'wb_archive',
+        position: 0,
+        depth: 2,
+        role: 0,
+      },
+    },
+    persona_description: '常年在档案馆夜班整理旧卷宗。',
+    persona_description_position: 0,
+    persona_description_depth: 2,
+    persona_description_role: 0,
+    persona_description_lorebook: 'wb_archive',
+  };
+
+  // Real SillyTavern getContext() exposes powerUserSettings (ctx.powerUser is undefined, ctx.userAvatar is undefined)
+  const ctx = {
+    name1: '沈初',
+    powerUserSettings,
+  };
+
+  const active = await getActivePersona({ ctx, document: null, skipDynamicImport: true });
+  assert.ok(active);
+  assert.equal(active.avatarId, 'st_real.png');
+  assert.equal(active.name, '沈初');
+  assert.equal(active.description, '常年在档案馆夜班整理旧卷宗。');
+  assert.equal(active.lorebook, 'wb_archive');
+  assert.equal(active.isActive, true);
+
+  const listed = await listPersonas({ ctx, document: null, skipDynamicImport: true });
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].avatarId, 'st_real.png');
+  assert.equal(listed[0].isActive, true);
+});
+
+test('H17: getActivePersona & listPersonas infer avatarId from DOM/description or fall back to __live_persona__ so non-empty persona is never lost', async () => {
+  // (a) Infers avatarId from selected DOM block #user_avatar_block .avatar-container.selected[data-avatar-id]
+  const domSelectedDoc = {
+    querySelector: (sel) => {
+      if (sel.includes('#user_avatar_block')) {
+        return { getAttribute: (attr) => (attr === 'data-avatar-id' ? 'dom_sel.png' : null) };
+      }
+      return null;
+    },
+  };
+  const puWithEmptySlotDesc = {
+    personas: { 'dom_sel.png': '陆澄' },
+    persona_descriptions: { 'dom_sel.png': { description: '' } },
+    persona_description: '来自镜像字段的完整设定正文。',
+  };
+  const activeFromDomBlock = await getActivePersona({
+    ctx: { powerUserSettings: puWithEmptySlotDesc },
+    document: domSelectedDoc,
+    skipDynamicImport: true,
+  });
+  assert.equal(activeFromDomBlock.avatarId, 'dom_sel.png');
+  assert.equal(activeFromDomBlock.name, '陆澄');
+  assert.equal(activeFromDomBlock.description, '来自镜像字段的完整设定正文。');
+
+  // (b) Falls back to __live_persona__ when user_avatar is unavailable and no slot matches power_user.persona_description
+  const puUnmatched = {
+    personas: { 'saved_a.png': '旧档案' },
+    persona_descriptions: { 'saved_a.png': { description: '旧档案固定文本' } },
+    persona_description: '当前面板里直接手写的新人设内容。',
+    persona_description_lorebook: 'wb_live',
+    persona_description_position: 1,
+    persona_description_depth: 4,
+    persona_description_role: 0,
+  };
+  const liveActive = await getActivePersona({
+    ctx: { name1: '温言', powerUserSettings: puUnmatched },
+    document: null,
+    skipDynamicImport: true,
+  });
+  assert.equal(liveActive.avatarId, LIVE_PERSONA_AVATAR_ID);
+  assert.equal(liveActive.name, '温言');
+  assert.equal(liveActive.description, '当前面板里直接手写的新人设内容。');
+  assert.equal(liveActive.lorebook, 'wb_live');
+  assert.equal(liveActive.position, 1);
+  assert.equal(liveActive.depth, 4);
+  assert.equal(liveActive.isActive, true);
+
+  const listedWithLive = await listPersonas({
+    ctx: { name1: '温言', powerUserSettings: puUnmatched },
+    document: null,
+    skipDynamicImport: true,
+  });
+  assert.equal(listedWithLive.length, 2);
+  assert.equal(listedWithLive[0].avatarId, LIVE_PERSONA_AVATAR_ID);
+  assert.equal(listedWithLive[0].description, '当前面板里直接手写的新人设内容。');
+  assert.equal(listedWithLive[1].avatarId, 'saved_a.png');
+
+  // (c) Pure DOM fallback (#persona_description textarea + #your_name) even when power_user is unavailable
+  const pureDomDoc = {
+    querySelector: (sel) => {
+      if (sel === '#persona_description') return { value: '仅存在于 DOM 文本框中的现有人设。' };
+      if (sel === '#your_name') return { textContent: '叶知秋' };
+      return null;
+    },
+  };
+  const domOnlyActive = await getActivePersona({
+    ctx: null,
+    powerUser: null,
+    document: pureDomDoc,
+    skipDynamicImport: true,
+  });
+  assert.ok(domOnlyActive);
+  assert.equal(domOnlyActive.avatarId, LIVE_PERSONA_AVATAR_ID);
+  assert.equal(domOnlyActive.name, '叶知秋');
+  assert.equal(domOnlyActive.description, '仅存在于 DOM 文本框中的现有人设。');
+
+  const domOnlyList = await listPersonas({
+    ctx: null,
+    powerUser: null,
+    document: pureDomDoc,
+    skipDynamicImport: true,
+  });
+  assert.equal(domOnlyList.length, 1);
+  assert.equal(domOnlyList[0].avatarId, LIVE_PERSONA_AVATAR_ID);
+});
+
+test('H18: savePersonaToHost overwrite with __live_persona__ updates power_user.persona_description and DOM #persona_description while preserving ghost avatarId guard', async () => {
+  const descTextarea = { value: '旧的面板人设文本' };
+  const mockDoc = {
+    querySelector: (sel) => {
+      if (sel === '#persona_description') return descTextarea;
+      if (sel === '#your_name') return { textContent: '原名' };
+      return null;
+    },
+  };
+
+  const powerUserSettings = {
+    personas: {},
+    persona_descriptions: {},
+    persona_description: '旧的面板人设文本',
+    persona_description_lorebook: 'wb_prev',
+    persona_description_position: 0,
+    persona_description_depth: 2,
+    persona_description_role: 0,
+  };
+
+  const setUserNameCalls = [];
+  let setPersonaDescCalls = 0;
+  let saveCalls = 0;
+  const emitted = [];
+  const dispatched = [];
+
+  class MockCustomEvent {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  }
+
+  const saved = await savePersonaToHost(
+    {
+      mode: 'overwrite',
+      avatarId: LIVE_PERSONA_AVATAR_ID,
+      name: '新名字',
+      description: '写入后的完整新人设文本',
+      lorebook: 'wb_next',
+    },
+    {
+      ctx: { name1: '原名', characterId: 2, chatId: 'chat_live', powerUserSettings },
+      document: mockDoc,
+      setUserName: (n) => setUserNameCalls.push(n),
+      setPersonaDescription: () => {
+        setPersonaDescCalls += 1;
+      },
+      saveSettingsDebounced: () => {
+        saveCalls += 1;
+      },
+      eventSource: {
+        emit: async (type, payload) => emitted.push({ type, payload }),
+      },
+      eventTypes: { PERSONA_UPDATED: 'persona_updated' },
+      window: { dispatchEvent: (e) => dispatched.push(e) },
+      CustomEvent: MockCustomEvent,
+      skipDynamicImport: true,
+    }
+  );
+
+  assert.equal(saved.avatarId, LIVE_PERSONA_AVATAR_ID);
+  assert.equal(saved.name, '新名字');
+  assert.equal(saved.description, '写入后的完整新人设文本');
+  assert.equal(saved.lorebook, 'wb_next');
+  assert.equal(saved.isNew, false);
+  assert.equal(powerUserSettings.persona_description, '写入后的完整新人设文本');
+  assert.equal(powerUserSettings.persona_description_lorebook, 'wb_next');
+  assert.equal(descTextarea.value, '写入后的完整新人设文本');
+  assert.deepEqual(setUserNameCalls, ['新名字']);
+  assert.equal(setPersonaDescCalls, 1);
+  assert.equal(saveCalls, 1);
+  assert.equal(
+    emitted.some((e) => e.type === 'persona_updated' && e.payload === LIVE_PERSONA_AVATAR_ID),
+    true
+  );
+  assert.equal(dispatched.length, 1);
+  assert.equal(dispatched[0].type, HOST_CUSTOM_EVENTS.PERSONA_SAVED);
+  assert.equal(dispatched[0].detail.avatarId, LIVE_PERSONA_AVATAR_ID);
+
+  // Explicit non-existent avatarId still throws 未找到目标人设
+  await assert.rejects(
+    () =>
+      savePersonaToHost(
+        { mode: 'overwrite', avatarId: 'ghost.png', description: '不应写入' },
+        { ctx: { powerUserSettings }, document: mockDoc, skipDynamicImport: true }
+      ),
+    /未找到目标人设/
+  );
+});
+
+test('A26: runStudioGeneration honors minMaxTokens across host & custom transports without mutating settings', async () => {
+  // (a) Host ChatCompletionService + generateQuietPrompt raise max_tokens / responseLength to minMaxTokens & clamp at 32768
+  const hostSettings = createDefaultSettings();
+  hostSettings.schemes[0].maxTokens = 2048;
+  const hostSnapshot = structuredClone(hostSettings);
+
+  let capturedHostPayload = null;
+  await runStudioGeneration({
+    settings: hostSettings,
+    messages: [{ role: 'user', content: '生成自检人设' }],
+    minMaxTokens: 4200,
+    deps: {
+      ctx: {
+        mainApi: 'openai',
+        chatCompletionSettings: { chat_completion_source: 'openai', openai_model: 'gpt-4o' },
+        ChatCompletionService: {
+          presetToGeneratePayload: async (_p, _o, override) => {
+            capturedHostPayload = override;
+            return { ...override, chat_completion_source: 'openai' };
+          },
+          sendRequest: async () => ({ content: '宿主生成结果' }),
+        },
+      },
+      skipDynamicImport: true,
+    },
+  });
+  assert.equal(capturedHostPayload.max_tokens, 4200);
+  assert.deepEqual(hostSettings, hostSnapshot);
+
+  let capturedQuietOpts = null;
+  await runStudioGeneration(
+    {
+      settings: hostSettings,
+      messages: [{ role: 'user', content: '超上限夹紧测试' }],
+      minMaxTokens: 99999,
+    },
+    {
+      ctx: {
+        mainApi: 'novel',
+        generateQuietPrompt: async (opts) => {
+          capturedQuietOpts = opts;
+          return '静默结果';
+        },
+      },
+      skipDynamicImport: true,
+    }
+  );
+  assert.equal(capturedQuietOpts.responseLength, 32768);
+  assert.deepEqual(hostSettings, hostSnapshot);
+
+  // (b) Custom API (ST proxy & direct) uses Math.max(profile.maxTokens, minMaxTokens) without mutating settings
+  const lowProfile = createApiProfile({
+    id: 'p_low_tok',
+    baseUrl: 'https://api.example.test/v1',
+    apiKey: 'sk-mock-headroom-1111',
+    model: 'm-test',
+    maxTokens: 2048,
+    stream: false,
+  });
+  const customSettings = createDefaultSettings({
+    api: { provider: 'custom', activeProfileId: lowProfile.id, profiles: [lowProfile] },
+  });
+  const customSnapshot = structuredClone(customSettings);
+
+  let capturedProxyBody = null;
+  await runStudioGeneration({
+    settings: customSettings,
+    messages: [{ role: 'user', content: '代理测试' }],
+    minMaxTokens: 4200,
+    deps: {
+      fetch: async (_url, init) => {
+        capturedProxyBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: async () => JSON.stringify({ choices: [{ message: { content: '代理成功' }, finish_reason: 'stop' }] }),
+        };
+      },
+      skipDynamicImport: true,
+    },
+  });
+  assert.equal(JSON.parse(capturedProxyBody.custom_include_body).max_tokens, 4200);
+  assert.deepEqual(customSettings, customSnapshot);
+
+  // Higher profile.maxTokens (8192 > 4200) is preserved
+  customSettings.api.profiles[0].maxTokens = 8192;
+  const highSnapshot = structuredClone(customSettings);
+  let capturedDirectBody = null;
+  await runStudioGeneration({
+    settings: customSettings,
+    messages: [{ role: 'user', content: '直连测试' }],
+    minMaxTokens: 4200,
+    deps: {
+      transport: 'direct',
+      fetch: async (_url, init) => {
+        capturedDirectBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          text: async () => JSON.stringify({ choices: [{ message: { content: '直连成功' }, finish_reason: 'stop' }] }),
+        };
+      },
+      skipDynamicImport: true,
+    },
+  });
+  assert.equal(capturedDirectBody.max_tokens, 8192);
+  assert.deepEqual(customSettings, highSnapshot);
 });

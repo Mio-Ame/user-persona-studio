@@ -5,9 +5,18 @@ import {
   CORE_SECTION_HEADER,
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
+  DRAFT_START_MARKER,
+  DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
+  VIBE_ANCHOR_EXAMPLES,
+  SPOTLIGHT_MODES,
+  BACKSTORY_MODES,
+  ANTI_PARROT_CLAUSE,
   WORD_COUNT_PRESETS,
+  LIKE_REASON_PRESETS,
+  DISLIKE_REASON_PRESETS,
   BUILTIN_USAGE_GUIDE,
+  BUILTIN_BANNED_CATEGORIES,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   BUILTIN_PRESET_SCHEMES,
@@ -17,9 +26,18 @@ export {
   CORE_SECTION_HEADER,
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
+  DRAFT_START_MARKER,
+  DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
+  VIBE_ANCHOR_EXAMPLES,
+  SPOTLIGHT_MODES,
+  BACKSTORY_MODES,
+  ANTI_PARROT_CLAUSE,
   WORD_COUNT_PRESETS,
+  LIKE_REASON_PRESETS,
+  DISLIKE_REASON_PRESETS,
   BUILTIN_USAGE_GUIDE,
+  BUILTIN_BANNED_CATEGORIES,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   BUILTIN_PRESET_SCHEMES,
@@ -43,6 +61,7 @@ export const ST_SENSITIVE_FIELDS = Object.freeze([
 ]);
 
 const VALID_ROLES = new Set(['system', 'user', 'assistant']);
+const VALID_STYLES = new Set(['longform', 'objective', 'refactor']);
 const VALID_SLOT_TYPES = new Set([
   'role',
   'context',
@@ -56,6 +75,13 @@ const VALID_SLOT_TYPES = new Set([
 const VALID_TAIL_MODES = new Set(['auto', 'user', 'assistant_prefill', 'prefill_plus_user']);
 const VALID_PALETTES = new Set(['paper', 'ink', 'warm', 'sakura', 'glass-dark', 'host']);
 const VALID_COLOR_MODES = new Set(['auto', 'light', 'dark']);
+const VALID_UI_TABS = new Set(['studio', 'presets', 'taste', 'settings']);
+const VALID_UI_SUBMODES = new Set(['de_label_reformat', 'core_expand', 'cross_card_adapt']);
+const VALID_BANNED_SEND_MODES = new Set(['smart_compact', 'personal_only', 'full']);
+const VALID_SPOTLIGHT_MODES = new Set(['balanced', 'featured', 'light_daily']);
+const VALID_BACKSTORY_MODES = new Set(['light_vibe', 'blank_self', 'rich_arc']);
+const BUILTIN_SCHEME_IDS = new Set(Object.keys(BUILTIN_PRESET_SCHEMES));
+const VALID_BANNED_CATEGORY_IDS = new Set(BUILTIN_BANNED_CATEGORIES.map((c) => c.id));
 
 let idCounter = 0;
 
@@ -80,12 +106,28 @@ export function deepClone(value) {
 }
 
 function clampNumber(value, min, max, fallback) {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === 'boolean' ||
+    (typeof value === 'string' && value.trim() === '')
+  ) {
+    return fallback;
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.min(max, Math.max(min, num));
 }
 
 function clampInt(value, min, max, fallback) {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === 'boolean' ||
+    (typeof value === 'string' && value.trim() === '')
+  ) {
+    return fallback;
+  }
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.min(max, Math.max(min, Math.round(num)));
@@ -171,8 +213,9 @@ function sanitizeSchemeEntry(entry, index = 0) {
 
 function sanitizeScheme(scheme, fallbackIndex = 0) {
   const raw = scheme && typeof scheme === 'object' ? scheme : {};
-  const style = raw.style === 'objective' ? 'objective' : 'longform';
+  const style = VALID_STYLES.has(raw.style) ? raw.style : 'longform';
   const defaultChars = style === 'objective' ? 600 : 1500;
+  const defaultTemp = style === 'objective' ? 0.55 : style === 'refactor' ? 0.65 : 0.78;
   const defaultBudget = computeLengthBudget(defaultChars);
   const rawEntries = Array.isArray(raw.entries) ? raw.entries : [];
   const seenIds = new Set();
@@ -222,6 +265,7 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     name: String(raw.name || '').trim() || `未命名方案 ${fallbackIndex + 1}`,
     style,
     builtin: Boolean(raw.builtin),
+    favorite: Boolean(raw.favorite),
     description: String(raw.description ?? ''),
     targetChars,
     targetTokens: {
@@ -231,10 +275,14 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     tailMode: validTailMode(raw.tailMode, 'auto'),
     prefillText: String(raw.prefillText ?? `${CORE_SECTION_HEADER}\n`),
     triggerText: String(raw.triggerText ?? DEFAULT_TRIGGER),
-    temperature: clampNumber(raw.temperature, 0, 2, 0.78),
+    temperature: clampNumber(raw.temperature, 0, 2, defaultTemp),
     maxTokens: clampInt(raw.maxTokens, 256, 32768, defaultBudget.recommendedMaxTokens),
     entries,
   };
+}
+
+function sortFavoriteSchemesFirst(schemes) {
+  return [...schemes].sort((a, b) => Number(Boolean(b?.favorite)) - Number(Boolean(a?.favorite)));
 }
 
 // ============================================================================
@@ -244,8 +292,9 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
 export function createDefaultSettings(overrides = {}) {
   const src = overrides && typeof overrides === 'object' ? overrides : {};
   const defaultSchemes = [
-    deepClone(BUILTIN_PRESET_SCHEMES.longform_coact),
-    deepClone(BUILTIN_PRESET_SCHEMES.player_controlled),
+    sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.longform_coact), 0),
+    sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.player_controlled), 1),
+    sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.persona_refactor), 2),
   ];
 
   let schemes = defaultSchemes;
@@ -253,8 +302,17 @@ export function createDefaultSettings(overrides = {}) {
     schemes = src.schemes.map((s, idx) => sanitizeScheme(s, idx));
     const hasLongform = schemes.some((s) => s.id === 'longform_coact');
     const hasObjective = schemes.some((s) => s.id === 'player_controlled');
-    if (!hasLongform) schemes.unshift(deepClone(BUILTIN_PRESET_SCHEMES.longform_coact));
-    if (!hasObjective) schemes.push(deepClone(BUILTIN_PRESET_SCHEMES.player_controlled));
+    const hasRefactor = schemes.some((s) => s.id === 'persona_refactor');
+    if (!hasLongform) {
+      schemes.unshift(sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.longform_coact), 0));
+    }
+    if (!hasObjective) {
+      schemes.push(sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.player_controlled), schemes.length));
+    }
+    if (!hasRefactor) {
+      schemes.push(sanitizeScheme(deepClone(BUILTIN_PRESET_SCHEMES.persona_refactor), schemes.length));
+    }
+    schemes = sortFavoriteSchemesFirst(schemes);
   }
 
   const candidateActiveId = typeof src.activeSchemeId === 'string' ? src.activeSchemeId.trim() : '';
@@ -265,6 +323,9 @@ export function createDefaultSettings(overrides = {}) {
   const rawTaste = src.tasteProfile && typeof src.tasteProfile === 'object' ? src.tasteProfile : {};
   const anchors = mergeTasteEntries([], Array.isArray(rawTaste.anchors) ? rawTaste.anchors : []);
   const banned = mergeTasteEntries([], Array.isArray(rawTaste.banned) ? rawTaste.banned : []);
+  const disabledCategories = Array.isArray(rawTaste.disabledCategories)
+    ? Array.from(new Set(rawTaste.disabledCategories.filter((id) => VALID_BANNED_CATEGORY_IDS.has(id))))
+    : [];
 
   const rawApi = src.api && typeof src.api === 'object' ? src.api : {};
   const rawProfiles = Array.isArray(rawApi.profiles) ? rawApi.profiles : [];
@@ -294,6 +355,10 @@ export function createDefaultSettings(overrides = {}) {
       anchors,
       banned,
       useBuiltinBanned: rawTaste.useBuiltinBanned !== false,
+      bannedSendMode: VALID_BANNED_SEND_MODES.has(rawTaste.bannedSendMode)
+        ? rawTaste.bannedSendMode
+        : 'smart_compact',
+      disabledCategories,
     },
     api: {
       provider: rawApi.provider === 'custom' ? 'custom' : 'host',
@@ -303,11 +368,21 @@ export function createDefaultSettings(overrides = {}) {
     ui: {
       showPersonaBtn: rawUi.showPersonaBtn !== false,
       showWandMenu: rawUi.showWandMenu !== false,
+      activeTab: VALID_UI_TABS.has(rawUi.activeTab) ? rawUi.activeTab : 'studio',
+      mode: rawUi.mode === 'B' ? 'B' : 'A',
+      subMode: VALID_UI_SUBMODES.has(rawUi.subMode) ? rawUi.subMode : 'de_label_reformat',
+      spotlightMode: VALID_SPOTLIGHT_MODES.has(rawUi.spotlightMode) ? rawUi.spotlightMode : 'balanced',
+      backstoryMode: VALID_BACKSTORY_MODES.has(rawUi.backstoryMode) ? rawUi.backstoryMode : 'light_vibe',
+      injectChar: rawUi.injectChar !== false,
+      dualLayer: Boolean(rawUi.dualLayer),
+      visibilityTags: Boolean(rawUi.visibilityTags),
+      draftAudit: rawUi.draftAudit !== false,
+      antiParrot: rawUi.antiParrot !== false,
       geometry: {
-        x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? rawGeo.x : 120,
-        y: Number.isFinite(rawGeo.y) && rawGeo.y >= 0 ? rawGeo.y : 60,
-        width: clampInt(rawGeo.width, 320, 1920, 1040),
-        height: clampInt(rawGeo.height, 360, 1440, 680),
+        x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? Math.round(rawGeo.x) : 120,
+        y: Number.isFinite(rawGeo.y) && rawGeo.y >= 0 ? Math.round(rawGeo.y) : 60,
+        width: clampInt(rawGeo.width, 320, 3840, 1080),
+        height: clampInt(rawGeo.height, 280, 2160, 700),
       },
       minimized: Boolean(rawUi.minimized),
       miniMode: Boolean(rawUi.miniMode),
@@ -342,7 +417,7 @@ export function sanitizeSettingsForExport(settings) {
 }
 
 // ============================================================================
-// B. Preset Stack & Scheme CRUD
+// B. Preset Stack & Scheme CRUD (including Built-in Reset & Favorite Pinning)
 // ============================================================================
 
 export function cloneScheme(scheme, overrides = {}) {
@@ -357,6 +432,7 @@ export function cloneScheme(scheme, overrides = {}) {
     id: String(ov.id || '').trim() || generateId('scheme'),
     name: rawName || `${base.name} (副本)`,
     builtin: Boolean(ov.builtin ?? false),
+    favorite: Boolean(ov.favorite ?? false),
     entries: sourceEntries,
   };
   delete merged.regenerateEntryIds;
@@ -369,6 +445,72 @@ export function cloneScheme(scheme, overrides = {}) {
     }));
   }
   return sanitized;
+}
+
+export function isBuiltinSchemeModified(scheme) {
+  if (!scheme || typeof scheme !== 'object') return false;
+  const id = String(scheme.id || '').trim();
+  if (!Object.hasOwn(BUILTIN_PRESET_SCHEMES, id)) return false;
+
+  const current = sanitizeScheme({ ...scheme, favorite: false });
+  const factory = sanitizeScheme({ ...deepClone(BUILTIN_PRESET_SCHEMES[id]), favorite: false });
+  return JSON.stringify(current) !== JSON.stringify(factory);
+}
+
+export function resetBuiltinScheme(settings, schemeId) {
+  const id = String(schemeId || '').trim();
+  const hasBuiltin = Object.hasOwn(BUILTIN_PRESET_SCHEMES, id);
+
+  if (!isSettingsContainer(settings) && Array.isArray(settings)) {
+    const listCopy = deepClone(settings);
+    if (!hasBuiltin) return listCopy;
+    const idx = listCopy.findIndex((s) => s && s.id === id);
+    const prevFavorite = idx !== -1 ? Boolean(listCopy[idx]?.favorite) : false;
+    const restored = sanitizeScheme({ ...deepClone(BUILTIN_PRESET_SCHEMES[id]), favorite: prevFavorite });
+    if (idx !== -1) {
+      listCopy[idx] = restored;
+    } else {
+      listCopy.push(restored);
+    }
+    return sortFavoriteSchemesFirst(listCopy);
+  }
+
+  const next = deepClone(settings && typeof settings === 'object' ? settings : createDefaultSettings());
+  if (!hasBuiltin) return next;
+
+  const schemes = Array.isArray(next.schemes) ? next.schemes : [];
+  const idx = schemes.findIndex((s) => s && s.id === id);
+  const prevFavorite = idx !== -1 ? Boolean(schemes[idx]?.favorite) : false;
+  const restored = sanitizeScheme({ ...deepClone(BUILTIN_PRESET_SCHEMES[id]), favorite: prevFavorite });
+
+  if (idx !== -1) {
+    schemes[idx] = restored;
+  } else {
+    schemes.push(restored);
+  }
+  next.schemes = sortFavoriteSchemesFirst(schemes);
+  return next;
+}
+
+export function toggleFavoriteScheme(settings, schemeId, forceFavorite) {
+  const id = String(schemeId || '').trim();
+
+  if (!isSettingsContainer(settings) && Array.isArray(settings)) {
+    const listCopy = deepClone(settings).map((s, idx) => sanitizeScheme(s, idx));
+    const target = listCopy.find((s) => s.id === id);
+    if (!target) return listCopy;
+    target.favorite = typeof forceFavorite === 'boolean' ? forceFavorite : !target.favorite;
+    return sortFavoriteSchemesFirst(listCopy);
+  }
+
+  const next = deepClone(settings && typeof settings === 'object' ? settings : createDefaultSettings());
+  const schemes = (Array.isArray(next.schemes) ? next.schemes : []).map((s, idx) => sanitizeScheme(s, idx));
+  const target = schemes.find((s) => s.id === id);
+  if (!target) return next;
+
+  target.favorite = typeof forceFavorite === 'boolean' ? forceFavorite : !target.favorite;
+  next.schemes = sortFavoriteSchemesFirst(schemes);
+  return next;
 }
 
 export function toggleStackEntry(scheme, entryId, enabled) {
@@ -531,10 +673,11 @@ export function saveSchemeAs(settingsOrCollection, sourceSchemeId, newName, opti
       id: newId,
       name: finalName,
       builtin: false,
+      favorite: false,
     });
 
     if (isArray) {
-      return [...colCopy, cloned];
+      return sortFavoriteSchemesFirst([...colCopy, cloned]);
     }
     return { ...colCopy, [cloned.id]: cloned };
   }
@@ -575,9 +718,10 @@ export function saveSchemeAs(settingsOrCollection, sourceSchemeId, newName, opti
     id: newId,
     name: finalName,
     builtin: false,
+    favorite: false,
   });
 
-  next.schemes = [...schemes, cloned];
+  next.schemes = sortFavoriteSchemesFirst([...schemes, cloned]);
   next.activeSchemeId = cloned.id;
   return next;
 }
@@ -637,7 +781,7 @@ export function deleteScheme(settingsOrCollection, schemeId) {
     const colCopy = deepClone(settingsOrCollection);
     if (isArray) {
       const target = colCopy.find((s) => s && s.id === schemeId);
-      if (!target || target.builtin || target.id === 'longform_coact' || target.id === 'player_controlled' || colCopy.length <= 1) {
+      if (!target || target.builtin || BUILTIN_SCHEME_IDS.has(target.id) || colCopy.length <= 1) {
         return colCopy;
       }
       const filtered = colCopy.filter((s) => s && s.id !== schemeId);
@@ -648,7 +792,7 @@ export function deleteScheme(settingsOrCollection, schemeId) {
     }
     const target = Object.hasOwn(colCopy, schemeId) ? colCopy[schemeId] : undefined;
     const keys = Object.keys(colCopy);
-    if (!target || target.builtin || schemeId === 'longform_coact' || schemeId === 'player_controlled' || keys.length <= 1) {
+    if (!target || target.builtin || BUILTIN_SCHEME_IDS.has(schemeId) || keys.length <= 1) {
       return colCopy;
     }
     delete colCopy[schemeId];
@@ -658,7 +802,7 @@ export function deleteScheme(settingsOrCollection, schemeId) {
   const next = deepClone(settingsOrCollection && typeof settingsOrCollection === 'object' ? settingsOrCollection : createDefaultSettings());
   const schemes = Array.isArray(next.schemes) ? next.schemes : [];
   const target = schemes.find((s) => s && s.id === schemeId);
-  if (!target || target.builtin || schemes.length <= 1) {
+  if (!target || target.builtin || BUILTIN_SCHEME_IDS.has(target.id) || schemes.length <= 1) {
     return next;
   }
 
@@ -674,7 +818,7 @@ export function deleteScheme(settingsOrCollection, schemeId) {
 }
 
 // ============================================================================
-// C. Prompt Assembly & Tail-Role Strategy
+// C. Prompt Assembly, Categorized Banned Lexicon, Draft Self-Check & Tail Role
 // ============================================================================
 
 function normalizeMode(mode, subMode) {
@@ -709,6 +853,54 @@ function normalizeSubMode(subMode) {
   throw new Error(`不支持的优化子模式：${String(subMode)}`);
 }
 
+const GENERIC_TASTE_NOTES = new Set([
+  '手动添加',
+  '单句一键拉黑',
+  '单句收藏锚点',
+  '检查结果一键屏蔽',
+  '质检一键拉黑',
+]);
+
+function formatTastePromptItem(item, kind = 'anchors') {
+  const text = extractEntryText(item);
+  if (!text) return '';
+  const rawNote = item && typeof item === 'object' && typeof item.note === 'string' ? item.note.trim() : '';
+  if (!rawNote || GENERIC_TASTE_NOTES.has(rawNote)) {
+    return `- ${text}`;
+  }
+  if (kind === 'banned') {
+    return `- 「${text}」（不喜欢的点：${rawNote}，请连同类风格写法一并避开）`;
+  }
+  return `- ${text}（喜好方向：${rawNote}）`;
+}
+
+function formatBuiltinBannedPromptBlock(disabledCategories = [], bannedSendMode = 'smart_compact') {
+  if (bannedSendMode === 'personal_only') return '';
+  const disabledSet = new Set(Array.isArray(disabledCategories) ? disabledCategories : []);
+  const enabledCats = BUILTIN_BANNED_CATEGORIES.filter((cat) => !disabledSet.has(cat.id));
+  if (enabledCats.length === 0) return '';
+
+  const isCompact = bannedSendMode !== 'full';
+  const lines = [
+    isCompact
+      ? '【人设避雷准则与代表禁词（写作时直接规避，严禁原样或变体混入成稿）】'
+      : '【分类禁写词库与句式红线（写作时直接规避，严禁原样或变体混入成稿）】',
+  ];
+
+  for (const cat of enabledCats) {
+    lines.push(`▸ ${cat.name}`);
+    if (Array.isArray(cat.rules) && cat.rules.length > 0) {
+      lines.push(`  核心准则：${cat.rules.join('；')}。`);
+    }
+    if (Array.isArray(cat.phrases) && cat.phrases.length > 0) {
+      const sample = isCompact ? cat.phrases.slice(0, 3) : cat.phrases;
+      lines.push(`  ${isCompact ? '代表禁词' : '禁写词句'}：${sample.join('、')}${isCompact && cat.phrases.length > 3 ? ' 等同类套话' : ''}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true) {
   const budget = computeLengthBudget(scheme.targetChars || 1500);
   let content = String(entry.content ?? '')
@@ -720,29 +912,38 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
 
   const anchors = includeTaste
     ? (Array.isArray(tasteProfile?.anchors) ? tasteProfile.anchors : [])
-        .map(extractEntryText)
+        .map((item) => formatTastePromptItem(item, 'anchors'))
         .filter(Boolean)
     : [];
 
   const userBanned = includeTaste
     ? (Array.isArray(tasteProfile?.banned) ? tasteProfile.banned : [])
-        .map(extractEntryText)
+        .map((item) => formatTastePromptItem(item, 'banned'))
         .filter(Boolean)
     : [];
 
   const useBuiltinBanned = tasteProfile?.useBuiltinBanned !== false;
+  const bannedSendMode = VALID_BANNED_SEND_MODES.has(tasteProfile?.bannedSendMode)
+    ? tasteProfile.bannedSendMode
+    : 'smart_compact';
+  const disabledCategories = Array.isArray(tasteProfile?.disabledCategories)
+    ? tasteProfile.disabledCategories
+    : [];
 
   if (entry.slotType === 'taste') {
     if (anchors.length > 0) {
-      content += `\n\n【个人喜欢的细节偏好】\n${anchors.map((a) => `- ${a}`).join('\n')}`;
+      content += `\n\n【个人喜欢的细节偏好（精炼融入，吃穿小喜好点到即止并按人物性格自然体现外显度）】\n${anchors.join('\n')}`;
     }
   } else if (entry.slotType === 'banned') {
     const blocks = [];
-    if (useBuiltinBanned && DEFAULT_BANNED_PHRASES.length > 0) {
-      blocks.push(`【常见套话禁写词库】\n${DEFAULT_BANNED_PHRASES.map((p) => `- ${p}`).join('\n')}`);
+    if (useBuiltinBanned) {
+      const catBlock = formatBuiltinBannedPromptBlock(disabledCategories, bannedSendMode);
+      if (catBlock) {
+        blocks.push(catBlock);
+      }
     }
     if (userBanned.length > 0) {
-      blocks.push(`【个人屏蔽的不爱看写法】\n${userBanned.map((p) => `- ${p}`).join('\n')}`);
+      blocks.push(`【个人屏蔽的不爱看写法】\n${userBanned.join('\n')}`);
     }
     if (blocks.length > 0) {
       content += `\n\n${blocks.join('\n\n')}`;
@@ -750,6 +951,26 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
   }
 
   return content.trim();
+}
+
+export function buildDraftAuditInstruction(scheme = {}, options = {}) {
+  const isObjective = scheme?.style === 'objective';
+  const backstoryMode = VALID_BACKSTORY_MODES.has(options?.backstoryMode) ? options.backstoryMode : 'light_vibe';
+  const backstoryShort =
+    backstoryMode === 'blank_self'
+      ? '严守过往纯留白零编造'
+      : backstoryMode === 'rich_arc'
+        ? '成长脉络与性格自然呼应'
+        : '仅保留轻度氛围、不乱编亲属变故';
+
+  return [
+    '【成稿前草稿自检】',
+    `输出正文前，先在顶部用唯一一个 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：`,
+    `1. 题材与经历边界：贴合故事语境，${backstoryShort}，性格顺着人物本色落地而不套固定公式；`,
+    '2. 戏份与伏笔分寸：职业、特殊属性与小喜好收放自然无打卡隐患（喜好外显度符合人物性格，不强设旁人必全知或必猜错），暗线具备自然日常表象，具体举例不写成必演剧本；',
+    `3. 语言净稿：符合${isObjective ? '纯手控零代演' : '自然代演留白'}边界，清零赋魅套话、系统口号与破折号。`,
+    `闭合 \`${DRAFT_END_MARKER}\` 后换一行直接从 \`${CORE_SECTION_HEADER}\` 输出干净正文。`,
+  ].join('\n');
 }
 
 function formatCharContextBlock(charContext) {
@@ -787,6 +1008,33 @@ function buildDualLayerDirective(scheme) {
     '关键词：关键词1, 关键词2',
     '内容：补充事实与触发范围说明。',
   ].join('\n');
+}
+
+function buildVisibilityTagsDirective() {
+  return [
+    '【信息可见度标注（已按需开启）】',
+    `当前故事涉及阵营试探、悬疑或明显信息差，请按需使用 ${VISIBILITY_MARKERS.join(' / ')} 简要区分旁人一眼可见的特征、开场双方已知的共识与尚未公开的私密信息；普通日常细节仍保持自然行文，无需逐句机械打标。`,
+  ].join('\n');
+}
+
+function buildBackstoryDirective(backstoryMode = 'light_vibe') {
+  if (backstoryMode === 'blank_self') {
+    return '【经历尺度：纯留白零编造】严禁编造任何玩家未主动提供的家庭出身、童年往事或旧日事件，完全通过当下的气质、习惯与处境立住人物。';
+  }
+  if (backstoryMode === 'rich_arc') {
+    return '【经历尺度：补全成长经历】结合人物特质与世界观，自然补全合理的成长环境与习惯成因，让人物来处清晰有血肉。';
+  }
+  return '【经历尺度：轻底色防套皮】已写明的经历完整保留；未提及过往处仅用宽泛生活氛围托底，不擅自编造具体父母亲属或童年创伤。';
+}
+
+function buildSpotlightDirective(spotlightMode = 'balanced') {
+  if (spotlightMode === 'featured') {
+    return '【元素与伏笔戏份：围绕设定展开】适当提高职业习惯、特殊属性与暗线伏笔在日常与开场中的比重和线索感，避免重复死板口头禅。';
+  }
+  if (spotlightMode === 'light_daily') {
+    return '【元素与伏笔戏份：轻盈纯日常】不额外铺设复杂沉重的身世暗线，职业与小习惯轻巧点缀，专注当下相处氛围。';
+  }
+  return '';
 }
 
 export function inferOptimalTailMode(modelHint = {}) {
@@ -841,6 +1089,8 @@ export function buildGenerationMessages(options = {}) {
   const existingDraft = String(opts.existingDraft ?? '').trim();
   const lockedCore = String(opts.lockedCore ?? '').trim();
   const targetSection = String(opts.targetSection ?? '').trim();
+  const useVisibilityTags = opts.visibilityTags === true;
+  const useDraftAudit = opts.draftAudit === true && !targetSection;
   const charBlock = formatCharContextBlock(opts.charContext);
   const budget = computeLengthBudget(scheme.targetChars);
 
@@ -866,11 +1116,11 @@ export function buildGenerationMessages(options = {}) {
     }
     const directiveMap = {
       de_label_reformat:
-        '【任务模式：无损去标签与排版整理】\n请完整保留原人设中的所有既定事实、经历细节与个人喜好，绝不擅自删改；消除混乱缩进与套话，把性格标签词改写为具体的养成原因、好恶界线、遇事取舍与生熟人相处差别，并整理为清晰的上下两部分结构。',
+        '【任务模式：无损去标签与排版整理】\n完整保留原人设所有既定事实、经历与个人喜好，清理混乱格式与套话，顺着原人设自身性格走向把空泛标签展开为具体言行细节，整理为上下两部分结构。',
       core_expand:
-        `【任务模式：扩写细节（目标约 ${budget.chars} 字，区间 ${budget.charsMin}～${budget.charsMax} 字）】\n请完整保留原人设既有事实骨架，围绕目标字数补充日常好恶界线、遇事取舍习惯、生活烟火气细节与不同关系下的相处变化。`,
+        `【任务模式：扩写细节（目标约 ${budget.chars} 字，区间 ${budget.charsMin}～${budget.charsMax} 字）】\n保留原人设事实骨架，顺着人物本色补充好恶界线、处事习惯与日常相处细节。`,
       cross_card_adapt:
-        `【任务模式：换卡改背景】\n请严格保留下方指定的固定人设内容（外貌、性格习惯、喜好与核心过往）不作篡改，仅结合新角色卡背景重写${SHELL_SECTION_HEADER}，让身份、职责与开场关系自然融入新故事。`,
+        `【任务模式：换卡改背景】\n严格保留下方指定的固定人设内容不做篡改，仅结合新角色卡背景重写${SHELL_SECTION_HEADER}，让身份与开场关系自然融入新故事。`,
     };
     taskParts.push(directiveMap[subMode]);
 
@@ -900,12 +1150,51 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
+  const backstoryMode = VALID_BACKSTORY_MODES.has(opts.backstoryMode) ? opts.backstoryMode : '';
+  const spotlightMode = VALID_SPOTLIGHT_MODES.has(opts.spotlightMode) ? opts.spotlightMode : '';
+
+  if (backstoryMode && !targetSection) {
+    const bsText = buildBackstoryDirective(backstoryMode);
+    if (bsText) taskParts.push(bsText);
+  }
+  if (spotlightMode && !targetSection) {
+    const spText = buildSpotlightDirective(spotlightMode);
+    if (spText) taskParts.push(spText);
+  }
+
+  const combinedInputForExamples = `${inspiration}\n${userMustHaves}\n${existingDraft}\n${lockedCore}`;
+  if (opts.antiParrot !== false && !targetSection && hasReplayRiskExamples(combinedInputForExamples)) {
+    taskParts.push(
+      '【示例防照抄提醒】\n检测到输入中包含“例如/比如”等具体情境示例：请先提炼出背后的通用思维回路与反应规律；若在正文中保留具体示例辅助理解，须保持简练并在括号内注明“仅作理解思维逻辑的参考例，日常互动随情境自然反应，不复刻原例桥段”。'
+    );
+  }
+
+  if (useVisibilityTags) {
+    taskParts.push(buildVisibilityTagsDirective());
+  }
+
   if (opts.dualLayer && !targetSection) {
     taskParts.push(buildDualLayerDirective(scheme));
   }
 
+  if (useDraftAudit) {
+    messages.push({
+      role: 'system',
+      content: buildDraftAuditInstruction(scheme, {
+        backstoryMode: backstoryMode || 'light_vibe',
+        spotlightMode: spotlightMode || 'balanced',
+      }),
+    });
+  }
+
   if (effectiveTailMode === 'user' && scheme.triggerText && scheme.triggerText.trim()) {
-    taskParts.push(scheme.triggerText.trim());
+    if (useDraftAudit) {
+      taskParts.push(
+        `${scheme.triggerText.trim()}\n（请先以 ${DRAFT_START_MARKER}…${DRAFT_END_MARKER} 完成简短草稿自检，闭合后立即输出干净的最终人设正文。）`
+      );
+    } else {
+      taskParts.push(scheme.triggerText.trim());
+    }
   }
 
   messages.push({
@@ -913,9 +1202,14 @@ export function buildGenerationMessages(options = {}) {
     content: taskParts.join('\n\n'),
   });
 
+  const effectivePrefillText =
+    useDraftAudit && effectiveTailMode === 'assistant_prefill'
+      ? `${DRAFT_START_MARKER}\n`
+      : scheme.prefillText;
+
   const finalMessages = applyTailRoleStrategy(messages, {
     tailMode: effectiveTailMode,
-    prefillText: scheme.prefillText,
+    prefillText: effectivePrefillText,
     triggerText: scheme.triggerText,
     modelHint: opts.modelHint,
   });
@@ -971,7 +1265,7 @@ export function applyTailRoleStrategy(messages, options = {}) {
 }
 
 // ============================================================================
-// D. SillyTavern Native Chat Completion Preset Exporter
+// D. SillyTavern Native Chat Completion Preset & Regex Script Exporters
 // ============================================================================
 
 function sanitizePromptIdentifier(id) {
@@ -1003,6 +1297,7 @@ export function exportSillyTavernPreset(options = {}) {
   const tasteProfile = opts.tasteProfile && typeof opts.tasteProfile === 'object' ? opts.tasteProfile : {};
   const includeTaste = opts.includeTaste !== false;
   const includeUsageGuide = opts.includeUsageGuide !== false;
+  const includeDraftAudit = Boolean(opts.includeDraftAudit);
   const rawPresetName =
     opts.presetName !== undefined && opts.presetName !== null ? String(opts.presetName).trim() : '';
   const presetName = rawPresetName || String(scheme.name ?? '').trim() || 'User 人设工坊预设';
@@ -1095,7 +1390,12 @@ export function exportSillyTavernPreset(options = {}) {
   ];
 
   const prompts = [...builtinPrompts];
-  const reservedSystemIds = new Set(['ups_usage_guide', 'ups_tail_prefill', 'ups_tail_trigger']);
+  const reservedSystemIds = new Set([
+    'ups_usage_guide',
+    'ups_draft_audit',
+    'ups_tail_prefill',
+    'ups_tail_trigger',
+  ]);
   const usedIds = new Set(prompts.map((p) => p.identifier));
   const order = [];
 
@@ -1153,9 +1453,27 @@ export function exportSillyTavernPreset(options = {}) {
     order.push({ identifier, enabled: Boolean(entry.enabled) });
   }
 
+  if (includeDraftAudit) {
+    const auditId = 'ups_draft_audit';
+    usedIds.add(auditId);
+    prompts.push(
+      makeCustomPromptEntry({
+        identifier: auditId,
+        name: '【草稿自检净化】先扫除套话禁词再输出成稿',
+        role: 'system',
+        content: buildDraftAuditInstruction(scheme),
+      })
+    );
+    order.push({ identifier: auditId, enabled: true });
+  }
+
   order.push({ identifier: 'chatHistory', enabled: true });
 
-  const prefillContent = String(scheme.prefillText ?? '').trimEnd() || DEFAULT_PREFILL.trimEnd();
+  const basePrefill = String(scheme.prefillText ?? '').trimEnd() || DEFAULT_PREFILL.trimEnd();
+  const prefillContent =
+    includeDraftAudit && scheme.tailMode === 'assistant_prefill' && basePrefill === CORE_SECTION_HEADER
+      ? DRAFT_START_MARKER
+      : basePrefill;
   const triggerContent = String(scheme.triggerText ?? '').trim() || DEFAULT_TRIGGER;
 
   if (scheme.tailMode === 'assistant_prefill') {
@@ -1194,7 +1512,7 @@ export function exportSillyTavernPreset(options = {}) {
       { identifier: triggerId, enabled: true }
     );
   } else {
-    // 'user'
+    // 'user' or 'auto'
     const triggerId = 'ups_tail_trigger';
     usedIds.add(triggerId);
     prompts.push(
@@ -1257,14 +1575,105 @@ export function exportSillyTavernPreset(options = {}) {
         presetName,
         style: scheme.style,
         tailMode: scheme.tailMode,
+        includeDraftAudit,
       },
     },
   };
 }
 
+export function exportDraftStripRegexScript(presetName = 'User人设工坊') {
+  const cleanName = String(presetName ?? '').trim() || 'User人设工坊';
+  return {
+    id: 'ups-strip-draft-audit',
+    scriptName: `${cleanName} · 隐藏草稿自检块`,
+    findRegex: '/(?:【草稿自检】[\\s\\S]*?【\\/草稿自检】|<!--\\s*(?:persona_)?draft[\\s\\S]*?-->)\\s*/gi',
+    replaceString: '',
+    trimStrings: [],
+    placement: [2],
+    disabled: false,
+    markdownOnly: true,
+    promptOnly: true,
+    runOnEdit: true,
+    substituteRegex: 0,
+    minDepth: null,
+    maxDepth: null,
+  };
+}
+
 // ============================================================================
-// E. Post-Processing, Linting, Splitting & Diff / Local Regen
+// E. Draft Stripping, Post-Processing, Smart Linting, Splitting & Diff
 // ============================================================================
+
+export function stripDraftAuditBlocks(rawText) {
+  const input = String(rawText ?? '').replace(/\r\n?/g, '\n');
+  if (!input) {
+    return { cleanText: '', draftLog: '', hasUnclosedDraft: false };
+  }
+
+  const openRe = /【\s*草稿自检\s*】|<!--\s*(?:persona_)?draft(?:\b|(?=[\s:：-]|$))/gi;
+  let cursor = 0;
+  let cleanOut = '';
+  const draftParts = [];
+  let hasUnclosedDraft = false;
+
+  // Handle continuation where assistant prefill supplied 【草稿自检】 and upstream only returned body + 【/草稿自检】
+  const firstOpen = openRe.exec(input);
+  openRe.lastIndex = 0;
+  const orphanCloseRe = /【\s*\/\s*草稿自检\s*】/;
+  const orphanCloseMatch = orphanCloseRe.exec(input);
+  if (orphanCloseMatch && (!firstOpen || orphanCloseMatch.index < firstOpen.index)) {
+    const preBody = input.slice(0, orphanCloseMatch.index).trim();
+    if (preBody) draftParts.push(preBody);
+    cursor = orphanCloseMatch.index + orphanCloseMatch[0].length;
+  }
+
+  while (cursor < input.length) {
+    openRe.lastIndex = cursor;
+    const openMatch = openRe.exec(input);
+    if (!openMatch) {
+      cleanOut += input.slice(cursor);
+      break;
+    }
+
+    cleanOut += input.slice(cursor, openMatch.index);
+    const bodyStart = openMatch.index + openMatch[0].length;
+    const isHtmlComment = openMatch[0].startsWith('<!--');
+
+    if (isHtmlComment) {
+      const closeIdx = input.indexOf('-->', bodyStart);
+      if (closeIdx === -1) {
+        hasUnclosedDraft = true;
+        const partial = input.slice(bodyStart).replace(/^[:：\s-]+/, '').trim();
+        if (partial) draftParts.push(partial);
+        cursor = input.length;
+        break;
+      }
+      const inner = input.slice(bodyStart, closeIdx).replace(/^[:：\s-]+/, '').trim();
+      if (inner) draftParts.push(inner);
+      cursor = closeIdx + 3;
+    } else {
+      const closeRe = /【\s*\/\s*草稿自检\s*】/g;
+      closeRe.lastIndex = bodyStart;
+      const closeMatch = closeRe.exec(input);
+      if (!closeMatch) {
+        hasUnclosedDraft = true;
+        const partial = input.slice(bodyStart).trim();
+        if (partial) draftParts.push(partial);
+        cursor = input.length;
+        break;
+      }
+      const inner = input.slice(bodyStart, closeMatch.index).trim();
+      if (inner) draftParts.push(inner);
+      cursor = closeMatch.index + closeMatch[0].length;
+    }
+  }
+
+  return {
+    cleanText: cleanOut.replace(/\n{3,}/g, '\n\n').trim(),
+    draftLog: draftParts.join('\n\n').trim(),
+    hasUnclosedDraft,
+  };
+}
 
 export function estimateTokens(text) {
   const str = String(text ?? '');
@@ -1276,7 +1685,8 @@ export function estimateTokens(text) {
 }
 
 export function normalizeFlatLayout(text) {
-  let out = String(text ?? '').replace(/\r\n?/g, '\n').trim();
+  const strippedDraft = stripDraftAuditBlocks(text).cleanText;
+  let out = String(strippedDraft ?? '').replace(/\r\n?/g, '\n').trim();
   if (!out) return '';
 
   // Unwrap outer fenced code blocks such as ```markdown / ```yaml / ```xml / ```
@@ -1286,11 +1696,7 @@ export function normalizeFlatLayout(text) {
   }
 
   // Strip simple XML-like wrapper tags while preserving square-bracket visibility markers
-  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9_-]*)(?:\s[^>]*)?>/g, (full, tagName) => {
-    // Keep common angle placeholders if not HTML/XML wrappers? Strip XML wrappers cleanly.
-    void tagName;
-    return '';
-  });
+  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9_-]*)(?:\s[^>]*)?>/g, () => '');
 
   const lines = out.split('\n').map((line) => {
     let cur = line.replace(/\t/g, '  ').replace(/[ \t]+$/g, '');
@@ -1306,6 +1712,53 @@ export function normalizeFlatLayout(text) {
   return out;
 }
 
+function isExpandedVibeAnchorLine(lineText, lineLabelCount) {
+  if (lineLabelCount >= 3) return false;
+  if (countReadableChars(lineText) <= 26) return false;
+  if (!/[，,：:；;（()]/.test(lineText)) return false;
+
+  const clauses = lineText
+    .split(/[，,：:；;（）()]+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (clauses.length < 2) return false;
+
+  return clauses.some((clause) => {
+    const listSeparators = (clause.match(/、/g) || []).length;
+    return listSeparators <= 1 && countReadableChars(clause) >= 10;
+  });
+}
+
+export function hasReplayRiskExamples(text) {
+  const s = String(text ?? '');
+  if (!s.trim()) return false;
+  if (/(?:并非固定必演桥段|不复刻原例|不重复原桥段|禁止原样照搬|勿照搬|仅作理解思维)/u.test(s)) {
+    return false;
+  }
+  return /(?:例如|比如|譬如|示例[:：]|不到(?:三|五|十)分钟)/u.test(s);
+}
+
+export function appendAntiParrotClause(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return ANTI_PARROT_CLAUSE;
+  if (trimmed.includes(ANTI_PARROT_CLAUSE) || /(?:并非固定必演桥段|不复刻原例|不重复原桥段)/u.test(trimmed)) {
+    return trimmed;
+  }
+  return `${trimmed}\n\n${ANTI_PARROT_CLAUSE}`;
+}
+
+export function replaceEmDashes(text) {
+  const input = String(text ?? '');
+  if (!input) return '';
+  return input
+    .replace(/\s*(?:——|――|--+)\s*/g, '，')
+    .replace(/([：:；;。！？!?])，+/g, '$1')
+    .replace(/，{2,}/g, '，')
+    .replace(/，([。！？!?；;）)])/g, '$1')
+    .replace(/(^|\n)([ \t]*[-*+]\s+)，/g, '$1$2')
+    .replace(/(^|\n)，+/g, '$1');
+}
+
 export function lintPersonaText(text, tasteProfile = {}) {
   const raw = String(text ?? '');
   const normalized = raw.replace(/\r\n?/g, '\n');
@@ -1317,30 +1770,62 @@ export function lintPersonaText(text, tasteProfile = {}) {
     return normalized.slice(0, index).split('\n').length;
   };
 
-  // 1. Qualitative labels
+  // Pre-collect qualitative label matches per line so vibe anchors expanded with concrete daily details pass cleanly
+  const rawLabelHits = [];
+  const lineHitCounts = new Map();
+
   for (const item of QUALITATIVE_LABEL_PATTERNS) {
-    const regex = new RegExp(item.pattern.source, item.pattern.flags.includes('g') ? item.pattern.flags : `${item.pattern.flags}g`);
+    const regex = new RegExp(
+      item.pattern.source,
+      item.pattern.flags.includes('g') ? item.pattern.flags : `${item.pattern.flags}g`
+    );
     let m;
     while ((m = regex.exec(normalized)) !== null) {
-      issues.push({
-        type: 'qualitative_label',
-        severity: 'error',
-        label: item.label,
-        term: item.label,
-        category: item.category,
+      const lineNum = findLineNumber(m.index);
+      lineHitCounts.set(lineNum, (lineHitCounts.get(lineNum) || 0) + 1);
+      rawLabelHits.push({
+        item,
         match: m[0],
         index: m.index,
-        line: findLineNumber(m.index),
-        message: `出现定性标签词「${item.label}」（${item.category}）`,
-        suggestion: item.hint,
+        line: lineNum,
       });
     }
   }
 
-  // 2. Built-in clichés & user blacklist
+  for (const hit of rawLabelHits) {
+    const lineText = lines[hit.line - 1] || '';
+    const lineCount = lineHitCounts.get(hit.line) || 1;
+    if (isExpandedVibeAnchorLine(lineText, lineCount)) {
+      continue;
+    }
+    issues.push({
+      type: 'qualitative_label',
+      severity: 'warn',
+      label: hit.item.label,
+      term: hit.item.label,
+      category: hit.item.category,
+      match: hit.match,
+      index: hit.index,
+      line: hit.line,
+      message: `出现未展开的性格标签词「${hit.item.label}」（${hit.item.category}）`,
+      suggestion: hit.item.hint,
+    });
+  }
+
+  // 2. Built-in categorized clichés & user blacklist
   const useBuiltinBanned = tasteProfile?.useBuiltinBanned !== false;
   if (useBuiltinBanned) {
-    for (const phrase of DEFAULT_BANNED_PHRASES) {
+    const disabledSet = new Set(
+      Array.isArray(tasteProfile?.disabledCategories) ? tasteProfile.disabledCategories : []
+    );
+    const activeBuiltinPhrases = Array.from(
+      new Set(
+        BUILTIN_BANNED_CATEGORIES
+          .filter((cat) => !disabledSet.has(cat.id))
+          .flatMap((cat) => cat.phrases)
+      )
+    );
+    for (const phrase of activeBuiltinPhrases) {
       const idx = normalized.indexOf(phrase);
       if (idx !== -1) {
         issues.push({
@@ -1392,7 +1877,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
         index: m.index ?? 0,
         line: findLineNumber(m.index ?? 0),
         message: `包含面向模型或叙事规则的系统说教「${m[0]}」`,
-        suggestion: '请删去说教口号，改用 [外显可感知] / [既有共识 / 开场起点] / [未公开私事 / 旁人无从知晓] 标识信息边界。',
+        suggestion: '请删去系统说教口号；若有未公开的私事直接用平实中文说明（如“此事平时未向外人提起”），悬疑阵营题材可按需开启可见度标注。',
       });
     }
   }
@@ -1410,7 +1895,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
         index: m.index ?? 0,
         line: findLineNumber(m.index ?? 0),
         message: `存在密集的死板绝对禁令「${m[0]}」`,
-        suggestion: '建议改为平时的舒适基准与何种临界条件下才会打破常态的弹性区间。',
+        suggestion: '建议改为平时的日常习惯与何种契机下才会心软破例的弹性表现。',
       });
     }
   }
@@ -1431,7 +1916,35 @@ export function lintPersonaText(text, tasteProfile = {}) {
     }
   });
 
-  // 6. Structural headers & visibility markers (advisory only; keep issues clean for markerless factual prose)
+  // 6. Concrete episode replay risk & em-dash proliferation guards
+  if (hasReplayRiskExamples(normalized)) {
+    issues.push({
+      type: 'replay_risk',
+      code: 'REPLAY_RISK',
+      severity: 'warn',
+      term: '示例防照抄',
+      match: '',
+      line: 0,
+      message: '检测到具体情境举例（如“例如/比如”），正文模型容易每轮原样照搬复演，建议附上防照抄说明',
+      suggestion: ANTI_PARROT_CLAUSE,
+    });
+  }
+
+  const dashMatches = normalized.match(/——|――/g);
+  if (dashMatches && dashMatches.length >= 2) {
+    issues.push({
+      type: 'dash_overuse',
+      code: 'DASH_OVERUSE',
+      severity: 'warn',
+      term: '破折号过多',
+      match: '',
+      line: 0,
+      message: `检测到 ${dashMatches.length} 处破折号，易诱导正文模型模仿并引发破折号增殖，建议替换为自然逗号或冒号`,
+      suggestion: '可点击旁侧「清理破折号」一键替换为清爽标点。',
+    });
+  }
+
+  // 7. Structural headers & optional visibility markers
   const hasCoreShell =
     (normalized.includes('基础人设') && normalized.includes('当前背景')) ||
     (normalized.includes('人物本体核') && normalized.includes('当前剧场壳'));
@@ -1444,15 +1957,15 @@ export function lintPersonaText(text, tasteProfile = {}) {
     normalized.includes('[未公开私事');
 
   const advisories = [];
-  if (!hasVisibilityMarkers && normalized.trim().length > 0) {
+  if (tasteProfile?.visibilityTags === true && !hasVisibilityMarkers && normalized.trim().length > 0) {
     advisories.push({
       type: 'missing_visibility_marker',
       severity: 'info',
       term: '',
       match: '',
       line: 0,
-      message: '尚未检测到信息标记（如 [外表可见]、[私密未公开]）',
-      suggestion: '补充标记有助于区分外表能看出的特征与未公开的心事，无需写系统禁止口号。',
+      message: '已开启信息可见度标注，但正文中尚未检测到标记（如 [外表可见]、[私密未公开]）',
+      suggestion: '涉及悬疑或阵营信息差时，可按需补充标记区分公开特征与私密心事。',
     });
   }
 
@@ -1605,7 +2118,8 @@ export function extractPersonaPoints(text, maxPoints = 24) {
 }
 
 export function splitDualLayerOutput(text) {
-  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').trim();
+  const stripped = stripDraftAuditBlocks(text).cleanText;
+  const normalized = String(stripped ?? '').replace(/\r\n?/g, '\n').trim();
   if (!normalized) {
     return { coreDescription: '', worldbookEntries: [] };
   }
@@ -1876,7 +2390,8 @@ export function computeLineDiff(oldText, newText) {
 
 export function mergeSectionUpdate(fullText, sectionTitle, newContent) {
   const targetTitle = String(sectionTitle ?? '').trim();
-  let cleanBody = String(newContent ?? '').replace(/\r\n?/g, '\n').trim();
+  const strippedContent = stripDraftAuditBlocks(newContent).cleanText;
+  let cleanBody = String(strippedContent ?? '').replace(/\r\n?/g, '\n').trim();
   const sections = parsePersonaSections(fullText);
 
   if (sections.length === 0) {
@@ -2099,7 +2614,9 @@ export function mergeTasteEntries(existingList = [], newItems = []) {
 
     if (indexByKey.has(key)) {
       const existingIdx = indexByKey.get(key);
-      if (note && !result[existingIdx].note) {
+      if (note && note !== result[existingIdx].note && !GENERIC_TASTE_NOTES.has(note)) {
+        result[existingIdx] = { ...result[existingIdx], note };
+      } else if (note && !result[existingIdx].note) {
         result[existingIdx] = { ...result[existingIdx], note };
       }
       return;
@@ -2130,6 +2647,71 @@ export function mergeTasteEntries(existingList = [], newItems = []) {
   }
 
   return result;
+}
+
+export function buildTasteSummaryMessages(tasteProfile = {}) {
+  const anchors = (Array.isArray(tasteProfile?.anchors) ? tasteProfile.anchors : [])
+    .map((item) => formatTastePromptItem(item, 'anchors'))
+    .filter(Boolean);
+  const banned = (Array.isArray(tasteProfile?.banned) ? tasteProfile.banned : [])
+    .map((item) => formatTastePromptItem(item, 'banned'))
+    .filter(Boolean);
+
+  if (anchors.length === 0 && banned.length === 0) {
+    throw new Error('偏好词库目前为空，请先在文稿中框选添加几条喜好或不喜欢记录');
+  }
+
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是一位帮玩家整理写作口味偏好的助手。请把玩家平时零散标记的「喜欢的句子」和「不喜欢的句子及原因」，归纳提炼成简明、直白、好懂的通用写作偏好与避雷条目，供后续生成 User 人设时复用。',
+        '严格按以下两段纯文本格式输出，每条一行，以 "- " 开头，禁止写多余寒暄或解释：',
+        '【归纳后的喜好偏好】',
+        '- 简短直白的喜好规则（2～5 条，若无原记录则写“无”）',
+        '',
+        '【归纳后的避雷规则】',
+        '- 简短直白的避雷规则（2～5 条，若无原记录则写“无”）',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        anchors.length > 0 ? `【零散喜欢的句子】\n${anchors.join('\n')}` : '【零散喜欢的句子】\n无',
+        banned.length > 0 ? `【零散不喜欢的句子与原因】\n${banned.join('\n')}` : '【零散不喜欢的句子与原因】\n无',
+        '请直接按上述格式输出归纳结果。',
+      ].join('\n\n'),
+    },
+  ];
+}
+
+export function parseTasteSummaryOutput(text) {
+  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const anchors = [];
+  const banned = [];
+  let bucket = '';
+
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    if (/喜好|偏爱/.test(trimmed) && (/^【/.test(trimmed) || /^#{1,4}\s/.test(trimmed))) {
+      bucket = 'anchors';
+      continue;
+    }
+    if (/避雷|禁写|不喜欢/.test(trimmed) && (/^【/.test(trimmed) || /^#{1,4}\s/.test(trimmed))) {
+      bucket = 'banned';
+      continue;
+    }
+    const item = trimmed.replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '').trim();
+    if (!item || item === '无' || item === '暂无' || /^【[^】]+】$/.test(item)) continue;
+    if (bucket === 'anchors') {
+      anchors.push({ text: item, note: 'AI 归纳提炼' });
+    } else if (bucket === 'banned') {
+      banned.push({ text: item, note: 'AI 归纳提炼' });
+    }
+  }
+
+  return { anchors, banned };
 }
 
 // ============================================================================

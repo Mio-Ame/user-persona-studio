@@ -22,6 +22,7 @@ const HOST_INLINE_VAR_KEYS = [
   '--ups-surface',
   '--ups-surface-strong',
   '--ups-surface-hover',
+  '--ups-input-bg',
   '--ups-border',
   '--ups-border-strong',
   '--ups-fg',
@@ -148,7 +149,10 @@ export function inferThemeFromTextColor(fgColor, bgColor = '') {
   return 'dark';
 }
 
-export function readHostThemeVars(doc = typeof document !== 'undefined' ? document : null, win = typeof window !== 'undefined' ? window : null) {
+export function readHostThemeVars(
+  doc = typeof document !== 'undefined' ? document : null,
+  win = typeof window !== 'undefined' ? window : null
+) {
   const empty = {
     bodyColor: '',
     blurBg: '',
@@ -197,35 +201,36 @@ export function resolveThemeTokens({ palette = 'paper', colorMode = 'auto', host
   const vars = { '--modal-blur': '0px' };
   if (safePalette === 'host') {
     const isLight = effectiveMode === 'light';
-    const fallbackBg = isLight ? '#f4f4f1' : '#191a1d';
-    const fallbackFg = isLight ? '#23262b' : '#ecece8';
+    const fallbackBg = isLight ? '#e8e5dc' : '#191a1d';
+    const fallbackFg = isLight ? '#212429' : '#ecece8';
     const baseBg = toOpaqueColor(hostVars?.blurBg || hostVars?.mainBg || fallbackBg, fallbackBg);
     const fg = toOpaqueColor(hostVars?.bodyColor || fallbackFg, fallbackFg);
     const borderBase = hostVars?.borderColor
       ? toOpaqueColor(hostVars.borderColor, baseBg)
-      : mixOpaqueColors(fg, baseBg, isLight ? 0.16 : 0.22);
+      : mixOpaqueColors(fg, baseBg, isLight ? 0.22 : 0.25);
     const accentBase = hostVars?.accentColor
-      ? toOpaqueColor(hostVars.accentColor, isLight ? '#4f5d75' : '#8fa2be')
+      ? toOpaqueColor(hostVars.accentColor, isLight ? '#3d526b' : '#8fa2be')
       : isLight
-        ? '#4f5d75'
+        ? '#3d526b'
         : '#8fa2be';
-    const accentRgb = parseColorRgb(accentBase) || { r: 79, g: 93, b: 117, a: 1 };
+    const accentRgb = parseColorRgb(accentBase) || { r: 61, g: 82, b: 107, a: 1 };
     const accentFg = luminanceOf(accentRgb) >= 155 ? '#181a1e' : '#ffffff';
 
     vars['--ups-bg'] = baseBg;
-    vars['--ups-bg-elevated'] = mixOpaqueColors(isLight ? '#ffffff' : '#262930', baseBg, isLight ? 0.55 : 0.35);
-    vars['--ups-surface'] = mixOpaqueColors(isLight ? '#ffffff' : '#2e3138', baseBg, isLight ? 0.72 : 0.48);
-    vars['--ups-surface-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.08 : 0.14);
-    vars['--ups-surface-hover'] = mixOpaqueColors(fg, baseBg, isLight ? 0.12 : 0.18);
-    vars['--ups-border'] = mixOpaqueColors(borderBase, baseBg, 0.72);
-    vars['--ups-border-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.28 : 0.34);
+    vars['--ups-bg-elevated'] = mixOpaqueColors(isLight ? '#dcd8ce' : '#24272e', baseBg, 0.55);
+    vars['--ups-surface'] = mixOpaqueColors(isLight ? '#ffffff' : '#2d3139', baseBg, isLight ? 0.85 : 0.56);
+    vars['--ups-surface-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.1 : 0.16);
+    vars['--ups-surface-hover'] = mixOpaqueColors(fg, baseBg, isLight ? 0.14 : 0.2);
+    vars['--ups-input-bg'] = mixOpaqueColors(isLight ? '#f4f2ec' : '#1e2026', baseBg, 0.7);
+    vars['--ups-border'] = mixOpaqueColors(borderBase, baseBg, 0.78);
+    vars['--ups-border-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.32 : 0.36);
     vars['--ups-fg'] = fg;
-    vars['--ups-fg-muted'] = mixOpaqueColors(fg, baseBg, 0.62);
+    vars['--ups-fg-muted'] = mixOpaqueColors(fg, baseBg, 0.66);
     vars['--ups-accent'] = accentBase;
-    vars['--ups-accent-hover'] = mixOpaqueColors(fg, accentBase, isLight ? 0.14 : 0.18);
+    vars['--ups-accent-hover'] = mixOpaqueColors(fg, accentBase, isLight ? 0.16 : 0.18);
     vars['--ups-accent-fg'] = accentFg;
     vars['--ups-accent-soft'] = mixOpaqueColors(accentBase, baseBg, 0.18);
-    vars['--ups-track-off'] = mixOpaqueColors(fg, baseBg, 0.24);
+    vars['--ups-track-off'] = mixOpaqueColors(fg, baseBg, 0.28);
     vars['--ups-track-on'] = accentBase;
     vars['--ups-thumb'] = '#ffffff';
   }
@@ -287,108 +292,115 @@ export const SHADOW_CSS = String.raw`
   display: none !important;
 }
 
-/* Solid Opaque Palettes (Light & Dark, --modal-blur: 0px) */
+/* Solid Opaque Palettes with Distinct 4-Tier Module Hierarchy */
 .ups-theme-root,
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="paper"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #f6f5f1;
-  --ups-bg-elevated: #eceae3;
+  --ups-bg: #e7e3d8;
+  --ups-bg-elevated: #dcd7c9;
   --ups-surface: #ffffff;
-  --ups-surface-strong: #e5e2d8;
-  --ups-surface-hover: #eae7df;
-  --ups-border: #d5d1c6;
-  --ups-border-strong: #b7b2a4;
-  --ups-fg: #222428;
-  --ups-fg-muted: #5d626b;
-  --ups-accent: #44566c;
-  --ups-accent-hover: #354559;
+  --ups-surface-strong: #e2ddd0;
+  --ups-surface-hover: #f2efe7;
+  --ups-input-bg: #f6f4ee;
+  --ups-border: #c5beb0;
+  --ups-border-strong: #9f9786;
+  --ups-fg: #1e2126;
+  --ups-fg-muted: #565b64;
+  --ups-accent: #3b5068;
+  --ups-accent-hover: #2d3f53;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #e2e7ee;
-  --ups-ok: #2e6f4e;
-  --ups-ok-soft: #e4f0e9;
-  --ups-warn: #8a5b1e;
-  --ups-warn-soft: #f5ecdc;
-  --ups-danger: #9e3a38;
-  --ups-danger-soft: #f7e4e4;
-  --ups-track-off: #c2beb2;
-  --ups-track-on: #44566c;
+  --ups-accent-soft: #dfe6ef;
+  --ups-ok: #266b48;
+  --ups-ok-soft: #e1f0e8;
+  --ups-warn: #8c5816;
+  --ups-warn-soft: #faeedb;
+  --ups-danger: #9e3634;
+  --ups-danger-soft: #fae3e3;
+  --ups-track-off: #b5ae9f;
+  --ups-track-on: #3b5068;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 14px 38px rgba(18, 22, 28, 0.2);
+  --ups-card-shadow: 0 2px 6px rgba(26, 23, 18, 0.07);
+  --ups-shadow: 0 16px 42px rgba(18, 22, 28, 0.24);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="paper"] {
   color-scheme: dark;
   --modal-blur: 0px;
-  --ups-bg: #1e2024;
-  --ups-bg-elevated: #25282e;
-  --ups-surface: #2b2e35;
-  --ups-surface-strong: #343841;
-  --ups-surface-hover: #383c46;
-  --ups-border: #3d424c;
-  --ups-border-strong: #535966;
-  --ups-fg: #ebeae6;
-  --ups-fg-muted: #a6aab3;
-  --ups-accent: #7f97b4;
-  --ups-accent-hover: #94abc7;
-  --ups-accent-fg: #14171c;
-  --ups-accent-soft: #2b3440;
+  --ups-bg: #191b20;
+  --ups-bg-elevated: #21242b;
+  --ups-surface: #282c34;
+  --ups-surface-strong: #333843;
+  --ups-surface-hover: #363c48;
+  --ups-input-bg: #1e2128;
+  --ups-border: #3d4350;
+  --ups-border-strong: #565e70;
+  --ups-fg: #ecebe7;
+  --ups-fg-muted: #a6abb5;
+  --ups-accent: #7f99b8;
+  --ups-accent-hover: #96afd0;
+  --ups-accent-fg: #12151a;
+  --ups-accent-soft: #2a3442;
   --ups-ok: #6db38b;
-  --ups-ok-soft: #22352b;
-  --ups-warn: #cfa15a;
-  --ups-warn-soft: #382e1f;
-  --ups-danger: #d47b78;
-  --ups-danger-soft: #3b2425;
-  --ups-track-off: #4c515d;
-  --ups-track-on: #7f97b4;
+  --ups-ok-soft: #21362a;
+  --ups-warn: #d4a459;
+  --ups-warn-soft: #3a2f1e;
+  --ups-danger: #d67a77;
+  --ups-danger-soft: #3d2324;
+  --ups-track-off: #4c5260;
+  --ups-track-on: #7f99b8;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --ups-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
 }
 
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="ink"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #eff4f5;
-  --ups-bg-elevated: #e3ecee;
-  --ups-surface: #fafcfd;
-  --ups-surface-strong: #d8e4e7;
-  --ups-surface-hover: #e1ebee;
-  --ups-border: #c5d5d9;
-  --ups-border-strong: #9fb4ba;
-  --ups-fg: #1c282c;
-  --ups-fg-muted: #506369;
-  --ups-accent: #3d6b75;
-  --ups-accent-hover: #2f555d;
+  --ups-bg: #e1ebed;
+  --ups-bg-elevated: #d4e1e4;
+  --ups-surface: #ffffff;
+  --ups-surface-strong: #d4e2e6;
+  --ups-surface-hover: #edf3f5;
+  --ups-input-bg: #f3f7f8;
+  --ups-border: #b8ccd1;
+  --ups-border-strong: #8faab1;
+  --ups-fg: #19262a;
+  --ups-fg-muted: #4c6066;
+  --ups-accent: #35656f;
+  --ups-accent-hover: #285058;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #dce9ec;
-  --ups-ok: #2e6f56;
-  --ups-ok-soft: #e0efe9;
-  --ups-warn: #8c6224;
-  --ups-warn-soft: #f3ebdc;
-  --ups-danger: #a14343;
-  --ups-danger-soft: #f5e2e2;
-  --ups-track-off: #b3c4c9;
-  --ups-track-on: #3d6b75;
+  --ups-accent-soft: #d9e8eb;
+  --ups-ok: #296b52;
+  --ups-ok-soft: #dfefe8;
+  --ups-warn: #8a5e1f;
+  --ups-warn-soft: #f7ecda;
+  --ups-danger: #a03e3e;
+  --ups-danger-soft: #f8e2e2;
+  --ups-track-off: #a8bec4;
+  --ups-track-on: #35656f;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 14px 38px rgba(18, 34, 38, 0.18);
+  --ups-card-shadow: 0 2px 6px rgba(18, 36, 40, 0.07);
+  --ups-shadow: 0 16px 40px rgba(18, 34, 38, 0.22);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="ink"] {
   color-scheme: dark;
   --modal-blur: 0px;
-  --ups-bg: #182124;
-  --ups-bg-elevated: #202b2f;
-  --ups-surface: #263338;
-  --ups-surface-strong: #2f3e44;
-  --ups-surface-hover: #35454b;
-  --ups-border: #3a4c52;
-  --ups-border-strong: #516870;
-  --ups-fg: #e5eef0;
-  --ups-fg-muted: #9eb2b7;
-  --ups-accent: #73a6b0;
-  --ups-accent-hover: #89b9c2;
+  --ups-bg: #161f22;
+  --ups-bg-elevated: #1d282c;
+  --ups-surface: #253338;
+  --ups-surface-strong: #2f4046;
+  --ups-surface-hover: #34474d;
+  --ups-input-bg: #1a2529;
+  --ups-border: #3a4e54;
+  --ups-border-strong: #526b73;
+  --ups-fg: #e6eff1;
+  --ups-fg-muted: #9eb3b8;
+  --ups-accent: #73a8b2;
+  --ups-accent-hover: #8abbc4;
   --ups-accent-fg: #10181b;
-  --ups-accent-soft: #24383d;
+  --ups-accent-soft: #23393e;
   --ups-ok: #6db392;
   --ups-ok-soft: #1f352c;
   --ups-warn: #d1a35d;
@@ -396,53 +408,57 @@ export const SHADOW_CSS = String.raw`
   --ups-danger: #d47b7b;
   --ups-danger-soft: #3a2325;
   --ups-track-off: #485b61;
-  --ups-track-on: #73a6b0;
+  --ups-track-on: #73a8b2;
   --ups-thumb: #ffffff;
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   --ups-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
 }
 
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="warm"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #f6f1ea;
-  --ups-bg-elevated: #ede4d8;
-  --ups-surface: #fcf9f5;
-  --ups-surface-strong: #e4d8c8;
-  --ups-surface-hover: #ebe1d4;
-  --ups-border: #d7c9b8;
-  --ups-border-strong: #b9a690;
-  --ups-fg: #2b241d;
-  --ups-fg-muted: #6c5f52;
-  --ups-accent: #7b5b43;
-  --ups-accent-hover: #644935;
+  --ups-bg: #eae2d6;
+  --ups-bg-elevated: #dfd5c6;
+  --ups-surface: #fffdf9;
+  --ups-surface-strong: #e2d6c5;
+  --ups-surface-hover: #f4ede3;
+  --ups-input-bg: #f8f3ec;
+  --ups-border: #cbbba6;
+  --ups-border-strong: #ab9880;
+  --ups-fg: #29221b;
+  --ups-fg-muted: #66594c;
+  --ups-accent: #78573e;
+  --ups-accent-hover: #60442f;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #ede2d7;
-  --ups-ok: #386e4d;
-  --ups-ok-soft: #e4efe7;
-  --ups-warn: #8f5c1a;
-  --ups-warn-soft: #f5ebd9;
-  --ups-danger: #a3433b;
-  --ups-danger-soft: #f7e3e1;
-  --ups-track-off: #c7b8a6;
-  --ups-track-on: #7b5b43;
+  --ups-accent-soft: #ece0d3;
+  --ups-ok: #356c4a;
+  --ups-ok-soft: #e2efe6;
+  --ups-warn: #8c5916;
+  --ups-warn-soft: #f7ecd8;
+  --ups-danger: #a14038;
+  --ups-danger-soft: #f9e2e0;
+  --ups-track-off: #bfaf9b;
+  --ups-track-on: #78573e;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 14px 38px rgba(40, 28, 16, 0.18);
+  --ups-card-shadow: 0 2px 6px rgba(42, 30, 16, 0.07);
+  --ups-shadow: 0 16px 40px rgba(40, 28, 16, 0.22);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="warm"] {
   color-scheme: dark;
   --modal-blur: 0px;
-  --ups-bg: #221d19;
-  --ups-bg-elevated: #2b241f;
-  --ups-surface: #332b25;
-  --ups-surface-strong: #3e342d;
-  --ups-surface-hover: #463b33;
+  --ups-bg: #1e1916;
+  --ups-bg-elevated: #27211c;
+  --ups-surface: #312923;
+  --ups-surface-strong: #3d332c;
+  --ups-surface-hover: #453a32;
+  --ups-input-bg: #231d19;
   --ups-border: #4d4138;
-  --ups-border-strong: #67584c;
+  --ups-border-strong: #69594d;
   --ups-fg: #f0e8df;
   --ups-fg-muted: #b6a799;
-  --ups-accent: #be9473;
-  --ups-accent-hover: #cfa889;
+  --ups-accent: #c09574;
+  --ups-accent-hover: #d1a98a;
   --ups-accent-fg: #1d1712;
   --ups-accent-soft: #3c3026;
   --ups-ok: #72b389;
@@ -452,49 +468,53 @@ export const SHADOW_CSS = String.raw`
   --ups-danger: #d67c74;
   --ups-danger-soft: #3c2322;
   --ups-track-off: #5c4e43;
-  --ups-track-on: #be9473;
+  --ups-track-on: #c09574;
   --ups-thumb: #ffffff;
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   --ups-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
 }
 
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="sakura"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #f8f2f4;
-  --ups-bg-elevated: #f0e6ea;
-  --ups-surface: #fefbfc;
-  --ups-surface-strong: #e8dae0;
-  --ups-surface-hover: #efe3e8;
-  --ups-border: #dccad1;
-  --ups-border-strong: #bf9fa9;
-  --ups-fg: #2b2125;
-  --ups-fg-muted: #6c5960;
-  --ups-accent: #8e5669;
-  --ups-accent-hover: #754455;
+  --ups-bg: #efe5e9;
+  --ups-bg-elevated: #e5d8dd;
+  --ups-surface: #ffffff;
+  --ups-surface-strong: #e6d6dc;
+  --ups-surface-hover: #f6eef1;
+  --ups-input-bg: #faf4f6;
+  --ups-border: #d1bcc4;
+  --ups-border-strong: #b495a0;
+  --ups-fg: #291f23;
+  --ups-fg-muted: #68555c;
+  --ups-accent: #8a5164;
+  --ups-accent-hover: #714051;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #f1e3e8;
-  --ups-ok: #386e54;
-  --ups-ok-soft: #e3efe9;
-  --ups-warn: #8f6023;
-  --ups-warn-soft: #f5ecdd;
-  --ups-danger: #a63f48;
-  --ups-danger-soft: #f8e2e4;
-  --ups-track-off: #cbb7bf;
-  --ups-track-on: #8e5669;
+  --ups-accent-soft: #f0e1e6;
+  --ups-ok: #356c52;
+  --ups-ok-soft: #e2efe8;
+  --ups-warn: #8c5d1f;
+  --ups-warn-soft: #f7ecdc;
+  --ups-danger: #a43b45;
+  --ups-danger-soft: #f9e1e3;
+  --ups-track-off: #c3aeb6;
+  --ups-track-on: #8a5164;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 14px 38px rgba(45, 22, 32, 0.17);
+  --ups-card-shadow: 0 2px 6px rgba(45, 22, 32, 0.07);
+  --ups-shadow: 0 16px 40px rgba(45, 22, 32, 0.21);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="sakura"] {
   color-scheme: dark;
   --modal-blur: 0px;
-  --ups-bg: #231c20;
-  --ups-bg-elevated: #2c2328;
-  --ups-surface: #34292f;
+  --ups-bg: #1f191c;
+  --ups-bg-elevated: #282024;
+  --ups-surface: #33282e;
   --ups-surface-strong: #40323a;
   --ups-surface-hover: #483941;
-  --ups-border: #4f3e48;
-  --ups-border-strong: #6c5562;
+  --ups-input-bg: #241c21;
+  --ups-border: #503f49;
+  --ups-border-strong: #6d5663;
   --ups-fg: #f2e8ec;
   --ups-fg-muted: #b9a4ae;
   --ups-accent: #c58ca0;
@@ -510,6 +530,7 @@ export const SHADOW_CSS = String.raw`
   --ups-track-off: #5f4b56;
   --ups-track-on: #c58ca0;
   --ups-thumb: #ffffff;
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   --ups-shadow: 0 18px 42px rgba(0, 0, 0, 0.48);
 }
 
@@ -518,12 +539,13 @@ export const SHADOW_CSS = String.raw`
   color-scheme: dark;
   --modal-blur: 0px;
   --ups-bg: #191a1d;
-  --ups-bg-elevated: #202226;
-  --ups-surface: #26292e;
-  --ups-surface-strong: #2f333a;
-  --ups-surface-hover: #353a42;
-  --ups-border: #3a3f48;
-  --ups-border-strong: #505763;
+  --ups-bg-elevated: #202227;
+  --ups-surface: #272a31;
+  --ups-surface-strong: #31353e;
+  --ups-surface-hover: #363b45;
+  --ups-input-bg: #1d1f24;
+  --ups-border: #3c414b;
+  --ups-border-strong: #535a68;
   --ups-fg: #ecece8;
   --ups-fg-muted: #a3a7b0;
   --ups-accent: #7f97b4;
@@ -539,35 +561,38 @@ export const SHADOW_CSS = String.raw`
   --ups-track-off: #4a4f5a;
   --ups-track-on: #7f97b4;
   --ups-thumb: #ffffff;
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.26);
   --ups-shadow: 0 18px 44px rgba(0, 0, 0, 0.52);
 }
 
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="host"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #f5f5f3;
-  --ups-bg-elevated: #eaeae6;
+  --ups-bg: #e8e6df;
+  --ups-bg-elevated: #dddad1;
   --ups-surface: #ffffff;
-  --ups-surface-strong: #e2e2dc;
-  --ups-surface-hover: #e7e7e2;
-  --ups-border: #d0d0c9;
-  --ups-border-strong: #aeaea6;
+  --ups-surface-strong: #e2e0d8;
+  --ups-surface-hover: #f2f1ec;
+  --ups-input-bg: #f6f5f1;
+  --ups-border: #c6c3b9;
+  --ups-border-strong: #a29f95;
   --ups-fg: #222428;
-  --ups-fg-muted: #5d626b;
-  --ups-accent: #44566c;
-  --ups-accent-hover: #354559;
+  --ups-fg-muted: #5b6069;
+  --ups-accent: #3f536a;
+  --ups-accent-hover: #314256;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #e2e7ee;
-  --ups-ok: #2e6f4e;
-  --ups-ok-soft: #e4f0e9;
+  --ups-accent-soft: #e0e6ee;
+  --ups-ok: #2c6d4c;
+  --ups-ok-soft: #e2efe8;
   --ups-warn: #8a5b1e;
-  --ups-warn-soft: #f5ecdc;
+  --ups-warn-soft: #f6ecdc;
   --ups-danger: #9e3a38;
-  --ups-danger-soft: #f7e4e4;
-  --ups-track-off: #c2c2ba;
-  --ups-track-on: #44566c;
+  --ups-danger-soft: #f8e3e3;
+  --ups-track-off: #bab7ad;
+  --ups-track-on: #3f536a;
   --ups-thumb: #ffffff;
-  --ups-shadow: 0 14px 38px rgba(18, 22, 28, 0.2);
+  --ups-card-shadow: 0 2px 6px rgba(18, 22, 28, 0.07);
+  --ups-shadow: 0 16px 40px rgba(18, 22, 28, 0.22);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="host"] {
@@ -575,11 +600,12 @@ export const SHADOW_CSS = String.raw`
   --modal-blur: 0px;
   --ups-bg: #191a1d;
   --ups-bg-elevated: #212328;
-  --ups-surface: #272a30;
-  --ups-surface-strong: #31353c;
-  --ups-surface-hover: #373c44;
-  --ups-border: #3c414a;
-  --ups-border-strong: #535966;
+  --ups-surface: #282b32;
+  --ups-surface-strong: #32363f;
+  --ups-surface-hover: #373c46;
+  --ups-input-bg: #1d1f24;
+  --ups-border: #3d424c;
+  --ups-border-strong: #555b69;
   --ups-fg: #ecece8;
   --ups-fg-muted: #a4a8b1;
   --ups-accent: #7f97b4;
@@ -595,10 +621,11 @@ export const SHADOW_CSS = String.raw`
   --ups-track-off: #4a4f5a;
   --ups-track-on: #7f97b4;
   --ups-thumb: #ffffff;
+  --ups-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.26);
   --ups-shadow: 0 18px 44px rgba(0, 0, 0, 0.52);
 }
 
-/* Outer transparent non-blocking backdrop */
+/* Outer transparent non-blocking container */
 .ups-backdrop {
   position: fixed;
   inset: 0;
@@ -621,24 +648,23 @@ export const SHADOW_CSS = String.raw`
   pointer-events: none !important;
 }
 
-/* Main studio modal window */
+/* Main studio modal window (supports full 100dvh manual resize, zero visible corner icon) */
 .ups-modal {
   position: relative;
   pointer-events: auto;
   container-type: inline-size;
   container-name: plugin-win;
-  width: min(1040px, calc(100vw - 24px));
-  height: min(680px, 88dvh);
+  width: min(1080px, calc(100vw - 24px));
+  height: min(700px, 90dvh);
   min-width: 320px;
   min-height: 280px;
+  max-height: 100dvh;
   background-color: var(--ups-bg);
   background-image: linear-gradient(var(--ups-bg), var(--ups-bg));
   color: var(--ups-fg);
   border: 1px solid var(--ups-border-strong);
-  border-radius: 14px;
+  border-radius: 13px;
   box-shadow: var(--ups-shadow);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -647,8 +673,12 @@ export const SHADOW_CSS = String.raw`
 .ups-modal.is-floating {
   position: fixed;
   margin: 0;
-  max-width: none;
-  max-height: none;
+  max-width: 100vw;
+  max-height: 100dvh;
+}
+
+.ups-modal.is-mini {
+  border-radius: 13px;
 }
 
 .ups-modal.is-dragging,
@@ -656,10 +686,140 @@ export const SHADOW_CSS = String.raw`
   user-select: none;
 }
 
-/* Constant Topbar (48px) */
+/* 8-Way Invisible Edge + Corner Resize Hit-Zones (Zero visible corner badge/text) */
+.ups-rz {
+  position: absolute;
+  z-index: 22;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+
+.ups-rz-n {
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.ups-rz-s {
+  bottom: 0;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.ups-rz-e {
+  right: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.ups-rz-w {
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.ups-rz-nw {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.ups-rz-ne {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.ups-rz-sw {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.ups-rz-se {
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+/* Prominent Top Toast Banner (Eye-catching feedback for warnings/errors/confirmations) */
+@keyframes upsToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.ups-toast {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 28;
+  max-width: min(560px, calc(100% - 28px));
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--ups-border-strong);
+  border-left: 4px solid var(--ups-accent);
+  background-color: var(--ups-surface);
+  color: var(--ups-fg);
+  box-shadow: var(--ups-shadow);
+  font-size: 12.5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  animation: upsToastIn 0.16s ease-out;
+}
+
+.ups-toast[data-tone="ok"] {
+  border-color: var(--ups-ok);
+  border-left-width: 4px;
+  background-color: var(--ups-ok-soft);
+  color: var(--ups-ok);
+}
+
+.ups-toast[data-tone="warn"] {
+  border-color: var(--ups-warn);
+  border-left-width: 4px;
+  background-color: var(--ups-warn-soft);
+  color: var(--ups-warn);
+}
+
+.ups-toast[data-tone="error"] {
+  border-color: var(--ups-danger);
+  border-left-width: 4px;
+  background-color: var(--ups-danger-soft);
+  color: var(--ups-danger);
+}
+
+/* Constant Topbar (46px) */
 .ups-header {
   flex-shrink: 0;
-  height: 48px;
+  height: 46px;
   padding: 0 14px;
   display: flex;
   align-items: center;
@@ -675,7 +835,7 @@ export const SHADOW_CSS = String.raw`
 .ups-header-title-wrap {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -699,13 +859,13 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-ctx-chip {
-  font-size: 11px;
-  padding: 2px 7px;
+  font-size: 11.5px;
+  padding: 2px 8px;
   border-radius: 999px;
-  background-color: var(--ups-accent-soft);
+  background-color: var(--ups-surface);
   color: var(--ups-accent);
   border: 1px solid var(--ups-border);
-  max-width: 150px;
+  max-width: 160px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -723,6 +883,8 @@ export const SHADOW_CSS = String.raw`
 
 .ups-palette-select {
   height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   padding: 0 6px;
   border-radius: 6px;
   border: 1px solid var(--ups-border);
@@ -735,6 +897,8 @@ export const SHADOW_CSS = String.raw`
 
 .ups-icon-btn {
   height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   min-width: 28px;
   padding: 0 8px;
   border-radius: 6px;
@@ -753,6 +917,7 @@ export const SHADOW_CSS = String.raw`
 
 .ups-icon-btn:hover {
   background-color: var(--ups-surface-hover);
+  border-color: var(--ups-border-strong);
 }
 
 .ups-icon-btn.is-active {
@@ -761,10 +926,10 @@ export const SHADOW_CSS = String.raw`
   color: var(--ups-accent);
 }
 
-/* Constant Tab Bar (44px) */
+/* Constant Tab Bar (42px) */
 .ups-tabs {
   flex-shrink: 0;
-  height: 44px;
+  height: 42px;
   padding: 0 14px;
   display: flex;
   align-items: center;
@@ -781,7 +946,9 @@ export const SHADOW_CSS = String.raw`
 
 .ups-tab {
   height: 30px;
-  padding: 0 12px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0 13px;
   border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
@@ -806,15 +973,18 @@ export const SHADOW_CSS = String.raw`
   background-color: var(--ups-surface);
   color: var(--ups-fg);
   border-color: var(--ups-border-strong);
+  box-shadow: var(--ups-card-shadow);
   font-weight: 600;
 }
 
-/* Scrollable Middle Body */
+/* Scrollable Middle Body — scrollbar-gutter: stable prevents mode-switch width bounce! */
 .ups-body {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -828,15 +998,25 @@ export const SHADOW_CSS = String.raw`
 .ups-tab-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
-/* Two-Pane Side-by-Side Workbench on Wide Containers (>= 720px) */
+/* Constrain single-column panels on wide screens so controls never stretch across 1400px */
+.ups-tab-panel[data-ups-tab-panel="presets"] > .ups-card,
+.ups-tab-panel[data-ups-tab-panel="taste"] > .ups-card,
+.ups-tab-panel[data-ups-tab-panel="settings"] > .ups-card {
+  width: 100%;
+  max-width: 880px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Clean Studio Two-Pane Workbench */
 .ups-workbench {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -853,15 +1033,18 @@ export const SHADOW_CSS = String.raw`
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 5px 8px;
-  border-radius: 8px;
+  padding: 6px 10px;
+  border-radius: 9px;
   border: 1px solid var(--ups-border);
-  background-color: var(--ups-bg-elevated);
+  background-color: var(--ups-surface);
+  box-shadow: var(--ups-card-shadow);
 }
 
 @container plugin-win (min-width: 720px) {
   .ups-body.is-studio-tab {
     overflow: hidden;
+    scrollbar-gutter: auto;
+    padding: 12px 14px;
   }
 
   .ups-tab-panel[data-ups-tab-panel="studio"] {
@@ -880,7 +1063,7 @@ export const SHADOW_CSS = String.raw`
     min-height: 0;
     height: 100%;
     display: grid;
-    grid-template-columns: minmax(300px, 43%) minmax(0, 57%);
+    grid-template-columns: minmax(310px, 42%) minmax(0, 58%);
     gap: 12px;
     overflow: hidden;
   }
@@ -891,7 +1074,9 @@ export const SHADOW_CSS = String.raw`
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding-right: 2px;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    padding-right: 4px;
   }
 
   .ups-pane-left[hidden],
@@ -906,52 +1091,142 @@ export const SHADOW_CSS = String.raw`
   }
 
   .ups-draft-card .ups-draft-editor {
-    flex: 1 1 210px;
-    min-height: 180px;
+    flex: 1 1 280px;
+    min-height: 240px;
   }
 }
 
-/* Extracted Persona Points Checklist */
+/* Module Cards with High-Clarity Contrast & Left Accent Header */
+.ups-card {
+  background-color: var(--ups-surface);
+  border: 1px solid var(--ups-border);
+  border-radius: 10px;
+  box-shadow: var(--ups-card-shadow);
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ups-mod-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--ups-border);
+  min-width: 0;
+}
+
+.ups-mod-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ups-fg);
+  padding-left: 8px;
+  border-left: 3px solid var(--ups-accent);
+  line-height: 1.25;
+}
+
+.ups-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ups-fg);
+}
+
+.ups-muted {
+  font-size: 12px;
+  color: var(--ups-fg-muted);
+  line-height: 1.45;
+}
+
+/* Extracted Persona Points Checklist (2-column clean alignment, bounded height) */
 .ups-points-box {
   border: 1px solid var(--ups-border);
-  border-radius: 8px;
-  background-color: var(--ups-bg);
-  padding: 8px 10px;
+  border-left: 3px solid var(--ups-accent);
+  border-radius: 9px;
+  background-color: var(--ups-surface);
+  box-shadow: var(--ups-card-shadow);
+  padding: 9px 11px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .ups-points-list {
-  max-height: 156px;
+  max-height: 168px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-right: 2px;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-input-bg);
 }
 
 .ups-point-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  display: grid;
+  grid-template-columns: auto 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--ups-border);
   font-size: 12px;
   line-height: 1.4;
   cursor: pointer;
+}
+
+.ups-point-item:last-child {
+  border-bottom: 0;
 }
 
 .ups-point-item:hover {
   background-color: var(--ups-surface-hover);
 }
 
-.ups-point-item input[type="checkbox"] {
-  margin-top: 2px;
-  flex-shrink: 0;
+.ups-point-cat {
+  font-size: 11px;
+  color: var(--ups-fg-muted);
+  padding-right: 6px;
+  border-right: 1px solid var(--ups-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Collapsible Advanced Details */
+.ups-point-item > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Explicit visible thin scrollbars so users always see scrollable lists */
+.ups-body::-webkit-scrollbar,
+.ups-pane-left::-webkit-scrollbar,
+.ups-pane-right::-webkit-scrollbar,
+.ups-points-list::-webkit-scrollbar,
+.ups-taste-scroll::-webkit-scrollbar,
+.ups-diff-box::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.ups-body::-webkit-scrollbar-thumb,
+.ups-pane-left::-webkit-scrollbar-thumb,
+.ups-pane-right::-webkit-scrollbar-thumb,
+.ups-points-list::-webkit-scrollbar-thumb,
+.ups-taste-scroll::-webkit-scrollbar-thumb,
+.ups-diff-box::-webkit-scrollbar-thumb {
+  background-color: var(--ups-border-strong);
+  border-radius: 999px;
+}
+
+/* Collapsible Details & Built-in Lexicon Packs */
 .ups-advanced-details {
   border-top: 1px dashed var(--ups-border);
   padding-top: 6px;
@@ -968,6 +1243,97 @@ export const SHADOW_CSS = String.raw`
 .ups-advanced-details[open] > summary {
   margin-bottom: 8px;
   color: var(--ups-fg);
+  font-weight: 500;
+}
+
+.ups-lexicon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-lexicon-pack {
+  border: 1px solid var(--ups-border);
+  border-left: 3px solid var(--ups-accent);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  overflow: hidden;
+}
+
+.ups-lexicon-pack.is-off {
+  opacity: 0.62;
+  border-left-color: var(--ups-border-strong);
+}
+
+.ups-lexicon-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ups-lexicon-head:hover {
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-lexicon-body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-lexicon-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ups-lexicon-tag {
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background-color: var(--ups-input-bg);
+  border: 1px solid var(--ups-border);
+  color: var(--ups-fg);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Bounded Personal Taste Scroll Container (Never stretches page height!) */
+.ups-taste-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ups-taste-scroll {
+  max-height: 210px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+}
+
+.ups-taste-scroll .ups-entry-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ups-btn-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* Newly Added Item Highlight Feedback */
@@ -988,10 +1354,10 @@ export const SHADOW_CSS = String.raw`
   animation: upsFlashHighlight 1.8s ease-out forwards;
 }
 
-/* Constant Bottom Footer */
+/* Constant Unified Bottom Footer */
 .ups-footer {
   flex-shrink: 0;
-  min-height: 48px;
+  min-height: 50px;
   padding: 8px 14px;
   background-color: var(--ups-bg-elevated);
   border-top: 1px solid var(--ups-border);
@@ -1001,8 +1367,12 @@ export const SHADOW_CSS = String.raw`
   gap: 10px;
 }
 
-.ups-modal.is-resizable .ups-footer {
-  padding-right: 32px;
+.ups-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .ups-footer-status {
@@ -1015,6 +1385,21 @@ export const SHADOW_CSS = String.raw`
   flex: 1 1 auto;
 }
 
+.ups-footer-status[data-tone="ok"] {
+  color: var(--ups-ok);
+  font-weight: 500;
+}
+
+.ups-footer-status[data-tone="warn"] {
+  color: var(--ups-warn);
+  font-weight: 600;
+}
+
+.ups-footer-status[data-tone="error"] {
+  color: var(--ups-danger);
+  font-weight: 600;
+}
+
 .ups-footer-actions {
   display: flex;
   align-items: center;
@@ -1022,37 +1407,11 @@ export const SHADOW_CSS = String.raw`
   flex-shrink: 0;
 }
 
-/* Cards, Grids & Controls */
-.ups-card {
-  background-color: var(--ups-surface);
-  border: 1px solid var(--ups-border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
+.ups-footer-name-input {
+  width: 148px;
 }
 
-.ups-card-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.ups-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ups-fg);
-}
-
-.ups-muted {
-  font-size: 12px;
-  color: var(--ups-fg-muted);
-}
-
+/* Rows, Grids & Inputs */
 .ups-row {
   display: flex;
   align-items: center;
@@ -1096,25 +1455,45 @@ export const SHADOW_CSS = String.raw`
   min-width: 0;
   border: 1px solid var(--ups-border);
   border-radius: 7px;
-  background-color: var(--ups-bg);
+  background-color: var(--ups-input-bg);
   color: var(--ups-fg);
   font-family: inherit;
   font-size: 12.5px;
   padding: 6px 9px;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
 }
 
 .ups-input,
 .ups-select {
   height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 10px;
+  line-height: 30px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.ups-input[type="search"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.ups-input.ups-input-sm {
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 24px;
+  border-radius: 6px;
+}
+
 .ups-textarea {
   resize: vertical;
   min-height: 76px;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .ups-input:focus,
@@ -1122,27 +1501,37 @@ export const SHADOW_CSS = String.raw`
 .ups-textarea:focus {
   outline: 2px solid var(--ups-accent-soft);
   border-color: var(--ups-accent);
+  background-color: var(--ups-surface);
 }
 
 .ups-segmented {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  gap: 3px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 7px;
   border: 1px solid var(--ups-border);
-  background-color: var(--ups-bg);
+  background-color: var(--ups-input-bg);
 }
 
 .ups-seg-btn {
-  height: 26px;
-  padding: 0 10px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--ups-fg-muted);
+  font-family: inherit;
   font-size: 12px;
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   white-space: nowrap;
   text-decoration: none;
@@ -1151,15 +1540,19 @@ export const SHADOW_CSS = String.raw`
 .ups-seg-btn.is-active {
   background-color: var(--ups-accent);
   color: var(--ups-accent-fg);
+  font-weight: 600;
 }
 
-/* Buttons (no underline link-buttons anywhere) */
+/* Strictly Uniform 32px Standard Buttons */
 .ups-btn,
-.ups-btn-ghost {
+.ups-btn-ghost,
+.ups-btn-danger {
   height: 32px;
-  padding: 0 11px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 12px;
   border-radius: 7px;
-  border: 1px solid var(--ups-border);
+  border: 1px solid var(--ups-border-strong);
   background-color: var(--ups-surface);
   color: var(--ups-fg);
   font-family: inherit;
@@ -1172,22 +1565,23 @@ export const SHADOW_CSS = String.raw`
   white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .ups-btn:hover:not(:disabled) {
   background-color: var(--ups-surface-hover);
+  border-color: var(--ups-accent);
 }
 
 .ups-btn-ghost {
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 6px;
-  background: transparent;
+  border-color: var(--ups-border);
+  background-color: var(--ups-input-bg);
   color: var(--ups-fg-muted);
 }
 
 .ups-btn-ghost:hover:not(:disabled) {
   background-color: var(--ups-surface-hover);
+  border-color: var(--ups-border-strong);
   color: var(--ups-fg);
 }
 
@@ -1195,22 +1589,88 @@ export const SHADOW_CSS = String.raw`
   background-color: var(--ups-accent);
   border-color: var(--ups-accent);
   color: var(--ups-accent-fg);
+  font-weight: 600;
 }
 
 .ups-btn-primary:hover:not(:disabled) {
   background-color: var(--ups-accent-hover);
+  border-color: var(--ups-accent-hover);
 }
 
 .ups-btn-danger {
   background-color: var(--ups-danger-soft);
-  border-color: var(--ups-border);
+  border-color: var(--ups-danger);
   color: var(--ups-danger);
 }
 
+.ups-btn-danger:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
 .ups-btn:disabled,
-.ups-btn-ghost:disabled {
-  opacity: 0.48;
+.ups-btn-ghost:disabled,
+.ups-btn-danger:disabled,
+.ups-btn-sm:disabled {
+  opacity: 0.46;
   cursor: not-allowed;
+}
+
+/* Uniform 26px Compact Buttons (Chips & Inline Row Actions) */
+.ups-btn-sm {
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  color: var(--ups-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.ups-btn-sm:hover:not(:disabled) {
+  background-color: var(--ups-surface-hover);
+  border-color: var(--ups-border-strong);
+}
+
+.ups-btn-sm.is-active,
+.ups-btn-sm.is-like {
+  background-color: var(--ups-ok-soft);
+  border-color: var(--ups-ok);
+  color: var(--ups-ok);
+}
+
+.ups-btn-sm.is-dislike {
+  background-color: var(--ups-warn-soft);
+  border-color: var(--ups-warn);
+  color: var(--ups-warn);
+}
+
+.ups-btn-sm.is-dislike:hover:not(:disabled) {
+  background-color: var(--ups-danger-soft);
+  border-color: var(--ups-danger);
+  color: var(--ups-danger);
+}
+
+.ups-fav-btn {
+  margin-left: auto;
+  color: var(--ups-fg-muted);
+}
+
+.ups-fav-btn.is-fav {
+  color: var(--ups-warn);
+  border-color: var(--ups-warn);
+  background-color: var(--ups-warn-soft);
 }
 
 .ups-btn-row {
@@ -1220,14 +1680,15 @@ export const SHADOW_CSS = String.raw`
   flex-wrap: wrap;
 }
 
-/* Aligned Settings Row */
+/* Compact Grouped Settings Row (No widescreen space-between chasm!) */
 .ups-setting-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 5px 0;
   min-width: 0;
+  max-width: 660px;
 }
 
 .ups-setting-meta {
@@ -1235,11 +1696,11 @@ export const SHADOW_CSS = String.raw`
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 320px;
 }
 
 .ups-setting-control {
-  width: 148px;
+  width: 168px;
   flex-shrink: 0;
 }
 
@@ -1248,7 +1709,7 @@ export const SHADOW_CSS = String.raw`
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 34px;
+  width: 36px;
   height: 20px;
   border-radius: 999px;
   border: 0;
@@ -1273,15 +1734,56 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-switch.is-on .ups-switch-thumb {
-  transform: translateX(14px);
+  transform: translateX(16px);
 }
 
-/* Compact Stack Entry Rows */
+/* Multi-Open Smooth Accordion Entry List + Drag-Reorder Even While Expanded */
+.ups-acc-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ups-border);
+  border-radius: 9px;
+  overflow: hidden;
+  background-color: var(--ups-input-bg);
+}
+
 .ups-entry-card {
   border: 1px solid var(--ups-border);
   border-radius: 8px;
-  background-color: var(--ups-bg);
+  background-color: var(--ups-surface);
   overflow: hidden;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.ups-acc-list > .ups-entry-card {
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--ups-border);
+  border-radius: 0;
+}
+
+.ups-acc-list > .ups-entry-card.is-expanded {
+  border-left-color: var(--ups-accent);
+}
+
+.ups-acc-list > .ups-entry-card:last-child {
+  border-bottom: 0;
+}
+
+.ups-entry-card.is-drag-over-top {
+  box-shadow: inset 0 2px 0 0 var(--ups-accent);
+}
+
+.ups-entry-card.is-drag-over-bottom {
+  box-shadow: inset 0 -2px 0 0 var(--ups-accent);
+}
+
+.ups-entry-card.is-dragging-row {
+  opacity: 0.58;
+}
+
+.ups-entry-card.is-disabled .ups-entry-title {
+  opacity: 0.56;
 }
 
 .ups-entry-row {
@@ -1291,6 +1793,90 @@ export const SHADOW_CSS = String.raw`
   gap: 8px;
   padding: 7px 10px;
   min-width: 0;
+  transition: background-color 0.15s ease;
+}
+
+.ups-entry-row:hover {
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-entry-card.is-expanded > .ups-entry-row {
+  background-color: var(--ups-bg-elevated);
+  border-bottom: 1px solid var(--ups-border);
+}
+
+.ups-drag-handle {
+  width: 18px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ups-fg-muted);
+  cursor: grab;
+  flex-shrink: 0;
+  border-radius: 4px;
+  user-select: none;
+  font-size: 13px;
+  letter-spacing: -1px;
+}
+
+.ups-drag-handle:hover {
+  background-color: var(--ups-surface-strong);
+  color: var(--ups-fg);
+}
+
+.ups-acc-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ups-fg);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ups-acc-chev {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--ups-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(0deg);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s ease;
+}
+
+.ups-entry-card.is-expanded .ups-acc-chev {
+  transform: rotate(90deg);
+  color: var(--ups-accent);
+}
+
+.ups-acc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-color: var(--ups-track-off);
+  transition: background-color 0.15s ease;
+}
+
+.ups-acc-dot.is-on {
+  background-color: var(--ups-ok);
+}
+
+.ups-acc-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .ups-entry-main {
@@ -1303,12 +1889,28 @@ export const SHADOW_CSS = String.raw`
 
 .ups-entry-title {
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ups-fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+
+.ups-acc-preview {
+  font-size: 11.5px;
+  color: var(--ups-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ups-acc-dirty {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ups-warn);
+  flex-shrink: 0;
 }
 
 .ups-badge {
@@ -1323,52 +1925,223 @@ export const SHADOW_CSS = String.raw`
 
 .ups-badge-ok {
   background-color: var(--ups-ok-soft);
+  border-color: var(--ups-ok);
   color: var(--ups-ok);
 }
 
 .ups-badge-warn {
   background-color: var(--ups-warn-soft);
+  border-color: var(--ups-warn);
   color: var(--ups-warn);
 }
 
+.ups-badge-danger {
+  background-color: var(--ups-danger-soft);
+  border-color: var(--ups-danger);
+  color: var(--ups-danger);
+}
+
+/* Container-Responsive Row Controls: Wide = flat inline buttons & NO ··· ; Narrow = ··· */
 .ups-row-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
+}
+
+.ups-row-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .ups-more-btn {
   width: 28px;
   height: 26px;
+  min-height: 26px;
+  max-height: 26px;
   padding: 0;
   border-radius: 6px;
   border: 1px solid var(--ups-border);
   background-color: var(--ups-surface);
   color: var(--ups-fg);
   cursor: pointer;
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
 }
 
+.ups-more-btn:hover {
+  background-color: var(--ups-surface-hover);
+  border-color: var(--ups-border-strong);
+}
+
+@container plugin-win (max-width: 620px) {
+  .ups-row-inline-actions {
+    display: none;
+  }
+
+  .ups-more-btn {
+    display: inline-flex;
+  }
+
+  .ups-taste-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Smooth CSS Grid 0fr -> 1fr Accordion Body (Body-first, metadata collapsed by default!) */
+.ups-acc-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.16s ease;
+}
+
+.ups-entry-card.is-expanded > .ups-acc-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.ups-acc-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .ups-entry-editor {
-  border-top: 1px solid var(--ups-border);
-  padding: 10px;
+  padding: 10px 12px 12px 16px;
   background-color: var(--ups-surface);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-/* Diff & Lint */
+.ups-acc-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ups-acc-editor-tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.ups-acc-textarea {
+  min-height: 120px;
+  transition: min-height 0.16s ease;
+}
+
+.ups-acc-textarea.is-tall {
+  min-height: 320px;
+  height: 320px;
+}
+
+.ups-acc-editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.ups-acc-save-status {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ups-ok);
+  margin-left: auto;
+}
+
+/* Slim Selection-Driven Preference Bar (1 slim row when idle; expands smoothly on selection!) */
+.ups-selection-bar {
+  border: 1px dashed var(--ups-border-strong);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ups-selection-bar.has-selection {
+  border-style: solid;
+  border-color: var(--ups-accent);
+  background-color: var(--ups-accent-soft);
+  gap: 6px;
+}
+
+.ups-selection-drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.14s ease;
+}
+
+.ups-selection-bar.has-selection .ups-selection-drawer,
+.ups-selection-bar.is-pinned-open .ups-selection-drawer {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.ups-selection-drawer-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-selection-bar.has-selection .ups-selection-drawer-inner,
+.ups-selection-bar.is-pinned-open .ups-selection-drawer-inner {
+  padding-top: 6px;
+  border-top: 1px solid var(--ups-border);
+}
+
+.ups-selection-snippet {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ups-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ups-selection-bar.has-selection .ups-selection-snippet {
+  color: var(--ups-fg);
+  font-weight: 600;
+}
+
+.ups-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.ups-chip-label {
+  font-size: 11.5px;
+  color: var(--ups-fg-muted);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+/* Diff, Draft Self-Check Log & Lint */
 .ups-diff-box {
   border: 1px solid var(--ups-border);
   border-radius: 8px;
-  background-color: var(--ups-bg);
+  background-color: var(--ups-input-bg);
   padding: 8px;
-  max-height: 180px;
+  max-height: 170px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.45;
@@ -1400,21 +2173,34 @@ export const SHADOW_CSS = String.raw`
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 5px 8px;
+  min-width: 0;
+  padding: 5px 9px;
   border-radius: 6px;
   background-color: var(--ups-warn-soft);
+  border: 1px solid var(--ups-warn);
   color: var(--ups-warn);
   font-size: 12px;
+}
+
+.ups-issue-item > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ups-issue-item > button {
+  flex-shrink: 0;
 }
 
 .ups-taste-candidates {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px;
-  border: 1px solid var(--ups-border);
+  padding: 9px;
+  border: 1px solid var(--ups-accent);
   border-radius: 8px;
-  background-color: var(--ups-bg);
+  background-color: var(--ups-surface);
 }
 
 .ups-check-row {
@@ -1426,36 +2212,29 @@ export const SHADOW_CSS = String.raw`
 }
 
 /* Anchored Popover & Floating Menu (NO !important width overrides) */
-.ups-popover-anchor {
-  position: relative;
-  display: inline-flex;
-}
-
 .ups-popover,
 .ups-floating-menu {
   position: fixed;
   z-index: 2147483015;
-  background-color: var(--ups-bg);
-  background-image: linear-gradient(var(--ups-bg), var(--ups-bg));
+  background-color: var(--ups-surface);
+  background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
   color: var(--ups-fg);
   border: 1px solid var(--ups-border-strong);
   border-radius: 10px;
   box-shadow: var(--ups-shadow);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   pointer-events: auto;
 }
 
 .ups-popover {
-  width: min(300px, calc(100vw - 20px));
-  padding: 10px 12px;
+  width: min(320px, calc(100vw - 20px));
+  padding: 11px 13px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .ups-floating-menu {
-  min-width: 152px;
+  min-width: 156px;
   max-width: min(240px, calc(100vw - 16px));
   padding: 4px;
   display: flex;
@@ -1488,13 +2267,13 @@ export const SHADOW_CSS = String.raw`
   cursor: not-allowed;
 }
 
-/* Sub-Modal */
+/* Non-Blocking Draggable Auxiliary Floating Panel (Never locks underlying scroll!) */
 .ups-submodal-mask {
   position: fixed;
   inset: 0;
   z-index: 2147483020;
-  background-color: rgba(15, 18, 24, 0.35);
-  pointer-events: auto;
+  background: transparent;
+  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1502,10 +2281,12 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-submodal-card {
+  position: relative;
+  pointer-events: auto;
   width: min(560px, calc(100vw - 24px));
-  max-height: min(540px, 84dvh);
-  background-color: var(--ups-bg);
-  background-image: linear-gradient(var(--ups-bg), var(--ups-bg));
+  max-height: min(560px, 86dvh);
+  background-color: var(--ups-surface);
+  background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
   color: var(--ups-fg);
   border: 1px solid var(--ups-border-strong);
   border-radius: 12px;
@@ -1513,6 +2294,11 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.ups-submodal-card.is-floating {
+  position: fixed;
+  margin: 0;
 }
 
 .ups-submodal-header {
@@ -1523,11 +2309,15 @@ export const SHADOW_CSS = String.raw`
   align-items: center;
   justify-content: space-between;
   font-weight: 600;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 .ups-submodal-body {
   padding: 12px 14px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -1545,24 +2335,6 @@ export const SHADOW_CSS = String.raw`
   gap: 8px;
 }
 
-/* SE Resize Handle (24x24px) */
-.ups-resize-handle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 24px;
-  height: 24px;
-  z-index: 15;
-  cursor: nwse-resize;
-  touch-action: none;
-  user-select: none;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 5px;
-  color: var(--ups-fg-muted);
-}
-
 /* Minimized Capsule Pill */
 .ups-minimized-pill {
   position: fixed;
@@ -1571,12 +2343,10 @@ export const SHADOW_CSS = String.raw`
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--ups-border-strong);
-  background-color: var(--ups-bg-elevated);
-  background-image: linear-gradient(var(--ups-bg-elevated), var(--ups-bg-elevated));
+  background-color: var(--ups-surface);
+  background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
   color: var(--ups-fg);
   box-shadow: var(--ups-shadow);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1592,7 +2362,7 @@ export const SHADOW_CSS = String.raw`
   background-color: var(--ups-surface-hover);
 }
 
-/* Compact height mode (360x420 & mobile mini-window) */
+/* Compact height mode (360x420 & compact viewports) */
 .ups-modal.is-compact-h .ups-header {
   height: 40px;
 }
@@ -1603,6 +2373,8 @@ export const SHADOW_CSS = String.raw`
 
 .ups-modal.is-compact-h .ups-tab {
   height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   font-size: 11.5px;
 }
 
@@ -1616,20 +2388,12 @@ export const SHADOW_CSS = String.raw`
   padding: 5px 10px;
 }
 
-.ups-modal.is-compact-h.is-resizable .ups-footer {
-  padding-right: 28px;
-}
-
-.ups-modal.is-compact-h .ups-footer-status {
+.ups-modal.is-compact-h .ups-footer-left {
   display: none;
 }
 
 /* Container Queries for 4-State Stability */
-@container plugin-win (max-width: 560px) {
-  .ups-grid-2 {
-    grid-template-columns: 1fr;
-  }
-
+@container plugin-win (max-width: 680px) {
   .ups-footer {
     flex-direction: column;
     align-items: stretch;
@@ -1640,17 +2404,34 @@ export const SHADOW_CSS = String.raw`
     width: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
+  }
+
+  .ups-footer-name-input {
+    flex: 1 1 130px;
+    width: auto;
   }
 
   .ups-footer-actions > button {
     flex: 1 1 auto;
     min-width: 0;
   }
+}
+
+@container plugin-win (max-width: 560px) {
+  .ups-grid-2 {
+    grid-template-columns: 1fr;
+  }
 
   .ups-setting-row {
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 6px;
+  }
+
+  .ups-setting-meta {
+    flex: 1 1 auto;
+    width: 100%;
   }
 
   .ups-setting-control {
@@ -1670,7 +2451,7 @@ export const SHADOW_CSS = String.raw`
   }
 
   .ups-palette-select {
-    max-width: 72px;
+    max-width: 74px;
     font-size: 11px;
     padding: 0 4px;
   }
@@ -1697,12 +2478,17 @@ export const SHADOW_CSS = String.raw`
     padding: 6px 10px;
   }
 
-  .ups-modal.is-resizable .ups-footer {
-    padding-right: 28px;
+  .ups-footer-name-input {
+    height: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    font-size: 11.5px;
   }
 
   .ups-footer-actions > button {
     height: 28px;
+    min-height: 28px;
+    max-height: 28px;
     padding: 0 6px;
     font-size: 11.5px;
   }
@@ -1718,12 +2504,17 @@ export const SHADOW_CSS = String.raw`
   }
 
   .ups-palette-select {
-    max-width: 62px;
+    max-width: 64px;
+    height: 26px;
+    min-height: 26px;
+    max-height: 26px;
   }
 
   .ups-header .ups-icon-btn {
     min-width: 24px;
     height: 26px;
+    min-height: 26px;
+    max-height: 26px;
     padding: 0 5px;
     font-size: 11px;
   }
@@ -1756,18 +2547,13 @@ export const SHADOW_CSS = String.raw`
     padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 
-  .ups-modal:not(.is-floating):not(.is-mini) .ups-resize-handle {
+  .ups-modal:not(.is-floating):not(.is-mini) .ups-rz {
     display: none;
   }
 
   .ups-modal:not(.is-floating):not(.is-mini) .ups-header {
     cursor: default;
     touch-action: auto;
-  }
-
-  .ups-modal.is-mini {
-    border-radius: 14px;
-    border: 1px solid var(--ups-border-strong);
   }
 
   .ups-submodal-footer {

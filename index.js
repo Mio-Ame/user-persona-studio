@@ -7,7 +7,7 @@ import {
 } from './src/host.js';
 import { createStudioUI } from './src/ui.js';
 
-export const EXTENSION_VERSION = '1.1.0';
+export const EXTENSION_VERSION = '1.3.0';
 
 function createDomEl(doc, tag, props = {}, children = []) {
   const node = doc.createElement(tag);

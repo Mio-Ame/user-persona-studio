@@ -34,16 +34,31 @@ function getBridge() {
     : null;
 }
 
-function buildImportCandidates(relToScripts, isRootScript = false) {
+export const LIVE_PERSONA_AVATAR_ID = '__live_persona__';
+
+export function buildImportCandidates(relToScripts, isRootScript = false) {
+  const absPath = isRootScript ? `/${relToScripts}` : `/scripts/${relToScripts}`;
   const candidates = isRootScript
-    ? [`../../../../../${relToScripts}`, `../../../../${relToScripts}`]
-    : [`../../../../${relToScripts}`, `../../../${relToScripts}`];
+    ? [
+        `../../../../../${relToScripts}`,
+        `../../../../${relToScripts}`,
+        `../../../${relToScripts}`,
+        absPath,
+      ]
+    : [
+        `../../../../${relToScripts}`,
+        `../../../${relToScripts}`,
+        `../../../../../${relToScripts}`,
+        absPath,
+      ];
 
   try {
     const href = globalThis.location?.href;
-    if (href && /^https?:/i.test(href)) {
-      const absPath = isRootScript ? `/${relToScripts}` : `/scripts/${relToScripts}`;
-      candidates.push(new URL(absPath, href).href);
+    if (href && /^[a-z][a-z0-9+.-]*:/i.test(href) && !/^file:/i.test(href)) {
+      const resolved = new URL(absPath, href).href;
+      if (!candidates.includes(resolved)) {
+        candidates.push(resolved);
+      }
     }
   } catch {
     // Ignore invalid location in non-browser runtimes
@@ -103,7 +118,8 @@ async function loadHostModules(needed = {}, deps = {}) {
       })
     );
   }
-  if (needed.powerUser && !deps?.powerUser && !deps?.power_user && !bridge?.powerUser) {
+  const immediateCtx = deps?.context ?? deps?.ctx ?? bridge?.context ?? null;
+  if (needed.powerUser && !hasImmediatePowerUser(deps, bridge, immediateCtx)) {
     tasks.push(
       importFirstAvailable('power-user', buildImportCandidates('power-user.js'), deps).then((m) => {
         mods.powerUser = m;
@@ -196,12 +212,39 @@ function resolveExtensionSettingsContainer(deps, bridge, ctx, extensionsMod) {
   );
 }
 
+function hasFiniteNumber(val) {
+  return (
+    typeof val !== 'boolean' &&
+    val !== null &&
+    val !== undefined &&
+    String(val).trim() !== '' &&
+    Number.isFinite(Number(val))
+  );
+}
+
+function hasImmediatePowerUser(deps, bridge, ctx) {
+  return Boolean(
+    deps?.powerUser ||
+      deps?.power_user ||
+      deps?.powerUserSettings ||
+      bridge?.powerUser ||
+      bridge?.power_user ||
+      bridge?.powerUserSettings ||
+      ctx?.powerUserSettings ||
+      ctx?.powerUser ||
+      globalThis.power_user
+  );
+}
+
 function resolvePowerUser(deps, bridge, ctx, powerUserMod) {
   return (
     deps?.powerUser ??
     deps?.power_user ??
+    deps?.powerUserSettings ??
     bridge?.powerUser ??
     bridge?.power_user ??
+    bridge?.powerUserSettings ??
+    ctx?.powerUserSettings ??
     ctx?.powerUser ??
     powerUserMod?.power_user ??
     globalThis.power_user ??
@@ -209,26 +252,139 @@ function resolvePowerUser(deps, bridge, ctx, powerUserMod) {
   );
 }
 
-function resolveActiveAvatarId(deps, bridge, ctx, personasMod) {
+function resolveHostDocument(deps = {}) {
+  if (deps && Object.hasOwn(deps, 'document')) {
+    return deps.document || null;
+  }
+  return typeof document !== 'undefined' ? document : null;
+}
+
+function readLiveDomPersona(deps = {}) {
+  const doc = resolveHostDocument(deps);
+  if (!doc) {
+    return { doc: null, descEl: null, description: '', name: '' };
+  }
+  const descEl =
+    doc.querySelector?.('#persona_description') ??
+    doc.getElementById?.('persona_description') ??
+    null;
+  const nameEl =
+    doc.querySelector?.('#your_name') ??
+    doc.getElementById?.('your_name') ??
+    null;
+  const description =
+    descEl && descEl.value !== undefined && descEl.value !== null
+      ? String(descEl.value)
+      : '';
+  const name = nameEl ? String(nameEl.textContent || nameEl.value || '').trim() : '';
+  return { doc, descEl, description, name };
+}
+
+function resolveActiveAvatarId(deps, bridge, ctx, personasMod, powerUser = null, doc = null) {
   if (typeof deps?.getUserAvatar === 'function') {
-    return String(deps.getUserAvatar() ?? '').trim();
+    const v = String(deps.getUserAvatar() ?? '').trim();
+    if (v) return v;
   }
   if (deps?.userAvatar !== undefined) {
-    return String(deps.userAvatar ?? '').trim();
+    const v = String(deps.userAvatar ?? '').trim();
+    if (v) return v;
   }
   if (typeof bridge?.getUserAvatar === 'function') {
-    return String(bridge.getUserAvatar() ?? '').trim();
+    const v = String(bridge.getUserAvatar() ?? '').trim();
+    if (v) return v;
   }
   if (bridge?.userAvatar !== undefined) {
-    return String(bridge.userAvatar ?? '').trim();
+    const v = String(bridge.userAvatar ?? '').trim();
+    if (v) return v;
   }
   if (ctx?.userAvatar !== undefined) {
-    return String(ctx.userAvatar ?? '').trim();
+    const v = String(ctx.userAvatar ?? '').trim();
+    if (v) return v;
   }
   if (personasMod?.user_avatar !== undefined) {
-    return String(personasMod.user_avatar ?? '').trim();
+    const v = String(personasMod.user_avatar ?? '').trim();
+    if (v) return v;
   }
+
+  const selectedEl = doc?.querySelector?.(
+    '#user_avatar_block .avatar-container.selected, #user_avatar_block .avatar.selected'
+  );
+  if (selectedEl) {
+    const domAvatarId = String(
+      selectedEl.getAttribute?.('data-avatar-id') ??
+        selectedEl.dataset?.avatarId ??
+        selectedEl.querySelector?.('[data-avatar-id]')?.getAttribute?.('data-avatar-id') ??
+        ''
+    ).trim();
+    if (domAvatarId) return domAvatarId;
+  }
+
+  const personasMap =
+    powerUser?.personas && typeof powerUser.personas === 'object' ? powerUser.personas : null;
+  const descriptionsMap =
+    powerUser?.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
+      ? powerUser.persona_descriptions
+      : null;
+
+  const liveDescTrimmed = String(powerUser?.persona_description ?? '').trim();
+  if (liveDescTrimmed && descriptionsMap) {
+    const activeNameTrimmed = String(ctx?.name1 ?? '').trim();
+    let firstMatchId = '';
+    for (const id of Object.keys(descriptionsMap)) {
+      const cleanId = String(id ?? '').trim();
+      if (!cleanId || !Object.hasOwn(descriptionsMap, id)) continue;
+      const item = descriptionsMap[id];
+      if (!item || typeof item !== 'object') continue;
+      const itemDesc = String(item.description ?? '').trim();
+      if (itemDesc && itemDesc === liveDescTrimmed) {
+        if (!firstMatchId) firstMatchId = cleanId;
+        if (
+          activeNameTrimmed &&
+          personasMap &&
+          Object.hasOwn(personasMap, id) &&
+          String(personasMap[id] ?? '').trim() === activeNameTrimmed
+        ) {
+          return cleanId;
+        }
+      }
+    }
+    if (firstMatchId) return firstMatchId;
+  }
+
+  const defaultPersona = String(powerUser?.default_persona ?? '').trim();
+  if (
+    defaultPersona &&
+    ((personasMap && Object.hasOwn(personasMap, defaultPersona)) ||
+      (descriptionsMap && Object.hasOwn(descriptionsMap, defaultPersona)))
+  ) {
+    return defaultPersona;
+  }
+
   return '';
+}
+
+function buildLivePersonaRecord(powerUser, ctx, liveDom) {
+  const fallbackDesc = String(powerUser?.persona_description || liveDom?.description || '');
+  const fallbackName = String(ctx?.name1 || liveDom?.name || '').trim();
+  return {
+    avatarId: LIVE_PERSONA_AVATAR_ID,
+    name: fallbackName || '当前人设',
+    description: fallbackDesc,
+    title: '',
+    lorebook: String(powerUser?.persona_description_lorebook ?? ''),
+    position: hasFiniteNumber(powerUser?.persona_description_position)
+      ? Number(powerUser.persona_description_position)
+      : 0,
+    depth: hasFiniteNumber(powerUser?.persona_description_depth)
+      ? Number(powerUser.persona_description_depth)
+      : 2,
+    role: hasFiniteNumber(powerUser?.persona_description_role)
+      ? Number(powerUser.persona_description_role)
+      : 0,
+    connections: [],
+    isDefault: false,
+    isActive: true,
+  };
 }
 
 function buildPersonaRecord(avatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx) {
@@ -433,47 +589,106 @@ export async function saveSettings(settings, deps = {}) {
 export async function getActivePersona(deps = {}) {
   const bridge = getBridge();
   const ctx = await resolveHostContext(deps);
-  const needPersonas =
-    deps?.userAvatar === undefined &&
-    typeof deps?.getUserAvatar !== 'function' &&
-    bridge?.userAvatar === undefined &&
-    typeof bridge?.getUserAvatar !== 'function' &&
-    ctx?.userAvatar === undefined;
-  const mods = await loadHostModules({ powerUser: true, personas: needPersonas }, deps);
+  const hasExplicitAvatar =
+    typeof deps?.getUserAvatar === 'function' ||
+    Boolean(String(deps?.userAvatar ?? '').trim()) ||
+    typeof bridge?.getUserAvatar === 'function' ||
+    Boolean(String(bridge?.userAvatar ?? '').trim()) ||
+    Boolean(String(ctx?.userAvatar ?? '').trim());
+  const mods = await loadHostModules(
+    {
+      powerUser: !hasImmediatePowerUser(deps, bridge, ctx),
+      personas: !hasExplicitAvatar,
+    },
+    deps
+  );
 
-  const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
-  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+  const liveDom = readLiveDomPersona(deps);
+  const rawPowerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+  const powerUser = rawPowerUser && typeof rawPowerUser === 'object' ? rawPowerUser : null;
+  const activeAvatarId = resolveActiveAvatarId(
+    deps,
+    bridge,
+    ctx,
+    mods.personas,
+    powerUser,
+    liveDom.doc
+  );
 
-  if (!activeAvatarId || !powerUser || typeof powerUser !== 'object') {
+  if (activeAvatarId && powerUser) {
+    const personasMap =
+      powerUser.personas && typeof powerUser.personas === 'object' ? powerUser.personas : {};
+    const descriptionsMap =
+      powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
+        ? powerUser.persona_descriptions
+        : {};
+    const record = buildPersonaRecord(
+      activeAvatarId,
+      personasMap,
+      descriptionsMap,
+      powerUser,
+      activeAvatarId,
+      ctx
+    );
+    if (!record.description.trim()) {
+      const liveFallbackDesc = String(powerUser.persona_description || liveDom.description || '');
+      if (liveFallbackDesc.trim()) {
+        record.description = liveFallbackDesc;
+      }
+    }
+    if (!record.name && liveDom.name) {
+      record.name = liveDom.name;
+    }
+    return record;
+  }
+
+  const fallbackDesc = String(powerUser?.persona_description || liveDom.description || '');
+  if (!powerUser && !fallbackDesc.trim()) {
     return null;
   }
 
-  const personasMap = powerUser.personas && typeof powerUser.personas === 'object' ? powerUser.personas : {};
-  const descriptionsMap =
-    powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
-      ? powerUser.persona_descriptions
-      : {};
-
-  return buildPersonaRecord(activeAvatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx);
+  const liveRecord = buildLivePersonaRecord(powerUser, ctx, liveDom);
+  if (activeAvatarId) {
+    liveRecord.avatarId = activeAvatarId;
+  }
+  return liveRecord;
 }
 
 export async function listPersonas(deps = {}) {
   const bridge = getBridge();
   const ctx = await resolveHostContext(deps);
-  const needPersonas =
-    deps?.userAvatar === undefined &&
-    typeof deps?.getUserAvatar !== 'function' &&
-    bridge?.userAvatar === undefined &&
-    typeof bridge?.getUserAvatar !== 'function' &&
-    ctx?.userAvatar === undefined;
-  const mods = await loadHostModules({ powerUser: true, personas: needPersonas }, deps);
+  const hasExplicitAvatar =
+    typeof deps?.getUserAvatar === 'function' ||
+    Boolean(String(deps?.userAvatar ?? '').trim()) ||
+    typeof bridge?.getUserAvatar === 'function' ||
+    Boolean(String(bridge?.userAvatar ?? '').trim()) ||
+    Boolean(String(ctx?.userAvatar ?? '').trim());
+  const mods = await loadHostModules(
+    {
+      powerUser: !hasImmediatePowerUser(deps, bridge, ctx),
+      personas: !hasExplicitAvatar,
+    },
+    deps
+  );
 
-  const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
-  if (!powerUser || typeof powerUser !== 'object') {
+  const liveDom = readLiveDomPersona(deps);
+  const rawPowerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+  const powerUser = rawPowerUser && typeof rawPowerUser === 'object' ? rawPowerUser : null;
+  if (!powerUser) {
+    if (liveDom.description.trim()) {
+      return [buildLivePersonaRecord(null, ctx, liveDom)];
+    }
     return [];
   }
 
-  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+  const activeAvatarId = resolveActiveAvatarId(
+    deps,
+    bridge,
+    ctx,
+    mods.personas,
+    powerUser,
+    liveDom.doc
+  );
   const personasMap = powerUser.personas && typeof powerUser.personas === 'object' ? powerUser.personas : {};
   const descriptionsMap =
     powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
@@ -492,7 +707,14 @@ export async function listPersonas(deps = {}) {
 
   const list = [];
   for (const avatarId of idSet) {
-    list.push(buildPersonaRecord(avatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx));
+    const rec = buildPersonaRecord(avatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx);
+    if (rec.isActive && !rec.description.trim()) {
+      const liveFallbackDesc = String(powerUser.persona_description || liveDom.description || '');
+      if (liveFallbackDesc.trim()) {
+        rec.description = liveFallbackDesc;
+      }
+    }
+    list.push(rec);
   }
 
   list.sort((a, b) => {
@@ -500,6 +722,15 @@ export async function listPersonas(deps = {}) {
     if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
     return a.name.localeCompare(b.name, 'zh-CN');
   });
+
+  const liveDesc = String(powerUser.persona_description || liveDom.description || '');
+  const hasActiveInList = list.some((item) => item.isActive);
+  const hasSameDescInList =
+    Boolean(liveDesc.trim()) &&
+    list.some((item) => String(item.description ?? '').trim() === liveDesc.trim());
+  if (liveDesc.trim() && !hasActiveInList && !hasSameDescInList) {
+    list.unshift(buildLivePersonaRecord(powerUser, ctx, liveDom));
+  }
 
   return list;
 }
@@ -660,13 +891,14 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
 
   const mods = await loadHostModules(
     {
-      powerUser: !deps?.powerUser && !deps?.power_user && !bridge?.powerUser,
+      powerUser: !hasImmediatePowerUser(deps, bridge, ctx),
       personas: needPersonas,
       script: needScript,
     },
     deps
   );
 
+  const liveDom = readLiveDomPersona(deps);
   const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
   if (!powerUser || typeof powerUser !== 'object') {
     throw new Error('未检测到酒馆用户人设存储（power_user），无法写入人设');
@@ -678,7 +910,14 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
     powerUser.persona_descriptions = {};
   }
 
-  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+  const activeAvatarId = resolveActiveAvatarId(
+    deps,
+    bridge,
+    ctx,
+    mods.personas,
+    powerUser,
+    liveDom.doc
+  );
   const saveDebounced =
     deps?.saveSettingsDebounced ??
     bridge?.saveSettingsDebounced ??
@@ -709,10 +948,90 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
   const chatId = rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null;
 
   if (mode === 'overwrite') {
-    const targetId = String(payload.avatarId || activeAvatarId || '').trim();
-    if (!targetId) {
-      throw new Error('当前没有可覆盖的目标 User 人设，请先选择一个人设或改用「另存为新人设」');
+    const explicitId = String(payload.avatarId ?? '').trim();
+    const targetId = explicitId || activeAvatarId;
+
+    if (targetId === LIVE_PERSONA_AVATAR_ID || !targetId) {
+      const prevDescription = String(powerUser.persona_description ?? liveDom.description ?? '');
+      const nextDescription =
+        payload.description !== undefined ? String(payload.description) : prevDescription;
+      const finalLorebook =
+        payload.lorebook !== undefined
+          ? String(payload.lorebook)
+          : String(powerUser.persona_description_lorebook ?? '');
+      const nextPosition =
+        payload.position !== undefined && Number.isFinite(Number(payload.position))
+          ? Number(payload.position)
+          : hasFiniteNumber(powerUser.persona_description_position)
+            ? Number(powerUser.persona_description_position)
+            : 0;
+      const nextDepth =
+        payload.depth !== undefined && Number.isFinite(Number(payload.depth))
+          ? Number(payload.depth)
+          : hasFiniteNumber(powerUser.persona_description_depth)
+            ? Number(powerUser.persona_description_depth)
+            : 2;
+      const nextRole =
+        payload.role !== undefined && Number.isFinite(Number(payload.role))
+          ? Number(payload.role)
+          : hasFiniteNumber(powerUser.persona_description_role)
+            ? Number(powerUser.persona_description_role)
+            : 0;
+
+      const prevName = String(ctx?.name1 || liveDom.name || '').trim();
+      const requestedName = payload.name !== undefined ? String(payload.name).trim() : '';
+      const finalName = requestedName || prevName || '当前人设';
+
+      if (requestedName && requestedName !== prevName && typeof setUserNameFn === 'function') {
+        setUserNameFn(requestedName);
+      }
+
+      powerUser.persona_description = nextDescription;
+      powerUser.persona_description_position = nextPosition;
+      powerUser.persona_description_depth = nextDepth;
+      powerUser.persona_description_role = nextRole;
+      powerUser.persona_description_lorebook = finalLorebook;
+
+      if (liveDom.descEl) {
+        liveDom.descEl.value = nextDescription;
+      }
+
+      if (typeof setPersonaDescriptionFn === 'function') {
+        setPersonaDescriptionFn();
+      }
+      if (typeof saveDebounced === 'function') {
+        await saveDebounced();
+      }
+
+      await eventSource?.emit?.(eventTypes.PERSONA_UPDATED ?? 'persona_updated', LIVE_PERSONA_AVATAR_ID);
+
+      const liveResult = {
+        avatarId: LIVE_PERSONA_AVATAR_ID,
+        name: finalName,
+        description: nextDescription,
+        title: payload.title !== undefined ? String(payload.title) : '',
+        lorebook: finalLorebook,
+        isNew: false,
+        mode: 'overwrite',
+      };
+
+      dispatchPersonaSavedEvent(
+        {
+          avatarId: liveResult.avatarId,
+          name: liveResult.name,
+          description: liveResult.description,
+          lorebook: liveResult.lorebook,
+          isNew: false,
+          characterId,
+          chatId,
+          mode: 'overwrite',
+        },
+        deps
+      );
+
+      return liveResult;
     }
+
     const exists =
       Object.hasOwn(powerUser.personas, targetId) ||
       Object.hasOwn(powerUser.persona_descriptions, targetId);
@@ -781,6 +1100,9 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
       powerUser.persona_description_depth = nextDesc.depth;
       powerUser.persona_description_role = nextDesc.role;
       powerUser.persona_description_lorebook = nextDesc.lorebook;
+      if (liveDom.descEl) {
+        liveDom.descEl.value = nextDesc.description;
+      }
       if (typeof setPersonaDescriptionFn === 'function') {
         setPersonaDescriptionFn();
       }
@@ -924,6 +1246,9 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
     powerUser.persona_description_depth = depth;
     powerUser.persona_description_role = role;
     powerUser.persona_description_lorebook = lorebook;
+    if (liveDom.descEl) {
+      liveDom.descEl.value = description;
+    }
     if (typeof setUserNameFn === 'function') {
       setUserNameFn(trimmedName);
     }
@@ -1013,7 +1338,7 @@ export async function saveSupplementaryWorldbook({ worldName, entries, avatarId 
   const mods = await loadHostModules(
     {
       worldInfo: needWorldInfo,
-      powerUser: Boolean(avatarId) && !deps?.powerUser && !deps?.power_user && !bridge?.powerUser,
+      powerUser: Boolean(avatarId) && !hasImmediatePowerUser(deps, bridge, ctx),
       personas:
         Boolean(avatarId) &&
         ((deps?.userAvatar === undefined && bridge?.userAvatar === undefined) ||
@@ -1086,36 +1411,53 @@ export async function saveSupplementaryWorldbook({ worldName, entries, avatarId 
 
   const boundAvatarId = String(avatarId ?? '').trim();
   if (boundAvatarId) {
+    const liveDom = readLiveDomPersona(deps);
     const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
     if (powerUser && typeof powerUser === 'object') {
-      if (!powerUser.persona_descriptions || typeof powerUser.persona_descriptions !== 'object') {
-        powerUser.persona_descriptions = {};
-      }
-      if (
-        !Object.hasOwn(powerUser.persona_descriptions, boundAvatarId) ||
-        !powerUser.persona_descriptions[boundAvatarId] ||
-        typeof powerUser.persona_descriptions[boundAvatarId] !== 'object'
-      ) {
-        powerUser.persona_descriptions[boundAvatarId] = {
-          description: '',
-          position: 0,
-          depth: 2,
-          role: 0,
-          lorebook: cleanWorldName,
-          title: '',
-          connections: [],
-        };
-      } else {
-        powerUser.persona_descriptions[boundAvatarId].lorebook = cleanWorldName;
-      }
-
-      const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
-      if (boundAvatarId === activeAvatarId) {
+      if (boundAvatarId === LIVE_PERSONA_AVATAR_ID) {
         powerUser.persona_description_lorebook = cleanWorldName;
         const setPersonaDescriptionFn =
           deps?.setPersonaDescription ?? bridge?.setPersonaDescription ?? mods.personas?.setPersonaDescription ?? null;
         if (typeof setPersonaDescriptionFn === 'function') {
           setPersonaDescriptionFn();
+        }
+      } else {
+        if (!powerUser.persona_descriptions || typeof powerUser.persona_descriptions !== 'object') {
+          powerUser.persona_descriptions = {};
+        }
+        if (
+          !Object.hasOwn(powerUser.persona_descriptions, boundAvatarId) ||
+          !powerUser.persona_descriptions[boundAvatarId] ||
+          typeof powerUser.persona_descriptions[boundAvatarId] !== 'object'
+        ) {
+          powerUser.persona_descriptions[boundAvatarId] = {
+            description: '',
+            position: 0,
+            depth: 2,
+            role: 0,
+            lorebook: cleanWorldName,
+            title: '',
+            connections: [],
+          };
+        } else {
+          powerUser.persona_descriptions[boundAvatarId].lorebook = cleanWorldName;
+        }
+
+        const activeAvatarId = resolveActiveAvatarId(
+          deps,
+          bridge,
+          ctx,
+          mods.personas,
+          powerUser,
+          liveDom.doc
+        );
+        if (boundAvatarId === activeAvatarId) {
+          powerUser.persona_description_lorebook = cleanWorldName;
+          const setPersonaDescriptionFn =
+            deps?.setPersonaDescription ?? bridge?.setPersonaDescription ?? mods.personas?.setPersonaDescription ?? null;
+          if (typeof setPersonaDescriptionFn === 'function') {
+            setPersonaDescriptionFn();
+          }
         }
       }
 

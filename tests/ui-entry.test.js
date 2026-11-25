@@ -1072,22 +1072,41 @@ test('ui.js regression: empty profiles preserves Custom API inputs, clears stale
   ui.destroy();
 });
 
-test('ui.js regression: miniBtn label syncs on setSettings and open', () => {
+test('ui.js regression: no redundant miniBtn in topbar; 8-way resize handles lock top/left up to 100dvh; programmatic miniMode syncs', () => {
   const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800 });
   const ui = createStudioUI({ doc: env.doc, win: env.win, mountTarget: env.doc.body });
-  const miniBtn = ui.shadow.querySelector('[data-ups-mini]');
-  const modalEl = ui.shadow.querySelector('[data-ups-window]');
+  const sr = ui.shadow;
+  const modalEl = sr.querySelector('[data-ups-window]');
+
+  assert.equal(sr.querySelector('[data-ups-mini]'), null);
+  const rzHandles = sr.querySelectorAll('.ups-rz');
+  assert.equal(rzHandles.length, 8);
+  for (const h of rzHandles) {
+    assert.equal(h.textContent, '');
+  }
+
+  const stretched = computeResizedModalRect({
+    origLeft: 100,
+    origTop: 60,
+    origWidth: 1080,
+    origHeight: 700,
+    dx: 0,
+    dy: 200,
+    handle: 's',
+    viewportWidth: 1280,
+    viewportHeight: 800,
+  });
+  assert.equal(stretched.left, 100);
+  assert.equal(stretched.top, 60);
+  assert.equal(stretched.height, 740);
 
   ui.setSettings({ ui: { miniMode: true } });
   assert.equal(ui.getState().miniMode, true);
-  assert.equal(miniBtn.textContent, '还原');
   ui.open();
-  assert.equal(miniBtn.textContent, '还原');
   assert.equal(modalEl.classList.contains('is-mini'), true);
 
   ui.setSettings({ ui: { miniMode: false } });
   assert.equal(ui.getState().miniMode, false);
-  assert.equal(miniBtn.textContent, '小窗');
   assert.equal(modalEl.classList.contains('is-mini'), false);
 
   ui.destroy();
@@ -1552,7 +1571,7 @@ test('Tier 5 | Gap 6: popoverEl and floatingMenuEl dismiss on switchTab, drag, r
   const popoverBtn = sr.querySelector('[data-ups-popover-btn]');
   const popoverEl = sr.querySelector('[data-ups-popover]');
   const topbarEl = sr.querySelector('.ups-header');
-  const resizeEl = sr.querySelector('[data-ups-resize]');
+  const resizeEl = sr.querySelector('[data-ups-resize-dir="se"]');
 
   // 1. switchTab hides popoverEl
   popoverBtn.click();
@@ -2000,6 +2019,82 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   assert.equal(addedCard.classList.contains('ups-just-added'), true);
   assert.ok(addedCard.querySelector('.ups-entry-editor'));
   assert.match(sr.querySelector('[data-ups-status]').textContent, /新增规则条目并自动跳转展开/);
+
+  ui.destroy();
+});
+
+test('UX v1.3: backstory & spotlight modes, anti-parrot & dash cleanup buttons, favorite/reset schemes, selection taste bar & non-blocking submodal', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800, coarse: false });
+  const capturedPayloads = [];
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'u1.png', name: '沈清', description: '旧描述' }),
+      listPersonas: async () => [{ avatarId: 'u1.png', name: '沈清', description: '旧描述', isActive: true }],
+      getActiveCharacterContext: async () => null,
+      runStudioGeneration: async ({ messages, minMaxTokens }) => {
+        capturedPayloads.push({ joined: messages.map((m) => m.content).join('\n'), minMaxTokens });
+        return {
+          text: '【草稿自检】1. 已核对纯留白经历与防打卡【/草稿自检】\n【基础人设】\n## 性格习惯\n例如看书不到十分钟就走神——习惯安静——不喜欢吵闹。',
+          source: 'mock',
+        };
+      },
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 15));
+  const sr = ui.shadow;
+
+  // 1. Backstory & Spotlight controls persist and wire into generation prompt + draftAudit minMaxTokens headroom
+  const backstorySel = sr.querySelector('[data-ups-backstory]');
+  const spotlightSel = sr.querySelector('[data-ups-spotlight]');
+  backstorySel.value = 'blank_self';
+  backstorySel.dispatchEvent({ type: 'change', bubbles: true });
+  spotlightSel.value = 'balanced';
+  spotlightSel.dispatchEvent({ type: 'change', bubbles: true });
+  assert.equal(ui.getState().settings.ui.backstoryMode, 'blank_self');
+
+  sr.querySelector('[data-ups-inspiration]').value = '恋爱日常，清冷感';
+  spotlightSel.value = 'featured';
+  spotlightSel.dispatchEvent({ type: 'change', bubbles: true });
+  sr.querySelector('[data-ups-generate]').click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(capturedPayloads[0].joined.includes('纯留白零编造'));
+  assert.ok(capturedPayloads[0].joined.includes('围绕设定展开'));
+  assert.ok(capturedPayloads[0].minMaxTokens >= 4000);
+
+  // 2. Draft self-check stripped into non-blocking submodal viewer; 1-click anti-parrot & dash cleanup work
+  const draftEl = sr.querySelector('[data-ups-draft]');
+  assert.equal(draftEl.value.includes('草稿自检'), false);
+  const viewLogBtn = sr.querySelector('[data-ups-view-draft-log]');
+  assert.equal(viewLogBtn.hidden, false);
+  viewLogBtn.click();
+  assert.equal(sr.querySelector('[data-ups-submodal]').hidden, false);
+
+  const antiParrotBtn = sr.querySelector('[data-ups-append-antiparrot]');
+  assert.ok(antiParrotBtn);
+  antiParrotBtn.click();
+  assert.ok(draftEl.value.includes('并非固定必演桥段'));
+
+  const cleanDashesBtn = sr.querySelector('[data-ups-clean-dashes]');
+  assert.ok(cleanDashesBtn);
+  cleanDashesBtn.click();
+  assert.equal(draftEl.value.includes('——'), false);
+
+  // 3. Scheme ★ favorite pinning & built-in 还原默认 + bannedSendModeSelect
+  ui.switchTab('presets');
+  const favBtn = sr.querySelector('[data-ups-scheme-fav]');
+  favBtn.click();
+  assert.equal(ui.getState().settings.schemes[0].favorite, true);
+
+  ui.switchTab('taste');
+  const sendModeSel = sr.querySelector('[data-ups-banned-send-mode]');
+  sendModeSel.value = 'personal_only';
+  sendModeSel.dispatchEvent({ type: 'change', bubbles: true });
+  assert.equal(ui.getState().settings.tasteProfile.bannedSendMode, 'personal_only');
 
   ui.destroy();
 });

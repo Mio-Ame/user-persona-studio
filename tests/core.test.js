@@ -8,9 +8,16 @@ import {
   CORE_SECTION_HEADER,
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
+  DRAFT_START_MARKER,
+  DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
+  VIBE_ANCHOR_EXAMPLES,
+  SPOTLIGHT_MODES,
+  BACKSTORY_MODES,
+  ANTI_PARROT_CLAUSE,
   WORD_COUNT_PRESETS,
   BUILTIN_USAGE_GUIDE,
+  BUILTIN_BANNED_CATEGORIES,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   BUILTIN_PRESET_SCHEMES,
@@ -23,6 +30,9 @@ import {
   createDefaultSettings,
   sanitizeSettingsForExport,
   cloneScheme,
+  isBuiltinSchemeModified,
+  resetBuiltinScheme,
+  toggleFavoriteScheme,
   toggleStackEntry,
   moveStackEntry,
   updateStackEntry,
@@ -36,9 +46,15 @@ import {
   applyTargetCharsToScheme,
   inferOptimalTailMode,
   extractPersonaPoints,
+  buildDraftAuditInstruction,
   buildGenerationMessages,
   applyTailRoleStrategy,
   exportSillyTavernPreset,
+  exportDraftStripRegexScript,
+  stripDraftAuditBlocks,
+  hasReplayRiskExamples,
+  appendAntiParrotClause,
+  replaceEmDashes,
   estimateTokens,
   normalizeFlatLayout,
   lintPersonaText,
@@ -60,28 +76,68 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 // ============================================================================
-// Group 1: presets.js Structural, Pure-ESM, Originality & Sanitization Audits
+// Group 1: presets.js Structural, Pure-ESM, Categorized Lexicon & Sanitization
 // ============================================================================
 
-test('Group 1.1: presets.js exports complete structural constants and 20 original banned phrases', () => {
+test('Group 1.1: presets.js exports structural constants, balanced vibe anchors, backstory/spotlight modes & 4 original persona-sheet banned packs', () => {
   assert.equal(CORE_SECTION_HEADER, '【基础人设】');
   assert.equal(SHELL_SECTION_HEADER, '【当前背景与关系】');
   assert.equal(WORLDBOOK_DIVIDER, '【补充世界书条目】');
+  assert.equal(DRAFT_START_MARKER, '【草稿自检】');
+  assert.equal(DRAFT_END_MARKER, '【/草稿自检】');
   assert.deepEqual(VISIBILITY_MARKERS, [
     '[外表可见]',
     '[开场已知]',
     '[私密未公开]',
   ]);
+  assert.equal(VIBE_ANCHOR_EXAMPLES.length, 20);
+  for (const v of ['清冷感', '娇气包', '高冷寡言', '冷脸萌', '外冷内热', '嘴硬心软']) {
+    assert.ok(VIBE_ANCHOR_EXAMPLES.includes(v), `Missing vibe anchor: ${v}`);
+  }
+  assert.deepEqual(SPOTLIGHT_MODES.map((m) => m.id), ['balanced', 'featured', 'light_daily']);
+  assert.deepEqual(BACKSTORY_MODES.map((m) => m.id), ['light_vibe', 'blank_self', 'rich_arc']);
+  assert.ok(ANTI_PARROT_CLAUSE.includes('并非固定必演桥段'));
   assert.equal(CORE_SECTION_HEADER.includes('本体核'), false);
   assert.equal(SHELL_SECTION_HEADER.includes('剧场壳'), false);
   assert.ok(WORD_COUNT_PRESETS.length >= 5);
   assert.ok(BUILTIN_USAGE_GUIDE.includes('SillyTavern'));
-  assert.equal(DEFAULT_BANNED_PHRASES.length, 20);
+
+  assert.equal(BUILTIN_BANNED_CATEGORIES.length, 4);
+  const expectedCatIds = [
+    'persona_marysue',
+    'persona_resume_ai',
+    'persona_tic_lock',
+    'persona_meta_overstep',
+  ];
+  assert.deepEqual(
+    BUILTIN_BANNED_CATEGORIES.map((c) => c.id),
+    expectedCatIds
+  );
+
+  for (const cat of BUILTIN_BANNED_CATEGORIES) {
+    assert.ok(cat.name && cat.description);
+    assert.equal(cat.scope, 'all');
+    assert.ok(Array.isArray(cat.rules) && cat.rules.length >= 1 && cat.rules.length <= 4);
+    assert.ok(
+      Array.isArray(cat.phrases) && cat.phrases.length >= 10 && cat.phrases.length <= 15,
+      `Category ${cat.id} phrases length ${cat.phrases.length} out of 10..15`
+    );
+  }
+
+  assert.equal(DEFAULT_BANNED_PHRASES.length, 45);
   const trimmedUnique = new Set(DEFAULT_BANNED_PHRASES.map((p) => p.trim()).filter(Boolean));
-  assert.equal(trimmedUnique.size, 20);
+  assert.equal(trimmedUnique.size, DEFAULT_BANNED_PHRASES.length);
+
+  // Zero em-dashes (——) in preset prompts & label hints to prevent em-dash proliferation, and zero reverse-template priming
+  const allPresetPromptText = JSON.stringify({
+    QUALITATIVE_LABEL_PATTERNS: QUALITATIVE_LABEL_PATTERNS.map((p) => p.hint),
+    BUILTIN_PRESET_SCHEMES,
+  });
+  assert.equal(allPresetPromptText.includes('——'), false, 'Built-in prompts & hints must not contain —— em-dashes');
+  assert.equal(allPresetPromptText.includes('外人面前维持体面'), false, 'Must not prime or reverse-taboo specific personality direction');
 });
 
-test('Group 1.2: QUALITATIVE_LABEL_PATTERNS has 16 detectors matching their own labels with causal hints', () => {
+test('Group 1.2: QUALITATIVE_LABEL_PATTERNS has 16 detectors matching their own labels with causal/gap hints', () => {
   assert.equal(QUALITATIVE_LABEL_PATTERNS.length, 16);
   const labels = QUALITATIVE_LABEL_PATTERNS.map((item) => item.label);
   for (const required of ['娇气', '娇蛮', '傲娇', '清冷', '高冷', '病娇', '呆萌', '腹黑', '温柔', '社恐']) {
@@ -94,17 +150,30 @@ test('Group 1.2: QUALITATIVE_LABEL_PATTERNS has 16 detectors matching their own 
   }
 });
 
-test('Group 1.3: BUILTIN_PRESET_SCHEMES defines longform_coact & player_controlled with 7 modular slots', () => {
-  const { longform_coact, player_controlled } = BUILTIN_PRESET_SCHEMES;
+test('Group 1.3: BUILTIN_PRESET_SCHEMES defines 3 relatable built-in presets with 7 modular slots & natural everyday default format', () => {
+  assert.equal(Object.keys(BUILTIN_PRESET_SCHEMES).length, 3);
+  const { longform_coact, player_controlled, persona_refactor } = BUILTIN_PRESET_SCHEMES;
+
+  assert.equal(longform_coact.name, '适合抢话党');
   assert.equal(longform_coact.style, 'longform');
   assert.equal(longform_coact.targetChars, 1500);
   assert.deepEqual(longform_coact.targetTokens, { min: 1780, max: 2270 });
+
+  assert.equal(player_controlled.name, '适合不抢话党');
   assert.equal(player_controlled.style, 'objective');
   assert.equal(player_controlled.targetChars, 600);
   assert.deepEqual(player_controlled.targetTokens, { min: 720, max: 900 });
 
+  assert.equal(persona_refactor.name, '旧人设改写与跨卡重构');
+  assert.equal(persona_refactor.style, 'refactor');
+  assert.equal(persona_refactor.builtin, true);
+  assert.equal(persona_refactor.targetChars, 1500);
+  assert.deepEqual(persona_refactor.targetTokens, { min: 1780, max: 2270 });
+  assert.equal(persona_refactor.temperature, 0.65);
+  assert.equal(persona_refactor.maxTokens, 3300);
+
   const requiredSlots = ['role', 'context', 'craft', 'taste', 'banned', 'pacing', 'format'];
-  for (const scheme of [longform_coact, player_controlled]) {
+  for (const scheme of [longform_coact, player_controlled, persona_refactor]) {
     assert.equal(scheme.tailMode, 'auto');
     assert.ok(scheme.prefillText.length > 0);
     assert.ok(scheme.triggerText.length > 0);
@@ -117,8 +186,9 @@ test('Group 1.3: BUILTIN_PRESET_SCHEMES defines longform_coact & player_controll
     assert.ok(joined.includes(CORE_SECTION_HEADER));
     assert.ok(joined.includes(SHELL_SECTION_HEADER));
     assert.equal(joined.includes('人物本体核'), false);
+    // Default built-in entries use clean everyday prose without forcing [外表可见]/[开场已知]/[私密未公开] brackets
     for (const marker of VISIBILITY_MARKERS) {
-      assert.ok(joined.includes(marker), `${scheme.id} missing marker ${marker}`);
+      assert.equal(joined.includes(marker), false, `${scheme.id} must not force ${marker} by default`);
     }
   }
 });
@@ -133,6 +203,8 @@ test('Group 1.4: Pure ESM isolation & sanitization check on src/presets.js and s
 
   const serializedPresets = JSON.stringify({
     BUILTIN_USAGE_GUIDE,
+    VIBE_ANCHOR_EXAMPLES,
+    BUILTIN_BANNED_CATEGORIES,
     DEFAULT_BANNED_PHRASES,
     QUALITATIVE_LABEL_PATTERNS: QUALITATIVE_LABEL_PATTERNS.map(({ id, label, category, hint }) => ({
       id,
@@ -149,27 +221,78 @@ test('Group 1.4: Pure ESM isolation & sanitization check on src/presets.js and s
 });
 
 // ============================================================================
-// Group 2: Settings Factory, Entry Stack CRUD & Scheme CRUD
+// Group 2: Settings Factory, Persistent UI Prefs, Stack CRUD & Scheme CRUD
 // ============================================================================
 
-test('Group 2.1: createDefaultSettings returns valid deep-isolated defaults', () => {
+test('Group 2.1: createDefaultSettings returns valid deep-isolated defaults, 3 schemes, disabledCategories & persistent UI prefs', () => {
   const s1 = createDefaultSettings();
   const s2 = createDefaultSettings();
   assert.equal(s1.version, 1);
   assert.equal(s1.palette, 'paper');
   assert.equal(s1.colorMode, 'auto');
   assert.equal(s1.activeSchemeId, 'longform_coact');
-  assert.equal(s1.schemes.length, 2);
+  assert.equal(s1.schemes.length, 3);
+  assert.deepEqual(
+    s1.schemes.map((s) => s.id),
+    ['longform_coact', 'player_controlled', 'persona_refactor']
+  );
   assert.equal(s1.tasteProfile.useBuiltinBanned, true);
+  assert.equal(s1.tasteProfile.bannedSendMode, 'smart_compact');
+  assert.deepEqual(s1.tasteProfile.disabledCategories, []);
   assert.equal(s1.api.provider, 'host');
-  assert.equal(s1.ui.geometry.width, 1040);
+  assert.equal(s1.ui.activeTab, 'studio');
+  assert.equal(s1.ui.mode, 'A');
+  assert.equal(s1.ui.subMode, 'de_label_reformat');
+  assert.equal(s1.ui.spotlightMode, 'balanced');
+  assert.equal(s1.ui.backstoryMode, 'light_vibe');
+  assert.equal(s1.ui.injectChar, true);
+  assert.equal(s1.ui.dualLayer, false);
+  assert.equal(s1.ui.visibilityTags, false);
+  assert.equal(s1.ui.draftAudit, true);
+  assert.equal(s1.ui.antiParrot, true);
+  assert.equal(s1.ui.geometry.width, 1080);
+  assert.equal(s1.ui.geometry.height, 700);
+  assert.equal(s1.ui.minimized, false);
 
   s1.schemes[0].entries[0].content = 'changed';
   assert.notEqual(s2.schemes[0].entries[0].content, 'changed');
 
-  const partial = createDefaultSettings({ palette: 'ink', activeSchemeId: 'non_existent' });
+  const partial = createDefaultSettings({
+    palette: 'ink',
+    activeSchemeId: 'non_existent',
+    schemes: [BUILTIN_PRESET_SCHEMES.longform_coact],
+    tasteProfile: { bannedSendMode: 'personal_only', disabledCategories: ['persona_tic_lock', 'invalid_cat'] },
+    ui: {
+      activeTab: 'taste',
+      mode: 'B',
+      subMode: 'cross_card_adapt',
+      spotlightMode: 'featured',
+      backstoryMode: 'blank_self',
+      injectChar: false,
+      dualLayer: true,
+      visibilityTags: true,
+      draftAudit: false,
+      antiParrot: false,
+      geometry: { width: 99999, height: 100 },
+    },
+  });
   assert.equal(partial.palette, 'ink');
   assert.equal(partial.activeSchemeId, 'longform_coact');
+  assert.equal(partial.schemes.length, 3);
+  assert.equal(partial.tasteProfile.bannedSendMode, 'personal_only');
+  assert.deepEqual(partial.tasteProfile.disabledCategories, ['persona_tic_lock']);
+  assert.equal(partial.ui.activeTab, 'taste');
+  assert.equal(partial.ui.mode, 'B');
+  assert.equal(partial.ui.subMode, 'cross_card_adapt');
+  assert.equal(partial.ui.spotlightMode, 'featured');
+  assert.equal(partial.ui.backstoryMode, 'blank_self');
+  assert.equal(partial.ui.injectChar, false);
+  assert.equal(partial.ui.dualLayer, true);
+  assert.equal(partial.ui.visibilityTags, true);
+  assert.equal(partial.ui.draftAudit, false);
+  assert.equal(partial.ui.antiParrot, false);
+  assert.equal(partial.ui.geometry.width, 3840);
+  assert.equal(partial.ui.geometry.height, 280);
 });
 
 test('Group 2.2: Stack entry CRUD (clone, toggle, move, update, add, remove) is immutable & guards locked entries', () => {
@@ -217,28 +340,52 @@ test('Group 2.2: Stack entry CRUD (clone, toggle, move, update, add, remove) is 
   assert.equal(afterCustomRemove.entries.length, orig.entries.length);
 });
 
-test('Group 2.3: Scheme CRUD (saveSchemeAs, renameScheme, deleteScheme) enforces invariants', () => {
+test('Group 2.3: Scheme CRUD, resetBuiltinScheme, isBuiltinSchemeModified & toggleFavoriteScheme enforce invariants', () => {
   const s0 = createDefaultSettings();
   assert.throws(() => saveSchemeAs(s0, 'longform_coact', '   '), /方案名称不能为空/);
-  assert.throws(() => saveSchemeAs(s0, 'longform_coact', '细致代演方案'), /方案名称已存在/);
+  assert.throws(() => saveSchemeAs(s0, 'longform_coact', '适合抢话党'), /方案名称已存在/);
 
-  const s1 = saveSchemeAs(s0, 'longform_coact', '细致代演方案', { autoSuffix: true });
-  assert.equal(s1.schemes.length, 3);
-  const customScheme = s1.schemes[2];
-  assert.equal(customScheme.name, '细致代演方案 (2)');
+  const s1 = saveSchemeAs(s0, 'longform_coact', '适合抢话党', { autoSuffix: true });
+  assert.equal(s1.schemes.length, 4);
+  const customScheme = s1.schemes[3];
+  assert.equal(customScheme.name, '适合抢话党 (2)');
   assert.equal(customScheme.builtin, false);
   assert.equal(s1.activeSchemeId, customScheme.id);
 
   const s2 = renameScheme(s1, customScheme.id, '个人古风慢节奏');
   assert.equal(s2.schemes.find((s) => s.id === customScheme.id).name, '个人古风慢节奏');
 
-  // Cannot delete built-in scheme
-  const afterBuiltinDel = deleteScheme(s2, 'longform_coact');
-  assert.equal(afterBuiltinDel.schemes.length, 3);
+  // Cannot delete any of the 3 built-in schemes (including persona_refactor)
+  for (const builtinId of ['longform_coact', 'player_controlled', 'persona_refactor']) {
+    const afterBuiltinDel = deleteScheme(s2, builtinId);
+    assert.equal(afterBuiltinDel.schemes.length, 4);
+    const afterArrDel = deleteScheme(s2.schemes, builtinId);
+    assert.equal(afterArrDel.length, 4);
+  }
+
+  // Favorite pinning & sorting to top + preserving favorite across resetBuiltinScheme
+  const favUpdated = toggleFavoriteScheme(s2, 'persona_refactor');
+  assert.equal(favUpdated.schemes[0].id, 'persona_refactor');
+  assert.equal(favUpdated.schemes[0].favorite, true);
+  assert.equal(isBuiltinSchemeModified(favUpdated.schemes[0]), false, 'Favorite toggle alone must not count as modified');
+
+  // Modify built-in scheme entry -> isBuiltinSchemeModified === true -> resetBuiltinScheme restores factory & keeps favorite
+  favUpdated.schemes[0] = updateStackEntry(favUpdated.schemes[0], 'pr_craft', { content: '用户临时改写规则' });
+  favUpdated.schemes[0].favorite = true;
+  assert.equal(isBuiltinSchemeModified(favUpdated.schemes[0]), true);
+
+  const afterReset = resetBuiltinScheme(favUpdated, 'persona_refactor');
+  const restoredRefactor = afterReset.schemes.find((s) => s.id === 'persona_refactor');
+  assert.equal(isBuiltinSchemeModified(restoredRefactor), false);
+  assert.equal(restoredRefactor.favorite, true);
+  assert.equal(afterReset.schemes[0].id, 'persona_refactor');
+
+  const unfavored = toggleFavoriteScheme(afterReset, 'persona_refactor');
+  assert.equal(unfavored.schemes.find((s) => s.id === 'persona_refactor').favorite, false);
 
   // Deleting active custom scheme resets activeSchemeId safely
   const afterCustomDel = deleteScheme(s2, customScheme.id);
-  assert.equal(afterCustomDel.schemes.length, 2);
+  assert.equal(afterCustomDel.schemes.length, 3);
   assert.equal(afterCustomDel.activeSchemeId, 'longform_coact');
 
   // Duplicate custom IDs leaving zero schemes must not throw TypeError and preserves schemes
@@ -262,25 +409,30 @@ test('Group 2.3: Scheme CRUD (saveSchemeAs, renameScheme, deleteScheme) enforces
 });
 
 // ============================================================================
-// Group 3: Mode A / Mode B Assembly & 3 Tail-Role Strategies
+// Group 3: Mode A / Mode B Assembly, Draft Audit, Visibility Opt-in & Tail Role
 // ============================================================================
 
-test('Group 3.1: buildGenerationMessages supports Mode A (create/new) & disabled slot filtering', () => {
+test('Group 3.1: buildGenerationMessages honors bannedSendMode, backstoryMode, spotlightMode, antiParrot & opt-in flags', () => {
   const scheme = toggleStackEntry(BUILTIN_PRESET_SCHEMES.longform_coact, 'lf_taste', false);
   const res = buildGenerationMessages({
     mode: 'new',
     scheme,
-    inspiration: '江南茶庄里负责记账和试新茶的年轻掌柜',
-    userMustHaves: '对潮湿霉味敏感，随身账本用硬壳布面装订',
+    inspiration: '恋爱日常，孤儿出身但其实是豪门抱错的女儿；例如看书不到十分钟就会走神',
+    userMustHaves: '清冷感，私下是个拍照博主',
     charContext: {
       name: '顾行舟',
-      scenario: '梅雨季的茶市老街',
+      scenario: '社团活动室午后',
     },
     tasteProfile: {
       anchors: ['偏爱节制留白的日常互动'],
-      banned: ['强行制造误会'],
+      banned: [{ text: '强行制造狗血误会', note: '偏爱日常甜文不虐' }],
       useBuiltinBanned: true,
+      bannedSendMode: 'smart_compact',
+      disabledCategories: ['persona_tic_lock'],
     },
+    spotlightMode: 'balanced',
+    backstoryMode: 'blank_self',
+    antiParrot: true,
     dualLayer: true,
   });
 
@@ -288,17 +440,72 @@ test('Group 3.1: buildGenerationMessages supports Mode A (create/new) & disabled
   assert.ok(res.estimatedTokens > 100);
   // Disabled taste slot is excluded
   assert.equal(res.assembledPromptText.includes('偏爱节制留白的日常互动'), false);
-  // Banned slot has both builtin and user items
+  // smart_compact sends rules + first 3 representative phrases, saves tokens on tail phrases, and omits disabled persona_tic_lock
   assert.ok(res.assembledPromptText.includes(DEFAULT_BANNED_PHRASES[0]));
-  assert.ok(res.assembledPromptText.includes('强行制造误会'));
+  assert.equal(res.assembledPromptText.includes(BUILTIN_BANNED_CATEGORIES[0].phrases.at(-1)), false);
+  assert.equal(res.assembledPromptText.includes('嘴角勾起一抹意味深长的弧度'), false);
+  assert.ok(res.assembledPromptText.includes('并非…而是…'));
+  assert.ok(res.assembledPromptText.includes('强行制造狗血误会'));
+  assert.ok(res.assembledPromptText.includes('偏爱日常甜文不虐'));
+  // Backstory blank_self + balanced spotlight (no duplicate block needed) + Anti-parrot example reminder
+  assert.ok(res.assembledPromptText.includes('纯留白零编造'));
+  assert.ok(res.assembledPromptText.includes('示例防照抄提醒'));
+  assert.equal(res.assembledPromptText.includes('无从知晓'), false, 'Must not force extreme cluelessness template');
+  assert.equal(res.assembledPromptText.includes('——'), false, 'Assembled prompt must contain zero —— em-dashes');
+  // Default visibilityTags is false -> no forced [外表可见] directive
+  assert.equal(res.assembledPromptText.includes('[外表可见]'), false);
+  // Default draftAudit is false when omitted
+  assert.equal(res.assembledPromptText.includes(DRAFT_START_MARKER), false);
   // Dual layer delimiter instructed
   assert.ok(res.assembledPromptText.includes(WORLDBOOK_DIVIDER));
-  assert.ok(res.assembledPromptText.includes('江南茶庄'));
   assert.ok(res.assembledPromptText.includes('顾行舟'));
   assert.equal(res.messages[res.messages.length - 1].role, 'user');
+
+  // personal_only sends 0 built-in phrases while preserving user's personal banned list; full sends tail phrases too
+  const personalOnlyRes = buildGenerationMessages({
+    mode: 'create',
+    scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
+    inspiration: '日常故事',
+    tasteProfile: {
+      anchors: ['偏爱温和烟火气'],
+      banned: ['自定义讨厌词'],
+      useBuiltinBanned: true,
+      bannedSendMode: 'personal_only',
+    },
+  });
+  assert.equal(personalOnlyRes.assembledPromptText.includes(DEFAULT_BANNED_PHRASES[0]), false);
+  assert.ok(personalOnlyRes.assembledPromptText.includes('自定义讨厌词'));
+  assert.ok(personalOnlyRes.assembledPromptText.includes('按人物性格自然体现外显度'));
+
+  const fullSendRes = buildGenerationMessages({
+    mode: 'create',
+    scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
+    inspiration: '日常故事',
+    tasteProfile: { useBuiltinBanned: true, bannedSendMode: 'full' },
+  });
+  assert.ok(fullSendRes.assembledPromptText.includes(BUILTIN_BANNED_CATEGORIES[0].phrases.at(-1)));
+
+  // Opt-in visibilityTags: true + draftAudit: true (both user tail and Claude assistant_prefill tail)
+  const withAuditAndTags = buildGenerationMessages({
+    mode: 'create',
+    scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
+    inspiration: '阵营悬疑故事里的潜伏联络员',
+    visibilityTags: true,
+    draftAudit: true,
+    backstoryMode: 'rich_arc',
+    spotlightMode: 'featured',
+    modelHint: { model: 'claude-3-7-sonnet-20250219', source: 'claude' },
+  });
+  assert.ok(withAuditAndTags.assembledPromptText.includes(VISIBILITY_MARKERS[0]));
+  assert.ok(withAuditAndTags.assembledPromptText.includes('补全成长经历'));
+  assert.ok(withAuditAndTags.assembledPromptText.includes('围绕设定展开'));
+  assert.ok(withAuditAndTags.assembledPromptText.includes(DRAFT_START_MARKER));
+  assert.ok(withAuditAndTags.assembledPromptText.includes(DRAFT_END_MARKER));
+  assert.equal(withAuditAndTags.messages.at(-1).role, 'assistant');
+  assert.equal(withAuditAndTags.messages.at(-1).content, DRAFT_START_MARKER);
 });
 
-test('Group 3.2: buildGenerationMessages supports Mode B aliases, useBuiltinBanned:false, lockedCore & targetSection', () => {
+test('Group 3.2: buildGenerationMessages supports Mode B aliases, persona_refactor, useBuiltinBanned:false & targetSection', () => {
   assert.throws(
     () => buildGenerationMessages({ mode: 'optimize', subMode: 'de_label_reformat', existingDraft: '   ' }),
     /原有人设文本/
@@ -309,7 +516,7 @@ test('Group 3.2: buildGenerationMessages supports Mode B aliases, useBuiltinBann
   const r1 = buildGenerationMessages({
     mode: 'refactor',
     subMode: 'refactor_lossless',
-    scheme: BUILTIN_PRESET_SCHEMES.player_controlled,
+    scheme: BUILTIN_PRESET_SCHEMES.persona_refactor,
     existingDraft: draft,
     tasteProfile: { anchors: ['讲究分寸感'], banned: [], useBuiltinBanned: false },
   });
@@ -317,17 +524,20 @@ test('Group 3.2: buildGenerationMessages supports Mode B aliases, useBuiltinBann
   assert.ok(r1.assembledPromptText.includes('讲究分寸感'));
   assert.equal(r1.assembledPromptText.includes(DEFAULT_BANNED_PHRASES[0]), false);
 
+  // targetSection suppresses full-document draftAudit block
   const r2 = buildGenerationMessages({
     mode: 'optimize',
     subMode: 'crosscard_adapt',
     scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
     existingDraft: draft,
     targetSection: '当前身份',
+    draftAudit: true,
     charContext: { name: '林栖', scenario: '冬夜山间气象站' },
   });
   assert.ok(r2.assembledPromptText.includes('严格保留'));
   assert.ok(r2.assembledPromptText.includes('局部重生成目标小节'));
   assert.ok(r2.assembledPromptText.includes('当前身份'));
+  assert.equal(r2.assembledPromptText.includes(DRAFT_START_MARKER), false);
 });
 
 test('Group 3.3: applyTailRoleStrategy handles all 3 modes cleanly without mutating inputs', () => {
@@ -351,10 +561,10 @@ test('Group 3.3: applyTailRoleStrategy handles all 3 modes cleanly without mutat
   // Mode 2: assistant_prefill with .trimEnd()
   const p1 = applyTailRoleStrategy(base, {
     tailMode: 'assistant_prefill',
-    prefillText: '【人物本体核（跨卡可锁）】\n  \n',
+    prefillText: '【基础人设】\n  \n',
   });
   assert.equal(p1[p1.length - 1].role, 'assistant');
-  assert.equal(p1[p1.length - 1].content, '【人物本体核（跨卡可锁）】');
+  assert.equal(p1[p1.length - 1].content, '【基础人设】');
 
   // Mode 3: prefill_plus_user
   const pu = applyTailRoleStrategy(base, {
@@ -374,10 +584,10 @@ test('Group 3.3: applyTailRoleStrategy handles all 3 modes cleanly without mutat
 });
 
 // ============================================================================
-// Group 4: SillyTavern Native Preset JSON Export
+// Group 4: SillyTavern Native Preset JSON Export & Draft Regex Exporter
 // ============================================================================
 
-test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, prompt_order, custom entry flags & zero sensitive keys', () => {
+test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, categorized banned lexicon, optional ups_draft_audit & zero sensitive keys', () => {
   const mandatory12 = [
     'main',
     'nsfw',
@@ -408,6 +618,7 @@ test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, prompt_order, c
       useBuiltinBanned: true,
     },
     includeTaste: true,
+    includeDraftAudit: true,
   });
 
   const promptIds = exported.prompts.map((p) => p.identifier);
@@ -415,10 +626,11 @@ test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, prompt_order, c
   for (const id of mandatory12) {
     assert.ok(promptIds.includes(id), `Missing ST built-in identifier: ${id}`);
   }
+  assert.ok(promptIds.includes('ups_draft_audit'));
 
   // All custom entries must have system_prompt: false and standard ST injection properties
   const customEntries = exported.prompts.filter((p) => !mandatory12.includes(p.identifier));
-  assert.ok(customEntries.length >= 9);
+  assert.ok(customEntries.length >= 10);
   for (const entry of customEntries) {
     assert.equal(entry.system_prompt, false);
     assert.equal(entry.marker, false);
@@ -439,21 +651,23 @@ test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, prompt_order, c
     assert.ok(promptIds.includes(item.identifier), `Order references missing identifier ${item.identifier}`);
   }
 
-  // Usage guide exists & disabled by default
+  // Usage guide exists & disabled by default; draft audit enabled before chatHistory
   const guideOrder = orderList.find((o) => o.identifier === 'ups_usage_guide');
   assert.ok(guideOrder && guideOrder.enabled === false);
-
-  // Tail entries placed after chatHistory in exact order
+  const auditIdx = orderList.findIndex((o) => o.identifier === 'ups_draft_audit');
   const chatIdx = orderList.findIndex((o) => o.identifier === 'chatHistory');
   const prefillIdx = orderList.findIndex((o) => o.identifier === 'ups_tail_prefill');
   const triggerIdx = orderList.findIndex((o) => o.identifier === 'ups_tail_trigger');
+  assert.ok(auditIdx !== -1 && auditIdx < chatIdx);
+  assert.equal(orderList[auditIdx].enabled, true);
   assert.ok(chatIdx !== -1 && prefillIdx === chatIdx + 1 && triggerIdx === chatIdx + 2);
   assert.equal(exported.prompts.find((p) => p.identifier === 'ups_tail_prefill').content, CORE_SECTION_HEADER);
 
-  // Taste included
+  // Taste & categorized banned lexicon included
   const jsonStr = JSON.stringify(exported);
   assert.ok(jsonStr.includes('偏好写实生活细节'));
   assert.ok(jsonStr.includes('不要过度戏剧化'));
+  assert.ok(jsonStr.includes(DEFAULT_BANNED_PHRASES[0]));
 
   // Zero ST sensitiveFields & zero API/connection keys
   for (const field of ST_SENSITIVE_FIELDS) {
@@ -465,7 +679,7 @@ test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, prompt_order, c
   }
 });
 
-test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail modes and includeTaste:false', () => {
+test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail modes, includeTaste:false & exportDraftStripRegexScript', () => {
   const schemeUser = cloneScheme(BUILTIN_PRESET_SCHEMES.player_controlled, { tailMode: 'user' });
   const expUser = exportSillyTavernPreset({
     scheme: schemeUser,
@@ -475,6 +689,7 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
   const expUserJson = JSON.stringify(expUser);
   assert.equal(expUserJson.includes('私密偏爱条目'), false);
   assert.equal(expUserJson.includes('私密拉黑条目'), false);
+  assert.equal(expUser.prompts.some((p) => p.identifier === 'ups_draft_audit'), false);
   assert.equal(expUser.temperature, 0.55);
   assert.equal(expUser.openai_max_tokens, 1400);
   const orderUser = expUser.prompt_order[0].order;
@@ -486,18 +701,65 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
     prefillText: `${CORE_SECTION_HEADER}\n   `,
   });
   const expPrefill = exportSillyTavernPreset({ scheme: schemePrefill });
-  // Keep top-level assistant_prefill empty so ST Claude connections do not duplicate ups_tail_prefill
   assert.equal(expPrefill.assistant_prefill, '');
   const orderPrefill = expPrefill.prompt_order[0].order;
   const chatIdx2 = orderPrefill.findIndex((o) => o.identifier === 'chatHistory');
   assert.equal(orderPrefill[chatIdx2 + 1].identifier, 'ups_tail_prefill');
   assert.equal(orderPrefill[chatIdx2 + 1].enabled, true);
   assert.equal(expPrefill.prompts.find((p) => p.identifier === 'ups_tail_prefill').content, CORE_SECTION_HEADER);
+
+  // Verify SillyTavern RegexScriptData exporter
+  const regexScript = exportDraftStripRegexScript('测试工坊');
+  assert.equal(regexScript.scriptName, '测试工坊 · 隐藏草稿自检块');
+  assert.equal(regexScript.replaceString, '');
+  assert.deepEqual(regexScript.placement, [2]);
+  assert.equal(regexScript.disabled, false);
+  assert.equal(regexScript.markdownOnly, true);
+  assert.equal(regexScript.promptOnly, true);
+  const compiled = new RegExp(
+    regexScript.findRegex.slice(1, regexScript.findRegex.lastIndexOf('/')),
+    regexScript.findRegex.slice(regexScript.findRegex.lastIndexOf('/') + 1)
+  );
+  const sampleMsg = '【草稿自检】内部排查【/草稿自检】\n\n<!-- persona_draft 备注 -->\n【基础人设】\n干净正文';
+  assert.equal(sampleMsg.replace(compiled, ''), '【基础人设】\n干净正文');
 });
 
 // ============================================================================
-// Group 5: Token Estimation, Flat Layout, Linter & Dual-Layer Splitters
+// Group 5: Draft Block Stripping, Linter (Smart Vibe Anchors) & Splitters
 // ============================================================================
+
+test('Group 5.0: stripDraftAuditBlocks handles closed blocks, streaming unclosed blocks & HTML comment variants', () => {
+  // 1. Closed 【草稿自检】...【/草稿自检】
+  const closed = stripDraftAuditBlocks(
+    '【草稿自检】\n1. 语域：现代校园甜宠\n2. 已替换“嘴角勾起一抹”\n【/草稿自检】\n\n【基础人设】\n## 外貌与印象\n黑发清爽。'
+  );
+  assert.equal(closed.hasUnclosedDraft, false);
+  assert.ok(closed.draftLog.includes('现代校园甜宠'));
+  assert.equal(closed.cleanText, '【基础人设】\n## 外貌与印象\n黑发清爽。');
+
+  // 2. Streaming unclosed 【草稿自检】...
+  const streaming = stripDraftAuditBlocks('【草稿自检】\n1. 正在核对禁词与冷脸萌反差细节...');
+  assert.equal(streaming.hasUnclosedDraft, true);
+  assert.equal(streaming.cleanText, '');
+  assert.ok(streaming.draftLog.includes('正在核对禁词'));
+
+  // 3. Closed & unclosed HTML comment <!-- persona_draft ... --> and <!-- draft ... -->
+  const htmlClosed = stripDraftAuditBlocks(
+    '<!-- persona_draft: 排查半文言词汇完毕 -->\n<!-- draft 第二次核对 -->\n【基础人设】\n日常自然正文。'
+  );
+  assert.equal(htmlClosed.hasUnclosedDraft, false);
+  assert.equal(htmlClosed.cleanText, '【基础人设】\n日常自然正文。');
+  assert.ok(htmlClosed.draftLog.includes('排查半文言词汇完毕'));
+  assert.ok(htmlClosed.draftLog.includes('第二次核对'));
+
+  const htmlStreaming = stripDraftAuditBlocks('<!-- persona_draft 正在生成自检草稿');
+  assert.equal(htmlStreaming.hasUnclosedDraft, true);
+  assert.equal(htmlStreaming.cleanText, '');
+  assert.equal(htmlStreaming.draftLog, '正在生成自检草稿');
+
+  const instr = buildDraftAuditInstruction(BUILTIN_PRESET_SCHEMES.longform_coact);
+  assert.ok(instr.includes(DRAFT_START_MARKER) && instr.includes(DRAFT_END_MARKER));
+});
 
 test('Group 5.1: estimateTokens & normalizeFlatLayout behave deterministically', () => {
   assert.equal(estimateTokens(''), 0);
@@ -510,6 +772,7 @@ test('Group 5.1: estimateTokens & normalizeFlatLayout behave deterministically',
   const messy = [
     '```yaml',
     '<persona>',
+    '【草稿自检】先自检一遍【/草稿自检】',
     `${CORE_SECTION_HEADER}`,
     '  - 习惯: 早上喝热姜茶',
     '    作息: 晚上十一点睡',
@@ -517,7 +780,7 @@ test('Group 5.1: estimateTokens & normalizeFlatLayout behave deterministically',
     '',
     '',
     `${SHELL_SECTION_HEADER}`,
-    '## 起点 [既有共识 / 开场起点]',
+    '## 开场处境',
     '在码头货栈核对账目。',
     '</persona>',
     '```',
@@ -526,15 +789,37 @@ test('Group 5.1: estimateTokens & normalizeFlatLayout behave deterministically',
   const clean = normalizeFlatLayout(messy);
   assert.equal(clean.includes('```'), false);
   assert.equal(clean.includes('<persona>'), false);
+  assert.equal(clean.includes('草稿自检'), false);
   assert.ok(clean.includes('- 习惯: 早上喝热姜茶'));
   assert.ok(clean.includes('作息: 晚上十一点睡'));
   assert.equal(/\n{3,}/.test(clean), false);
-  assert.ok(clean.includes('[既有共识 / 开场起点]'));
 });
 
-test('Group 5.2: lintPersonaText catches labels, clichés, meta-preaching, rigid stacks, and passes clean original fixtures', () => {
+test('Group 5.2: lintPersonaText distinguishes bare labels vs concrete vibe-anchor lines, catches clichés & passes natural everyday personas', () => {
+  // Bare short label input must still emit qualitative_label (severity: 'warn')
+  const bareShort = lintPersonaText('性格：傲娇，其实很娇气。');
+  const bareShortLabels = bareShort.issues.filter((i) => i.type === 'qualitative_label');
+  assert.equal(bareShortLabels.length, 2);
+  assert.ok(bareShortLabels.every((i) => i.severity === 'warn'));
+  assert.ok(bareShortLabels.some((i) => i.label === '傲娇'));
+  assert.ok(bareShortLabels.some((i) => i.label === '娇气'));
+
+  // Stacked 3+ labels on one long line must still be flagged
+  const stackedLong = lintPersonaText('性格特征：温柔、高冷、傲娇，平时在学校里总是独来独往让人觉得十分神秘。');
+  assert.ok(stackedLong.issues.filter((i) => i.type === 'qualitative_label').length >= 3);
+
+  // Expanded vibe/gap anchor (> 26 readable chars + < 3 labels + concrete daily behavior) is NOT flagged!
+  const expandedVibe = lintPersonaText(
+    '身边熟人常笑称她有点反差萌：在自习室核对资料时总是神情认真一板一眼，下课买到刚出炉的烤红薯却会捧在手心弯起眼睛小口吹气。'
+  );
+  assert.equal(
+    expandedVibe.issues.some((i) => i.type === 'qualitative_label'),
+    false,
+    'Vibe anchor followed by concrete daily gap behavior must not be flagged'
+  );
+
   const badText = [
-    '【人物本体核（跨卡可锁）】',
+    '【基础人设】',
     '性格有些娇气又有点傲娇，嘴角勾起一抹意味深长的弧度。',
     '严禁NPC读心和全知。',
     '绝不哭泣，永远不会退让，每次都必先开口，绝对不会低头。',
@@ -553,6 +838,31 @@ test('Group 5.2: lintPersonaText catches labels, clichés, meta-preaching, rigid
   assert.ok(badReport.issues.some((i) => i.type === 'rigid_prop_rule'));
   assert.ok(badReport.issues.some((i) => i.type === 'nested_indent'));
 
+  // disabledCategories exempts specific built-in category when toggled off
+  const ticText = '说话前总是先垂下眼帘，安静听完再回应。';
+  assert.equal(
+    lintPersonaText(ticText, { useBuiltinBanned: true, disabledCategories: ['persona_tic_lock'] }).issues.some(
+      (i) => i.type === 'cliche_phrase'
+    ),
+    false
+  );
+
+  // Replay risk detection & 1-click anti-parrot clause guard
+  const quirkyExample = '注意力容易发散，例如戴着耳机看书做笔记通常坚持不到十分钟就会走神放弃。';
+  assert.equal(hasReplayRiskExamples(quirkyExample), true);
+  assert.ok(lintPersonaText(quirkyExample).issues.some((i) => i.type === 'replay_risk'));
+  const guardedExample = appendAntiParrotClause(quirkyExample);
+  assert.equal(hasReplayRiskExamples(guardedExample), false);
+  assert.equal(appendAntiParrotClause(guardedExample), guardedExample);
+  assert.equal(lintPersonaText(guardedExample).issues.some((i) => i.type === 'replay_risk'), false);
+
+  // Em-dash proliferation detection & 1-click cleanup
+  const dashyText = '她平时话不多——习惯独来独往——对陌生人也保持礼貌距离。';
+  assert.ok(lintPersonaText(dashyText).issues.some((i) => i.type === 'dash_overuse'));
+  const cleanedDash = replaceEmDashes(dashyText);
+  assert.equal(cleanedDash.includes('——'), false);
+  assert.equal(lintPersonaText(cleanedDash).issues.some((i) => i.type === 'dash_overuse'), false);
+
   const respectingDisabledBuiltin = lintPersonaText(DEFAULT_BANNED_PHRASES[0], {
     useBuiltinBanned: false,
   });
@@ -561,24 +871,24 @@ test('Group 5.2: lintPersonaText catches labels, clichés, meta-preaching, rigid
     false
   );
 
-  const cleanFixture = [
+  // Clean everyday persona WITHOUT [外表可见] brackets scores 100 with zero issues and zero nagging advisories
+  const cleanEverydayFixture = [
     CORE_SECTION_HEADER,
-    '## 体貌与日常节奏 [外显可感知]',
+    '## 外貌与日常印象',
     '中等身量，长年做旧书修补，指腹常有薄茧，说话语速平稳，习惯穿袖口利落的棉麻衬衫。',
-    '## 性情成因与舒适基准',
-    '幼时跟着祖父在库房整理纸张长大，对潮湿和尖锐噪音尤为敏感；室内保持干燥安静时能连续伏案三小时，一旦环境嘈杂就会先收手退到走廊透气。',
-    '## 未公开私事 [未公开私事 / 旁人无从知晓]',
-    '左手腕内侧有一道早年裁纸刀留下的浅疤，平时用表带遮住，外人很少察觉。',
+    '## 性格习惯与相处分寸',
+    '从小跟着祖父在库房整理纸张长大，对潮湿和尖锐噪音比较敏感；室内保持干燥安静时能连续伏案三小时，一旦环境嘈杂就会先收手退到走廊透气。（左手腕内侧有一道早年裁纸留下的浅痕，平时戴表遮住，未向外人提起。）',
     '',
     SHELL_SECTION_HEADER,
-    '## 当前立足点 [既有共识 / 开场起点]',
+    '## 当前身份与开场关系',
     '受聘于城南图书馆古籍室做季度外包修复，与馆内负责人早已签妥三个月工期。',
   ].join('\n');
 
-  const cleanReport = lintPersonaText(cleanFixture);
+  const cleanReport = lintPersonaText(cleanEverydayFixture);
   assert.equal(cleanReport.ok, true);
   assert.equal(cleanReport.stats.hasCoreShell, true);
-  assert.equal(cleanReport.stats.hasVisibilityMarkers, true);
+  assert.equal(cleanReport.stats.hasVisibilityMarkers, false);
+  assert.equal(cleanReport.advisories.length, 0);
   assert.equal(cleanReport.score, 100);
 });
 
@@ -837,6 +1147,7 @@ test('Group 8.2: exportSillyTavernPreset trims whitespace presetName & disambigu
       { id: 'tail_prefill', name: '自定义碰撞1', slotType: 'custom', role: 'system', enabled: true, content: '自定义内容1' },
       { id: 'tail_trigger', name: '自定义碰撞2', slotType: 'custom', role: 'system', enabled: true, content: '自定义内容2' },
       { id: 'usage_guide', name: '自定义碰撞3', slotType: 'custom', role: 'system', enabled: true, content: '自定义内容3' },
+      { id: 'draft_audit', name: '自定义碰撞4', slotType: 'custom', role: 'system', enabled: true, content: '自定义内容4' },
     ],
   });
 
@@ -844,6 +1155,7 @@ test('Group 8.2: exportSillyTavernPreset trims whitespace presetName & disambigu
     scheme: customScheme,
     presetName: '   ',
     includeUsageGuide: true,
+    includeDraftAudit: true,
   });
 
   const mainPrompt = exported.prompts.find((p) => p.identifier === 'main');
@@ -861,6 +1173,7 @@ test('Group 8.2: exportSillyTavernPreset trims whitespace presetName & disambigu
   assert.ok(promptIds.includes('ups_tail_prefill_2'));
   assert.ok(promptIds.includes('ups_tail_trigger_2'));
   assert.ok(promptIds.includes('ups_usage_guide_2'));
+  assert.ok(promptIds.includes('ups_draft_audit_2'));
   assert.equal(exported.prompts.find((p) => p.identifier === 'ups_tail_prefill').role, 'assistant');
   assert.equal(exported.prompts.find((p) => p.identifier === 'ups_tail_trigger').role, 'user');
 });
@@ -940,7 +1253,6 @@ test('Group 8.5: buildCustomChatPayload ignores blank temp/topP, preserves 0, & 
   const proxyExclude = JSON.parse(proxyBlank.custom_exclude_body);
   assert.ok(proxyExclude.includes('temperature'));
   assert.ok(proxyExclude.includes('top_p'));
-  // ST custom backend injects SECRET_KEYS.CUSTOM unless Authorization is explicitly overridden
   assert.equal(proxyBlank.custom_include_headers, JSON.stringify({ Authorization: '' }));
 
   const directBlank = buildCustomChatPayload(
@@ -995,12 +1307,16 @@ test('Group 8.7: sanitizeScheme & cloneScheme boundary hardening', () => {
       {
         id: 'inverted',
         name: '倒置预算',
+        style: 'refactor',
+        favorite: true,
         targetTokens: { min: 4000, max: 500 },
         entries: [{ id: 'e1', name: '规则', content: '正文' }],
       },
     ],
   });
   const inv = settings.schemes.find((s) => s.id === 'inverted');
+  assert.equal(inv.style, 'refactor');
+  assert.equal(inv.favorite, true);
   assert.equal(inv.targetTokens.min, 4000);
   assert.equal(inv.targetTokens.max, 4000);
 
@@ -1011,7 +1327,7 @@ test('Group 8.7: sanitizeScheme & cloneScheme boundary hardening', () => {
     targetTokens: { min: 3000, max: 600 },
     entries: [{ id: 'custom_1', name: '覆盖条目', role: 'invalid_role', content: '新条目正文' }],
   });
-  assert.equal(cloned.name, '细致代演方案 (副本)');
+  assert.equal(cloned.name, '适合抢话党 (副本)');
   assert.equal(cloned.temperature, 2);
   assert.equal(cloned.maxTokens, 256);
   assert.equal(cloned.targetTokens.min, 3000);

@@ -920,14 +920,18 @@ async function runHostGeneration({ ctx, cleanMessages, effectiveMaxTokens, signa
   };
 }
 
-export async function runStudioGeneration({
-  settings,
-  messages,
-  signal,
-  onChunk,
-  responseLength,
-  deps = {},
-} = {}) {
+export async function runStudioGeneration(options = {}, depsArg = undefined) {
+  const {
+    settings,
+    messages,
+    signal,
+    onChunk,
+    responseLength,
+    minMaxTokens,
+    deps: optionsDeps,
+  } = options && typeof options === 'object' ? options : {};
+  const deps = depsArg && typeof depsArg === 'object' ? depsArg : (optionsDeps ?? {});
+
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error('消息列表不能为空');
   }
@@ -939,10 +943,28 @@ export async function runStudioGeneration({
 
   const activeScheme = settings?.schemes?.find?.((s) => s.id === settings?.activeSchemeId);
   const explicitLen =
-    Number.isFinite(Number(responseLength)) && Number(responseLength) > 0
+    typeof responseLength !== 'boolean' &&
+    responseLength !== null &&
+    responseLength !== undefined &&
+    String(responseLength).trim() !== '' &&
+    Number.isFinite(Number(responseLength)) &&
+    Number(responseLength) > 0
       ? Number(responseLength)
       : undefined;
-  const effectiveMaxTokens = explicitLen ?? activeScheme?.maxTokens ?? undefined;
+  const parsedMinMax =
+    typeof minMaxTokens !== 'boolean' &&
+    minMaxTokens !== null &&
+    minMaxTokens !== undefined &&
+    String(minMaxTokens).trim() !== '' &&
+    Number.isFinite(Number(minMaxTokens)) &&
+    Number(minMaxTokens) > 0
+      ? Math.min(32768, Math.round(Number(minMaxTokens)))
+      : undefined;
+  const baseHostMaxTokens = explicitLen ?? activeScheme?.maxTokens ?? undefined;
+  const effectiveMaxTokens =
+    parsedMinMax !== undefined
+      ? Math.min(32768, Math.max(Number(baseHostMaxTokens) || 0, parsedMinMax))
+      : baseHostMaxTokens;
 
   const { ctx, fetchFn, useDirectTransport, getHeaders } = resolveDeps(deps);
   const provider = settings?.api?.provider === 'custom' ? 'custom' : 'host';
@@ -1027,7 +1049,19 @@ export async function runStudioGeneration({
     throw new Error('当前运行环境缺少 fetch 接口，无法发起自定义 API 请求。');
   }
 
-  const profileForRequest = explicitLen ? { ...profile, maxTokens: explicitLen } : profile;
+  const baseProfileMax =
+    Number.isFinite(Number(profile.maxTokens)) && Number(profile.maxTokens) > 0
+      ? Number(profile.maxTokens)
+      : 4096;
+  const requestedProfileMax = explicitLen ?? baseProfileMax;
+  const effectiveProfileMax =
+    parsedMinMax !== undefined
+      ? Math.min(32768, Math.max(requestedProfileMax, parsedMinMax))
+      : Math.min(32768, requestedProfileMax);
+  const profileForRequest =
+    explicitLen !== undefined || parsedMinMax !== undefined
+      ? { ...profile, maxTokens: Math.round(effectiveProfileMax) }
+      : profile;
   const wantStream = Boolean(profile.stream);
 
   const sendCustomOnce = async (msgs) => {
