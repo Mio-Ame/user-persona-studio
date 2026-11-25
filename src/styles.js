@@ -627,8 +627,8 @@ export const SHADOW_CSS = String.raw`
   pointer-events: auto;
   container-type: inline-size;
   container-name: plugin-win;
-  width: min(820px, calc(100vw - 24px));
-  height: min(620px, 88dvh);
+  width: min(1040px, calc(100vw - 24px));
+  height: min(680px, 88dvh);
   min-width: 320px;
   min-height: 280px;
   background-color: var(--ups-bg);
@@ -830,6 +830,162 @@ export const SHADOW_CSS = String.raw`
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+}
+
+/* Two-Pane Side-by-Side Workbench on Wide Containers (>= 720px) */
+.ups-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ups-pane-left,
+.ups-pane-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ups-narrow-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--ups-border);
+  background-color: var(--ups-bg-elevated);
+}
+
+@container plugin-win (min-width: 720px) {
+  .ups-body.is-studio-tab {
+    overflow: hidden;
+  }
+
+  .ups-tab-panel[data-ups-tab-panel="studio"] {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .ups-narrow-nav {
+    display: none;
+  }
+
+  .ups-workbench {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-columns: minmax(300px, 43%) minmax(0, 57%);
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .ups-pane-left,
+  .ups-pane-right {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+  }
+
+  .ups-pane-left[hidden],
+  .ups-pane-right[hidden] {
+    display: flex !important;
+  }
+
+  .ups-draft-card {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ups-draft-card .ups-draft-editor {
+    flex: 1 1 210px;
+    min-height: 180px;
+  }
+}
+
+/* Extracted Persona Points Checklist */
+.ups-points-box {
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-points-list {
+  max-height: 156px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.ups-point-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ups-point-item:hover {
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-point-item input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+/* Collapsible Advanced Details */
+.ups-advanced-details {
+  border-top: 1px dashed var(--ups-border);
+  padding-top: 6px;
+}
+
+.ups-advanced-details > summary {
+  font-size: 12px;
+  color: var(--ups-fg-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.ups-advanced-details[open] > summary {
+  margin-bottom: 8px;
+  color: var(--ups-fg);
+}
+
+/* Newly Added Item Highlight Feedback */
+@keyframes upsFlashHighlight {
+  0% {
+    border-color: var(--ups-accent);
+    box-shadow: 0 0 0 3px var(--ups-accent-soft);
+    background-color: var(--ups-accent-soft);
+  }
+  100% {
+    border-color: var(--ups-border);
+    box-shadow: none;
+  }
+}
+
+.ups-just-added {
+  border-color: var(--ups-accent) !important;
+  animation: upsFlashHighlight 1.8s ease-out forwards;
 }
 
 /* Constant Bottom Footer */

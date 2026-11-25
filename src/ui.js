@@ -1,6 +1,7 @@
 import {
   CORE_SECTION_HEADER,
   SHELL_SECTION_HEADER,
+  WORD_COUNT_PRESETS,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   DEFAULT_PREFILL,
@@ -18,9 +19,13 @@ import {
   buildGenerationMessages,
   exportSillyTavernPreset,
   estimateTokens,
+  countReadableChars,
+  computeLengthBudget,
+  applyTargetCharsToScheme,
   normalizeFlatLayout,
   lintPersonaText,
   splitCoreAndShell,
+  extractPersonaPoints,
   splitDualLayerOutput,
   parsePersonaSections,
   computeLineDiff,
@@ -69,8 +74,8 @@ export function clampModalSize({ width, height, viewportWidth, viewportHeight } 
   const minHeight = Math.min(vw <= 640 ? 240 : 280, maxHeight);
   const hasWidth = width !== null && width !== undefined && String(width).trim() !== '' && typeof width !== 'boolean' && Number.isFinite(Number(width));
   const hasHeight = height !== null && height !== undefined && String(height).trim() !== '' && typeof height !== 'boolean' && Number.isFinite(Number(height));
-  const rawW = hasWidth ? Number(width) : 820;
-  const rawH = hasHeight ? Number(height) : 620;
+  const rawW = hasWidth ? Number(width) : 1040;
+  const rawH = hasHeight ? Number(height) : 680;
   const w = Math.max(minWidth, Math.min(maxWidth, Math.round(rawW)));
   const h = Math.max(minHeight, Math.min(maxHeight, Math.round(rawH)));
   return { width: w, height: h, minWidth, maxWidth, minHeight, maxHeight };
@@ -386,6 +391,25 @@ function getTextareaCurrentLine(textarea) {
   return value.slice(lineStart, lineEnd).trim();
 }
 
+function flashButtonFeedback(btn, feedbackText, durationMs = 1200) {
+  if (!btn) return;
+  if (!btn._upsBaseText) {
+    btn._upsBaseText = btn.textContent || '';
+  }
+  if (btn._upsFlashTimer) {
+    clearTimeout(btn._upsFlashTimer);
+    btn._upsFlashTimer = null;
+  }
+  btn.textContent = feedbackText;
+  btn._upsFlashTimer = setTimeout(() => {
+    btn._upsFlashTimer = null;
+    if (!btn.disabled && btn._upsBaseText) {
+      btn.textContent = btn._upsBaseText;
+    }
+  }, durationMs);
+  btn._upsFlashTimer?.unref?.();
+}
+
 function triggerJsonDownload(doc, win, filename, payloadObj) {
   const jsonText = JSON.stringify(payloadObj, null, 2);
   const BlobCtor = win?.Blob || globalThis.Blob;
@@ -449,6 +473,7 @@ export function createStudioUI(options = {}) {
     miniMode: Boolean(settings.ui.miniMode),
     activeTab: 'studio', // studio | presets | taste | settings
     mode: 'A', // A | B
+    narrowPane: 'both', // both | left | right (for <720px compact view)
     subMode: 'de_label_reformat',
     injectChar: true,
     dualLayer: false,
@@ -460,6 +485,10 @@ export function createStudioUI(options = {}) {
     baselineDraft: '',
     tasteBaselineDraft: '',
     lastCandidates: { bannedCandidates: [], anchorCandidates: [] },
+    extractedPoints: [],
+    selectedPointIds: new Set(),
+    justAddedEntryId: '',
+    justAddedTasteId: '',
     cachedActivePersona: null,
     cachedPersonas: [],
     cachedCharContext: null,
@@ -566,12 +595,12 @@ export function createStudioUI(options = {}) {
     ]
   );
 
-  // Constant 4-Tab Bar
+  // Constant 4-Tab Bar (plain beginner-friendly labels)
   const TAB_DEFS = [
     { id: 'studio', label: '工坊主页' },
-    { id: 'presets', label: '预设条目栈' },
-    { id: 'taste', label: '审美成长库' },
-    { id: 'settings', label: '连接与设置' },
+    { id: 'presets', label: '生成规则' },
+    { id: 'taste', label: '偏好词库' },
+    { id: 'settings', label: '接口与设置' },
   ];
   const tabButtons = new Map();
   const tabsBarEl = createEl(
@@ -598,11 +627,11 @@ export function createStudioUI(options = {}) {
   );
 
   const bodyEl = createEl(doc, 'main', {
-    className: 'ups-body',
+    className: 'ups-body is-studio-tab',
     attrs: { 'data-ups-body': 'true' },
   });
 
-  // Footer
+  // Footer (streamlined: only draft Undo / Redo / Copy / Save Persona)
   const statusEl = createEl(doc, 'span', {
     className: 'ups-footer-status',
     text: '就绪',
@@ -628,18 +657,11 @@ export function createStudioUI(options = {}) {
     text: '复制',
     attrs: { 'data-ups-copy': 'true' },
   });
-  const exportPresetBtn = createEl(doc, 'button', {
-    type: 'button',
-    className: 'ups-btn',
-    text: '导出预设',
-    title: '导出酒馆原生预设 JSON',
-    attrs: { 'data-ups-export-preset': 'true' },
-  });
   const footerSaveBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn ups-btn-primary',
-    text: '保存',
-    title: '保存至当前酒馆 User 人设',
+    text: '保存人设',
+    title: '保存到当前酒馆 User 人设',
     attrs: { 'data-ups-footer-save': 'true' },
   });
 
@@ -653,7 +675,6 @@ export function createStudioUI(options = {}) {
         undoBtn,
         redoBtn,
         copyBtn,
-        exportPresetBtn,
         footerSaveBtn,
       ]),
     ]
@@ -693,19 +714,9 @@ export function createStudioUI(options = {}) {
     ]
   );
 
-  // Strategy Popover
+  // Lightweight Context Options Popover (no manual prefill toggles!)
   const injectCharCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.injectChar });
   const dualLayerCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.dualLayer });
-  const popoverTailSelect = createEl(
-    doc,
-    'select',
-    { className: 'ups-select', attrs: { 'data-ups-popover-tail': 'true' } },
-    [
-      createEl(doc, 'option', { value: 'user', text: '末尾为 user（通用兼容）' }),
-      createEl(doc, 'option', { value: 'assistant_prefill', text: '末尾为 assistant 预填充' }),
-      createEl(doc, 'option', { value: 'prefill_plus_user', text: '预填充 + 末尾 user 触发' }),
-    ]
-  );
   const charContextHint = createEl(doc, 'div', { className: 'ups-muted', text: '当前角色：检测中…' });
 
   const popoverEl = createEl(
@@ -717,19 +728,15 @@ export function createStudioUI(options = {}) {
       attrs: { 'data-ups-popover': 'true' },
     },
     [
-      createEl(doc, 'div', { className: 'ups-card-title', text: '生成与末尾角色策略' }),
+      createEl(doc, 'div', { className: 'ups-card-title', text: '生成附加选项' }),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         injectCharCheckbox,
-        createEl(doc, 'span', { text: '注入当前角色卡公开背景' }),
+        createEl(doc, 'span', { text: '结合当前角色卡背景生成' }),
       ]),
       charContextHint,
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         dualLayerCheckbox,
-        createEl(doc, 'span', { text: '双层输出（常驻核心 + 补充世界书）' }),
-      ]),
-      createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '末尾消息角色 / 预填充' }),
-        popoverTailSelect,
+        createEl(doc, 'span', { text: '长设定自动拆出世界书（省常驻字数）' }),
       ]),
     ]
   );
@@ -775,45 +782,98 @@ export function createStudioUI(options = {}) {
   stopHostDrawerCollapse(submodalMaskEl, signal);
 
   // ==========================================================================
-  // Tab 1: 工坊主页 (Studio)
+  // Tab 1: 工坊主页 (Two-Pane Side-by-Side Workbench)
   // ==========================================================================
+
+  // Narrow-container pane switcher (<720px: lets mobile/mini-window users flip without scrolling)
+  const narrowBothBtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-seg-btn is-active',
+    text: '上下同屏',
+    attrs: { 'data-ups-narrow-pane': 'both' },
+  });
+  const narrowLeftBtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-seg-btn',
+    text: '只看要求',
+    attrs: { 'data-ups-narrow-pane': 'left' },
+  });
+  const narrowRightBtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-seg-btn',
+    text: '只看结果',
+    attrs: { 'data-ups-narrow-pane': 'right' },
+  });
+  const narrowNavEl = createEl(
+    doc,
+    'div',
+    { className: 'ups-narrow-nav', attrs: { 'data-ups-narrow-nav': 'true' } },
+    [
+      createEl(doc, 'span', { className: 'ups-muted', text: '视图' }),
+      createEl(doc, 'div', { className: 'ups-segmented' }, [narrowBothBtn, narrowLeftBtn, narrowRightBtn]),
+    ]
+  );
 
   const modeABtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-seg-btn is-active',
-    text: '模式 A · 新建直出',
+    text: '新建人设',
     attrs: { 'data-ups-mode': 'A' },
   });
   const modeBBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-seg-btn',
-    text: '模式 B · 优化重构',
+    text: '改写旧人设',
     attrs: { 'data-ups-mode': 'B' },
   });
   const schemeSelect = createEl(doc, 'select', {
     className: 'ups-select',
-    style: { width: 'auto', flex: '1 1 160px' },
-    attrs: { 'data-ups-scheme': 'true', 'aria-label': '人设预设方案' },
+    attrs: { 'data-ups-scheme': 'true', 'aria-label': '写作风格方案' },
+  });
+  const wordCountSelect = createEl(
+    doc,
+    'select',
+    {
+      className: 'ups-select',
+      attrs: { 'data-ups-word-count': 'true', 'aria-label': '目标字数' },
+    },
+    WORD_COUNT_PRESETS.map((p) => createEl(doc, 'option', { value: p.id, text: p.label }))
+  );
+  const customCharsInput = createEl(doc, 'input', {
+    type: 'number',
+    className: 'ups-input',
+    min: '200',
+    max: '12000',
+    step: '100',
+    hidden: true,
+    placeholder: '输入目标汉字数（如 1200）',
+    attrs: { 'data-ups-custom-chars': 'true', 'aria-label': '自定义目标字数' },
   });
   const popoverBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '策略选项',
+    text: '附加选项',
     attrs: { 'data-ups-popover-btn': 'true' },
   });
 
   // Mode A inputs
   const inspirationInput = createEl(doc, 'textarea', {
     className: 'ups-textarea',
-    rows: 3,
-    placeholder: '用一两句话描述你想塑造的 User 身份、性格底色或开场处境……',
+    rows: 4,
+    placeholder: '用一两句话写你想扮演的身份、性格特点或开场处境（可带口语词如“偏慢热”，生成时会自动写成具体细节）……',
     attrs: { 'data-ups-inspiration': 'true' },
   });
   const mustHavesAInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '可选：个人必带细节或核心偏爱（逗号分隔）',
+    placeholder: '选填：必须写进去的外貌、习惯或喜好细节',
     attrs: { 'data-ups-must-haves': 'true' },
+  });
+  const pickFromPersonaABtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-btn-ghost',
+    text: '从现有人设挑几条沿用',
+    attrs: { 'data-ups-pick-points-a': 'true' },
   });
   const generateABtn = createEl(doc, 'button', {
     type: 'button',
@@ -832,11 +892,14 @@ export function createStudioUI(options = {}) {
     { className: 'ups-card', attrs: { 'data-ups-panel-mode': 'A' } },
     [
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '一句话灵感 / 角色定位' }),
+        createEl(doc, 'label', { className: 'ups-label', text: '想塑造什么样的人设' }),
         inspirationInput,
       ]),
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '必带偏好槽（可选）' }),
+        createEl(doc, 'div', { className: 'ups-row-between' }, [
+          createEl(doc, 'label', { className: 'ups-label', text: '必须包含的设定（选填）' }),
+          pickFromPersonaABtn,
+        ]),
         mustHavesAInput,
       ]),
       createEl(doc, 'div', { className: 'ups-btn-row' }, [generateABtn, previewPromptABtn]),
@@ -847,45 +910,46 @@ export function createStudioUI(options = {}) {
   const subModeSelect = createEl(
     doc,
     'select',
-    { className: 'ups-select', attrs: { 'data-ups-submode': 'true', 'aria-label': '优化重构档位' } },
+    { className: 'ups-select', attrs: { 'data-ups-submode': 'true', 'aria-label': '改写方式' } },
     [
-      createEl(doc, 'option', { value: 'de_label_reformat', text: '无损去标签与排版重整' }),
-      createEl(doc, 'option', { value: 'core_expand', text: '保核扩写丰满（支撑长文）' }),
-      createEl(doc, 'option', { value: 'cross_card_adapt', text: '旧人设跨卡合理化改编' }),
+      createEl(doc, 'option', { value: 'de_label_reformat', text: '整理排版并去套话（保留全部原设定）' }),
+      createEl(doc, 'option', { value: 'core_expand', text: '扩写丰富细节（保留原设定骨架）' }),
+      createEl(doc, 'option', { value: 'cross_card_adapt', text: '换卡改背景（保留外貌性格，只改当前身份）' }),
     ]
   );
   const loadPersonaBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn',
-    text: '载入当前人设',
+    text: '载入人设',
     attrs: { 'data-ups-load-persona': 'true' },
   });
   const personaPickerSelect = createEl(doc, 'select', {
     className: 'ups-select',
-    style: { flex: '1 1 140px' },
+    style: { flex: '1 1 130px' },
     attrs: { 'aria-label': '选择已有人设' },
   });
-  const lockCoreBtn = createEl(doc, 'button', {
+  const extractPointsBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '提取并锁定本体核',
+    text: '提取可勾选项',
+    attrs: { 'data-ups-extract-points': 'true' },
   });
   const existingDraftInput = createEl(doc, 'textarea', {
     className: 'ups-textarea',
     rows: 4,
-    placeholder: '点击“载入当前人设”或直接粘贴旧人设 / 碎稿……',
+    placeholder: '点击上方“载入人设”读取酒馆人设，或直接粘贴旧人设文本……',
     attrs: { 'data-ups-existing-draft': 'true' },
   });
   const lockedCoreInput = createEl(doc, 'textarea', {
     className: 'ups-textarea',
     rows: 2,
-    placeholder: '可选：跨卡改编时锁定的【人物本体核】内容',
+    placeholder: '选填：若有额外不想被改动的句子也可手写补充在此',
     attrs: { 'data-ups-locked-core': 'true' },
   });
   const mustHavesBInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '可选：本次重构补充说明',
+    placeholder: '选填：本次改写的补充要求（如“改成新学校转学生身份”）',
   });
   const generateBBtn = createEl(doc, 'button', {
     type: 'button',
@@ -905,44 +969,75 @@ export function createStudioUI(options = {}) {
     { className: 'ups-card', hidden: true, attrs: { 'data-ups-panel-mode': 'B' } },
     [
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '重构档位' }),
+        createEl(doc, 'label', { className: 'ups-label', text: '改写方式' }),
         subModeSelect,
       ]),
-      createEl(doc, 'div', { className: 'ups-row' }, [loadPersonaBtn, personaPickerSelect, lockCoreBtn]),
+      createEl(doc, 'div', { className: 'ups-row' }, [personaPickerSelect, loadPersonaBtn, extractPointsBtn]),
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '原有人设底稿' }),
+        createEl(doc, 'label', { className: 'ups-label', text: '旧人设原稿' }),
         existingDraftInput,
       ]),
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '锁定本体核（可选）' }),
-        lockedCoreInput,
-      ]),
-      createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'label', { className: 'ups-label', text: '额外优化要求（可选）' }),
+        createEl(doc, 'label', { className: 'ups-label', text: '补充改写要求（选填）' }),
         mustHavesBInput,
+      ]),
+      createEl(doc, 'details', { className: 'ups-advanced-details' }, [
+        createEl(doc, 'summary', { text: '手写补充固定保留内容（选填，常规直接用下方勾选即可）' }),
+        lockedCoreInput,
       ]),
       createEl(doc, 'div', { className: 'ups-btn-row' }, [generateBBtn, previewPromptBBtn]),
     ]
   );
 
-  // Draft workspace
-  const tokenBadgeEl = createEl(doc, 'span', { className: 'ups-badge', text: '0 tokens' });
-  const flattenBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '扁平整理' });
+  // Shared Selectable Persona Points Box (no manual copy-paste required!)
+  const pointsCountLabel = createEl(doc, 'span', {
+    className: 'ups-card-title',
+    text: '勾选要保留的原人设内容',
+  });
+  const pointsSelectAllBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '全选' });
+  const pointsSelectCoreBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '只留外貌性格' });
+  const pointsClearBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '清空' });
+  const pointsListEl = createEl(doc, 'div', { className: 'ups-points-list' });
+  const extractedPointsBox = createEl(
+    doc,
+    'div',
+    {
+      className: 'ups-points-box',
+      hidden: true,
+      attrs: { 'data-ups-points-box': 'true' },
+    },
+    [
+      createEl(doc, 'div', { className: 'ups-row-between' }, [
+        pointsCountLabel,
+        createEl(doc, 'div', { className: 'ups-btn-row' }, [
+          pointsSelectAllBtn,
+          pointsSelectCoreBtn,
+          pointsClearBtn,
+        ]),
+      ]),
+      createEl(doc, 'div', { className: 'ups-muted', text: '勾上的条目在生成或换卡改写时会原样保留，无需手动复制粘贴：' }),
+      pointsListEl,
+    ]
+  );
+
+  // Right Pane: Draft workspace + Diff + Save
+  const tokenBadgeEl = createEl(doc, 'span', { className: 'ups-badge', text: '0 字 · 0 tokens' });
+  const flattenBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '清理缩进' });
   const sectionSelect = createEl(doc, 'select', {
     className: 'ups-select',
-    style: { width: 'auto', maxWidth: '160px' },
+    style: { width: 'auto', maxWidth: '150px' },
     attrs: { 'aria-label': '选择重生成分段' },
   });
   const regenSectionBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '局部重生成',
+    text: '重写本段',
     attrs: { 'data-ups-regen-section': 'true' },
   });
   const draftTextarea = createEl(doc, 'textarea', {
-    className: 'ups-textarea',
-    rows: 8,
-    placeholder: '生成的 User 人设正文将显示在此，可直接编辑、撤销/重做或分段重写……',
+    className: 'ups-textarea ups-draft-editor',
+    rows: 10,
+    placeholder: '生成的 User 人设会直接显示在右侧这里，方便与左侧要求对照修改……',
     attrs: { 'data-ups-draft': 'true' },
   });
 
@@ -955,23 +1050,23 @@ export function createStudioUI(options = {}) {
   const extractTasteBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '归纳审美候选',
+    text: '记住这次改稿偏好',
     attrs: { 'data-ups-extract-taste': 'true' },
   });
   const quickBanLineBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '拉黑此句写法',
+    text: '屏蔽这句写法',
   });
   const quickAnchorLineBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-ghost',
-    text: '收藏偏爱锚点',
+    text: '喜欢这句细节',
   });
   const confirmTasteBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn ups-btn-primary',
-    text: '确认沉淀入库',
+    text: '确认记入偏好库',
     attrs: { 'data-ups-confirm-taste': 'true' },
   });
   const tasteCandidatesListEl = createEl(doc, 'div', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } });
@@ -984,20 +1079,20 @@ export function createStudioUI(options = {}) {
       attrs: { 'data-ups-taste-candidates': 'true' },
     },
     [
-      createEl(doc, 'div', { className: 'ups-card-title', text: '从改稿差异中归纳的审美候选' }),
+      createEl(doc, 'div', { className: 'ups-card-title', text: '从刚才的删改中识别出的个人偏好' }),
       tasteCandidatesListEl,
       createEl(doc, 'div', { className: 'ups-btn-row' }, [confirmTasteBtn]),
     ]
   );
 
   // Lint & Dual Layer Worldbook
-  const lintSummaryBadge = createEl(doc, 'span', { className: 'ups-badge', text: '质量检测：待检测' });
+  const lintSummaryBadge = createEl(doc, 'span', { className: 'ups-badge', text: '质量检查：待检查' });
   const lintIssuesListEl = createEl(doc, 'div', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } });
 
   const wbNameInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '补充世界书名称（留空则自动生成）',
+    placeholder: '补充世界书名称（留空自动命名）',
   });
   const saveWbBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '保存补充世界书' });
   const wbPreviewText = createEl(doc, 'div', { className: 'ups-muted', text: '' });
@@ -1006,7 +1101,7 @@ export function createStudioUI(options = {}) {
     'div',
     { className: 'ups-card', hidden: true },
     [
-      createEl(doc, 'div', { className: 'ups-card-title', text: '双层输出 · 补充世界书条目' }),
+      createEl(doc, 'div', { className: 'ups-card-title', text: '补充世界书条目（自动拆分）' }),
       wbPreviewText,
       createEl(doc, 'div', { className: 'ups-row' }, [
         createEl(doc, 'div', { style: { flex: '1 1 160px' } }, [wbNameInput]),
@@ -1019,7 +1114,7 @@ export function createStudioUI(options = {}) {
   const saveNameInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '人设名称（用于覆盖或另存新建）',
+    placeholder: '人设名称（覆盖或另存时使用）',
     attrs: { 'data-ups-save-name': 'true' },
   });
   const saveOverwriteBtn = createEl(doc, 'button', {
@@ -1035,27 +1130,43 @@ export function createStudioUI(options = {}) {
     attrs: { 'data-ups-save-new': 'true' },
   });
 
-  const studioTabPanel = createEl(
+  const leftPaneEl = createEl(
     doc,
-    'section',
-    { className: 'ups-tab-panel', attrs: { 'data-ups-tab-panel': 'studio' } },
+    'div',
+    { className: 'ups-pane-left', attrs: { 'data-ups-pane': 'left' } },
     [
       createEl(doc, 'div', { className: 'ups-card' }, [
         createEl(doc, 'div', { className: 'ups-row-between' }, [
           createEl(doc, 'div', { className: 'ups-segmented' }, [modeABtn, modeBBtn]),
           popoverBtn,
         ]),
-        createEl(doc, 'div', { className: 'ups-row' }, [
-          createEl(doc, 'span', { className: 'ups-label', text: '写作流派' }),
-          schemeSelect,
+        createEl(doc, 'div', { className: 'ups-grid-2' }, [
+          createEl(doc, 'div', { className: 'ups-field' }, [
+            createEl(doc, 'label', { className: 'ups-label', text: '写作风格' }),
+            schemeSelect,
+          ]),
+          createEl(doc, 'div', { className: 'ups-field' }, [
+            createEl(doc, 'label', { className: 'ups-label', text: '目标字数（自动同步预设）' }),
+            wordCountSelect,
+            customCharsInput,
+          ]),
         ]),
       ]),
       modeAPanel,
       modeBPanel,
-      createEl(doc, 'div', { className: 'ups-card' }, [
+      extractedPointsBox,
+    ]
+  );
+
+  const rightPaneEl = createEl(
+    doc,
+    'div',
+    { className: 'ups-pane-right', attrs: { 'data-ups-pane': 'right' } },
+    [
+      createEl(doc, 'div', { className: 'ups-card ups-draft-card' }, [
         createEl(doc, 'div', { className: 'ups-row-between' }, [
           createEl(doc, 'div', { className: 'ups-row' }, [
-            createEl(doc, 'span', { className: 'ups-card-title', text: '人设文稿工作区' }),
+            createEl(doc, 'span', { className: 'ups-card-title', text: '生成结果' }),
             tokenBadgeEl,
           ]),
           createEl(doc, 'div', { className: 'ups-btn-row' }, [
@@ -1077,9 +1188,9 @@ export function createStudioUI(options = {}) {
       ]),
       wbBox,
       createEl(doc, 'div', { className: 'ups-card' }, [
-        createEl(doc, 'div', { className: 'ups-card-title', text: '写入酒馆原生人设' }),
+        createEl(doc, 'div', { className: 'ups-card-title', text: '写入酒馆人设面板' }),
         createEl(doc, 'div', { className: 'ups-row' }, [
-          createEl(doc, 'div', { style: { flex: '1 1 180px' } }, [saveNameInput]),
+          createEl(doc, 'div', { style: { flex: '1 1 160px' } }, [saveNameInput]),
           saveOverwriteBtn,
           saveNewBtn,
         ]),
@@ -1087,8 +1198,18 @@ export function createStudioUI(options = {}) {
     ]
   );
 
+  const studioTabPanel = createEl(
+    doc,
+    'section',
+    { className: 'ups-tab-panel', attrs: { 'data-ups-tab-panel': 'studio' } },
+    [
+      narrowNavEl,
+      createEl(doc, 'div', { className: 'ups-workbench' }, [leftPaneEl, rightPaneEl]),
+    ]
+  );
+
   // ==========================================================================
-  // Tab 2: 预设条目栈 (Presets)
+  // Tab 2: 生成规则 (Presets & Export to SillyTavern)
   // ==========================================================================
 
   const stackSchemeSelect = createEl(doc, 'select', {
@@ -1099,24 +1220,33 @@ export function createStudioUI(options = {}) {
   const schemeNameInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '输入方案名称（用于另存或重命名）',
+    placeholder: '输入新方案名称（用于另存或改名）',
   });
   const schemeSaveAsBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '另存方案' });
   const schemeRenameBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '重命名' });
   const schemeDeleteBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-danger', text: '删除方案' });
+  const exportPresetBtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-btn ups-btn-primary',
+    text: '导出到酒馆预设',
+    title: '导出为标准 SillyTavern 预设 JSON，可在酒馆原生预设界面直接使用',
+    attrs: { 'data-ups-export-preset': 'true' },
+  });
+  const exportPresetModalBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '导出选项' });
 
   const tailModeSelect = createEl(
     doc,
     'select',
     { className: 'ups-select', attrs: { 'aria-label': '末尾消息角色策略' } },
     [
-      createEl(doc, 'option', { value: 'user', text: '末尾为 user（通用兼容）' }),
-      createEl(doc, 'option', { value: 'assistant_prefill', text: '末尾为 assistant 预填充' }),
-      createEl(doc, 'option', { value: 'prefill_plus_user', text: '预填充 + 末尾 user 触发' }),
+      createEl(doc, 'option', { value: 'auto', text: '自动适配当前模型（推荐）' }),
+      createEl(doc, 'option', { value: 'user', text: '固定以用户消息收尾' }),
+      createEl(doc, 'option', { value: 'assistant_prefill', text: '固定追加 AI 开头引导' }),
+      createEl(doc, 'option', { value: 'prefill_plus_user', text: '开头引导 + 用户消息收尾' }),
     ]
   );
-  const prefillInput = createEl(doc, 'textarea', { className: 'ups-textarea', rows: 2, placeholder: '输入预填充引导语' });
-  const triggerInput = createEl(doc, 'input', { type: 'text', className: 'ups-input', placeholder: '输入末尾触发语' });
+  const prefillInput = createEl(doc, 'textarea', { className: 'ups-textarea', rows: 2, placeholder: '可选：自定义开头引导文本' });
+  const triggerInput = createEl(doc, 'input', { type: 'text', className: 'ups-input', placeholder: '可选：自定义收尾触发句' });
   const schemeTempInput = createEl(doc, 'input', { type: 'number', className: 'ups-input', step: '0.05', min: '0', max: '2' });
   const schemeMaxTokensInput = createEl(doc, 'input', { type: 'number', className: 'ups-input', step: '100', min: '256', max: '32768' });
 
@@ -1124,11 +1254,15 @@ export function createStudioUI(options = {}) {
     type: 'search',
     className: 'ups-input',
     style: { flex: '1 1 160px' },
-    placeholder: '搜索预设条目名称或正文……',
+    placeholder: '搜索规则标题或内容……',
     attrs: { 'data-ups-stack-search': 'true' },
   });
-  const addStackEntryBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '+ 新增条目' });
-  const exportPresetModalBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '自定义导出' });
+  const addStackEntryBtn = createEl(doc, 'button', {
+    type: 'button',
+    className: 'ups-btn',
+    text: '+ 新增条目',
+    attrs: { 'data-ups-add-entry': 'true' },
+  });
   const stackListEl = createEl(doc, 'div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
 
   const presetsTabPanel = createEl(
@@ -1137,7 +1271,10 @@ export function createStudioUI(options = {}) {
     { className: 'ups-tab-panel', hidden: true, attrs: { 'data-ups-tab-panel': 'presets' } },
     [
       createEl(doc, 'div', { className: 'ups-card' }, [
-        createEl(doc, 'div', { className: 'ups-card-title', text: '方案管理与末尾预填充策略' }),
+        createEl(doc, 'div', { className: 'ups-row-between' }, [
+          createEl(doc, 'div', { className: 'ups-card-title', text: '生成方案管理与原生预设导出' }),
+          createEl(doc, 'div', { className: 'ups-btn-row' }, [exportPresetBtn, exportPresetModalBtn]),
+        ]),
         createEl(doc, 'div', { className: 'ups-row' }, [stackSchemeSelect]),
         createEl(doc, 'div', { className: 'ups-row' }, [
           createEl(doc, 'div', { style: { flex: '1 1 150px' } }, [schemeNameInput]),
@@ -1147,25 +1284,33 @@ export function createStudioUI(options = {}) {
         ]),
         createEl(doc, 'div', { className: 'ups-grid-2' }, [
           createEl(doc, 'div', { className: 'ups-field' }, [
-            createEl(doc, 'label', { className: 'ups-label', text: '末尾消息角色' }),
-            tailModeSelect,
+            createEl(doc, 'label', { className: 'ups-label', text: '采样温度（Temperature）' }),
+            schemeTempInput,
           ]),
           createEl(doc, 'div', { className: 'ups-field' }, [
-            createEl(doc, 'label', { className: 'ups-label', text: '生成温度 / 最大 Token' }),
-            createEl(doc, 'div', { className: 'ups-row' }, [
-              createEl(doc, 'div', { style: { flex: '1 1 60px' } }, [schemeTempInput]),
-              createEl(doc, 'div', { style: { flex: '1 1 70px' } }, [schemeMaxTokensInput]),
-            ]),
+            createEl(doc, 'label', { className: 'ups-label', text: '最大回复上限（Max Tokens）' }),
+            schemeMaxTokensInput,
           ]),
         ]),
-        createEl(doc, 'div', { className: 'ups-grid-2' }, [
+        createEl(doc, 'div', {
+          className: 'ups-muted',
+          text: '模型收尾格式已开启自动适配（自动兼容 Claude / Gemini / GPT / DeepSeek 等接口，遇到格式限制还会自动重试，无需手动设置预填充）。',
+        }),
+        createEl(doc, 'details', { className: 'ups-advanced-details' }, [
+          createEl(doc, 'summary', { text: '高级收尾兼容微调（默认自动适配，一般无需改动）' }),
           createEl(doc, 'div', { className: 'ups-field' }, [
-            createEl(doc, 'label', { className: 'ups-label', text: 'Assistant 预填充引导语' }),
-            prefillInput,
+            createEl(doc, 'label', { className: 'ups-label', text: '收尾适配策略' }),
+            tailModeSelect,
           ]),
-          createEl(doc, 'div', { className: 'ups-field' }, [
-            createEl(doc, 'label', { className: 'ups-label', text: '末尾 User 触发语' }),
-            triggerInput,
+          createEl(doc, 'div', { className: 'ups-grid-2' }, [
+            createEl(doc, 'div', { className: 'ups-field' }, [
+              createEl(doc, 'label', { className: 'ups-label', text: '自定义开头引导（仅特定模式生效）' }),
+              prefillInput,
+            ]),
+            createEl(doc, 'div', { className: 'ups-field' }, [
+              createEl(doc, 'label', { className: 'ups-label', text: '自定义末尾请求句' }),
+              triggerInput,
+            ]),
           ]),
         ]),
       ]),
@@ -1173,7 +1318,6 @@ export function createStudioUI(options = {}) {
         createEl(doc, 'div', { className: 'ups-row' }, [
           stackSearchInput,
           addStackEntryBtn,
-          exportPresetModalBtn,
         ]),
         stackListEl,
       ]),
@@ -1181,7 +1325,7 @@ export function createStudioUI(options = {}) {
   );
 
   // ==========================================================================
-  // Tab 3: 审美成长库 (Taste Profile)
+  // Tab 3: 偏好词库 (Taste Profile)
   // ==========================================================================
 
   const useBuiltinBannedBtn = createEl(
@@ -1190,35 +1334,35 @@ export function createStudioUI(options = {}) {
     {
       type: 'button',
       className: 'ups-switch is-on',
-      attrs: { role: 'switch', 'aria-checked': 'true', 'aria-label': '启用内置人设腔禁词底座' },
+      attrs: { role: 'switch', 'aria-checked': 'true', 'aria-label': '启用内置去套话词库' },
     },
     [createEl(doc, 'span', { className: 'ups-switch-thumb' })]
   );
-  const toggleBuiltinViewerBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '查看内置底座' });
-  const dedupTasteBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '去重合并' });
+  const toggleBuiltinViewerBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '查看内置词表' });
+  const dedupTasteBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '去重整理' });
   const builtinViewerEl = createEl(doc, 'div', { className: 'ups-card', hidden: true }, [
     createEl(doc, 'div', { className: 'ups-label', text: `内置高频套话禁词（${DEFAULT_BANNED_PHRASES.length} 条）` }),
     createEl(doc, 'div', { className: 'ups-muted', text: DEFAULT_BANNED_PHRASES.join('、') }),
-    createEl(doc, 'div', { className: 'ups-label', text: `内置定性标签拦截（${QUALITATIVE_LABEL_PATTERNS.length} 类）` }),
+    createEl(doc, 'div', { className: 'ups-label', text: `自动转写性格标签（${QUALITATIVE_LABEL_PATTERNS.length} 类）` }),
     createEl(doc, 'div', { className: 'ups-muted', text: QUALITATIVE_LABEL_PATTERNS.map((p) => p.label).join('、') }),
   ]);
 
   const tasteSearchInput = createEl(doc, 'input', {
     type: 'search',
     className: 'ups-input',
-    placeholder: '搜索偏爱锚点或个人禁写规则……',
+    placeholder: '搜索我喜欢的细节或禁写词句……',
     attrs: { 'data-ups-taste-search': 'true' },
   });
   const addAnchorInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '新增偏爱特质锚点，如：低压力环境下有轻微生活笨拙感',
+    placeholder: '添加喜欢的细节偏好，例如：做饭很好吃但记不住路名',
   });
-  const addAnchorBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '添加锚点' });
+  const addAnchorBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '添加喜好' });
   const addBannedInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '新增个人禁写写法，如：冷冽如刀的目光',
+    placeholder: '添加不爱看的禁写词句，例如：三分凉薄七分漫不经心',
   });
   const addBannedBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '添加禁写' });
   const tasteListContainer = createEl(doc, 'div', {
@@ -1234,8 +1378,8 @@ export function createStudioUI(options = {}) {
       createEl(doc, 'div', { className: 'ups-card' }, [
         createEl(doc, 'div', { className: 'ups-setting-row' }, [
           createEl(doc, 'div', { className: 'ups-setting-meta' }, [
-            createEl(doc, 'div', { className: 'ups-card-title', text: '启用内置人设腔禁词底座' }),
-            createEl(doc, 'div', { className: 'ups-muted', text: '自动避开常见套话与直接定性标签词' }),
+            createEl(doc, 'div', { className: 'ups-card-title', text: '自动拦截常见网文套话与性格标签' }),
+            createEl(doc, 'div', { className: 'ups-muted', text: '开启后自动避开油腻排比与空洞形容词' }),
           ]),
           useBuiltinBannedBtn,
         ]),
@@ -1580,6 +1724,21 @@ export function createStudioUI(options = {}) {
     redoBtn.disabled = !draftHistory.canRedo();
   }
 
+  function syncWordCountControls(scheme) {
+    if (!scheme) return;
+    const targetChars = Number(scheme.targetChars) || 1500;
+    const presetHit = WORD_COUNT_PRESETS.find((p) => p.chars > 0 && p.chars === targetChars);
+    if (presetHit) {
+      wordCountSelect.value = presetHit.id;
+      customCharsInput.hidden = true;
+      customCharsInput.value = String(targetChars);
+    } else {
+      wordCountSelect.value = 'custom';
+      customCharsInput.hidden = false;
+      customCharsInput.value = String(targetChars);
+    }
+  }
+
   function updateSchemeSelects() {
     const schemes = settings.schemes || [];
     const active = getActiveScheme(settings);
@@ -1594,22 +1753,94 @@ export function createStudioUI(options = {}) {
     makeOpts(schemeSelect);
     makeOpts(stackSchemeSelect);
     if (active) {
-      popoverTailSelect.value = active.tailMode || 'user';
-      tailModeSelect.value = active.tailMode || 'user';
+      syncWordCountControls(active);
+      tailModeSelect.value = active.tailMode || 'auto';
       prefillInput.value = active.prefillText || '';
       triggerInput.value = active.triggerText || '';
-      schemeTempInput.value = String(active.temperature ?? 0.85);
-      schemeMaxTokensInput.value = String(active.maxTokens ?? 4096);
+      schemeTempInput.value = String(active.temperature ?? 0.78);
+      schemeMaxTokensInput.value = String(active.maxTokens ?? 3300);
       schemeDeleteBtn.disabled = Boolean(active.builtin) || schemes.length <= 1;
     }
   }
 
+  function renderExtractedPoints() {
+    const pts = state.extractedPoints || [];
+    if (pts.length === 0) {
+      extractedPointsBox.hidden = true;
+      pointsListEl.replaceChildren();
+      return;
+    }
+    extractedPointsBox.hidden = false;
+    const keptCount = pts.filter((p) => state.selectedPointIds.has(p.id)).length;
+    pointsCountLabel.textContent = `勾选要保留的原人设内容（已选 ${keptCount}/${pts.length}）`;
+
+    const rows = pts.map((pt) => {
+      const checked = state.selectedPointIds.has(pt.id);
+      const cb = createEl(doc, 'input', { type: 'checkbox', checked });
+      cb.addEventListener('change', () => {
+        if (cb.checked) state.selectedPointIds.add(pt.id);
+        else state.selectedPointIds.delete(pt.id);
+        const nowKept = pts.filter((p) => state.selectedPointIds.has(p.id)).length;
+        pointsCountLabel.textContent = `勾选要保留的原人设内容（已选 ${nowKept}/${pts.length}）`;
+      });
+      return createEl(doc, 'label', { className: 'ups-point-item' }, [
+        cb,
+        createEl(doc, 'span', { className: 'ups-badge', text: pt.category }),
+        createEl(doc, 'span', { text: pt.text }),
+      ]);
+    });
+    pointsListEl.replaceChildren(...rows);
+  }
+
+  function populateExtractedPointsFromText(rawText, { defaultMode = 'smart', scrollToBox = false } = {}) {
+    const pts = extractPersonaPoints(rawText);
+    state.extractedPoints = pts;
+    state.selectedPointIds = new Set();
+    for (const pt of pts) {
+      if (defaultMode === 'all' || (defaultMode === 'smart' && pt.keepByDefault)) {
+        state.selectedPointIds.add(pt.id);
+      }
+    }
+    renderExtractedPoints();
+    if (scrollToBox && pts.length > 0) {
+      extractedPointsBox.classList.remove('ups-just-added');
+      extractedPointsBox.classList.add('ups-just-added');
+      extractedPointsBox.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    }
+    return pts;
+  }
+
+  function getCombinedLockedPointsText() {
+    const checkedLines = (state.extractedPoints || [])
+      .filter((pt) => state.selectedPointIds.has(pt.id))
+      .map((pt) => `- ${pt.fullText}`);
+    const manual = lockedCoreInput.value.trim();
+    if (checkedLines.length > 0 && manual) {
+      return `${checkedLines.join('\n')}\n${manual}`;
+    }
+    if (checkedLines.length > 0) {
+      return checkedLines.join('\n');
+    }
+    return manual;
+  }
+
+  function setNarrowPane(view) {
+    const next = view === 'left' || view === 'right' ? view : 'both';
+    state.narrowPane = next;
+    narrowBothBtn.classList.toggle('is-active', next === 'both');
+    narrowLeftBtn.classList.toggle('is-active', next === 'left');
+    narrowRightBtn.classList.toggle('is-active', next === 'right');
+    leftPaneEl.hidden = next === 'right';
+    rightPaneEl.hidden = next === 'left';
+  }
+
   function syncDraftRelatedViews() {
     const text = draftTextarea.value || '';
+    const chars = countReadableChars(text);
     const tokens = estimateTokens(text);
     const active = getActiveScheme(settings);
-    const rangeHint = active?.targetTokens ? ` / 目标 ${active.targetTokens.min}~${active.targetTokens.max}` : '';
-    tokenBadgeEl.textContent = `${tokens} tokens${rangeHint}`;
+    const targetChars = active?.targetChars || 1500;
+    tokenBadgeEl.textContent = `${chars} 字 · 约 ${tokens} tokens（目标约 ${targetChars} 字）`;
 
     // Sections
     const sections = parsePersonaSections(text);
@@ -1627,7 +1858,7 @@ export function createStudioUI(options = {}) {
       if (prevSec && sections.some((s) => s.title === prevSec)) {
         sectionSelect.value = prevSec;
       } else {
-        const shellSec = sections.find((s) => /剧场壳/.test(s.title));
+        const shellSec = sections.find((s) => /(?:当前背景|当前身份|剧场壳)/.test(s.title));
         sectionSelect.value = shellSec ? shellSec.title : sections[0].title;
       }
     }
@@ -1635,8 +1866,8 @@ export function createStudioUI(options = {}) {
     // Lint
     const lint = lintPersonaText(text, settings.tasteProfile);
     lintSummaryBadge.textContent = text.trim()
-      ? `质量检测：${lint.score} 分（${lint.issues.length} 项提示）`
-      : '质量检测：待检测';
+      ? `质量检查：${lint.score} 分（${lint.issues.length} 项提示）`
+      : '质量检查：待检查';
     lintSummaryBadge.className = `ups-badge ${lint.issues.length === 0 && text.trim() ? 'ups-badge-ok' : lint.issues.length > 0 ? 'ups-badge-warn' : ''}`;
 
     const issueNodes = lint.issues.slice(0, 8).map((issue) => {
@@ -1649,7 +1880,7 @@ export function createStudioUI(options = {}) {
         });
         banBtn.addEventListener('click', () => {
           settings.tasteProfile.banned = mergeTasteEntries(settings.tasteProfile.banned, [
-            { text: issue.match, note: '质检一键拉黑' },
+            { text: issue.match, note: '检查结果一键屏蔽' },
           ]);
           persistSettings();
           renderTasteTab();
@@ -1860,8 +2091,10 @@ export function createStudioUI(options = {}) {
       ]);
 
       const cardChildren = [row];
+      let addedNameInput = null;
       if (isExpanded) {
         const nameEd = createEl(doc, 'input', { type: 'text', className: 'ups-input', value: entry.name || '' });
+        addedNameInput = nameEd;
         const roleEd = createEl(
           doc,
           'select',
@@ -1899,7 +2132,7 @@ export function createStudioUI(options = {}) {
               ]),
             ]),
             createEl(doc, 'div', { className: 'ups-field' }, [
-              createEl(doc, 'label', { className: 'ups-label', text: '提示词正文' }),
+              createEl(doc, 'label', { className: 'ups-label', text: '规则内容' }),
               contentEd,
             ]),
             createEl(doc, 'div', { className: 'ups-btn-row' }, [applyBtn]),
@@ -1907,10 +2140,36 @@ export function createStudioUI(options = {}) {
         );
       }
 
-      return createEl(doc, 'div', { className: 'ups-entry-card' }, cardChildren);
+      const isJustAdded = state.justAddedEntryId === entry.id;
+      const cardEl = createEl(
+        doc,
+        'div',
+        {
+          className: `ups-entry-card${isJustAdded ? ' ups-just-added' : ''}`,
+          attrs: { 'data-ups-entry-id': entry.id },
+        },
+        cardChildren
+      );
+      cardEl._upsNameInput = addedNameInput;
+      return cardEl;
     });
 
     stackListEl.replaceChildren(...cards);
+    if (state.justAddedEntryId) {
+      const targetId = state.justAddedEntryId;
+      state.justAddedEntryId = '';
+      const targetCard = cards.find((c) => c.getAttribute?.('data-ups-entry-id') === targetId);
+      if (targetCard) {
+        targetCard.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+        if (typeof bodyEl.scrollHeight === 'number' && bodyEl.scrollHeight > 0) {
+          bodyEl.scrollTop = bodyEl.scrollHeight;
+        }
+        if (canAutoFocusDesktop(win) && targetCard._upsNameInput) {
+          targetCard._upsNameInput.focus?.();
+          targetCard._upsNameInput.select?.();
+        }
+      }
+    }
   }
 
   function renderTasteTab() {
@@ -1936,15 +2195,25 @@ export function createStudioUI(options = {}) {
           renderTasteTab();
           persistSettings();
           syncDraftRelatedViews();
+          setStatus(`已移除：${item.text.slice(0, 18)}`);
         });
         const metaChildren = [createEl(doc, 'div', { className: 'ups-entry-title', text: item.text })];
         if (item.note) {
           metaChildren.push(createEl(doc, 'div', { className: 'ups-muted', text: item.note }));
         }
-        return createEl(doc, 'div', { className: 'ups-entry-row' }, [
-          createEl(doc, 'div', { style: { minWidth: '0', flex: '1 1 auto' } }, metaChildren),
-          delBtn,
-        ]);
+        const isJustAdded = state.justAddedTasteId === item.id;
+        return createEl(
+          doc,
+          'div',
+          {
+            className: `ups-entry-row${isJustAdded ? ' ups-just-added' : ''}`,
+            attrs: { 'data-ups-taste-id': item.id },
+          },
+          [
+            createEl(doc, 'div', { style: { minWidth: '0', flex: '1 1 auto' } }, metaChildren),
+            delBtn,
+          ]
+        );
       });
 
       return createEl(doc, 'div', { className: 'ups-entry-card' }, [
@@ -1953,14 +2222,21 @@ export function createStudioUI(options = {}) {
         ]),
         ...(rows.length
           ? rows
-          : [createEl(doc, 'div', { className: 'ups-muted', style: { padding: '8px 10px' }, text: '暂无匹配记录' })]),
+          : [createEl(doc, 'div', { className: 'ups-muted', style: { padding: '8px 10px' }, text: '暂无记录' })]),
       ]);
     };
 
     tasteListContainer.replaceChildren(
-      renderGroup('偏爱特质锚点', settings.tasteProfile.anchors || [], 'anchors'),
-      renderGroup('个人拉黑 / 禁写规则', settings.tasteProfile.banned || [], 'banned')
+      renderGroup('我喜欢的细节偏好', settings.tasteProfile.anchors || [], 'anchors'),
+      renderGroup('我不喜欢的禁写词句', settings.tasteProfile.banned || [], 'banned')
     );
+
+    if (state.justAddedTasteId) {
+      const targetId = state.justAddedTasteId;
+      state.justAddedTasteId = '';
+      const rowEl = tasteListContainer.querySelector?.(`[data-ups-taste-id="${targetId}"]`);
+      rowEl?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    }
   }
 
   function renderSettingsTab({ syncInputs = true } = {}) {
@@ -2069,6 +2345,7 @@ export function createStudioUI(options = {}) {
     state.activeTab = tabId;
     popoverEl.hidden = true;
     closeFloatingMenu();
+    bodyEl.classList.toggle('is-studio-tab', tabId === 'studio');
     for (const [id, btn] of tabButtons.entries()) {
       const active = id === tabId;
       btn.classList.toggle('is-active', active);
@@ -2169,6 +2446,11 @@ export function createStudioUI(options = {}) {
         ? existingDraftInput.value.trim() || draftTextarea.value.trim() || state.cachedActivePersona?.description || ''
         : draftTextarea.value.trim();
 
+    const activeCustom = settings.api.provider === 'custom' ? getActiveCustomProfile(settings) : null;
+    const modelHint = activeCustom
+      ? { model: activeCustom.model, baseUrl: activeCustom.baseUrl, source: 'custom' }
+      : undefined;
+
     return buildGenerationMessages({
       mode: isSectionRegen ? 'optimize' : state.mode === 'A' ? 'create' : 'optimize',
       subMode: isSectionRegen
@@ -2182,11 +2464,12 @@ export function createStudioUI(options = {}) {
       inspiration: inspirationInput.value,
       charContext: state.injectChar ? state.cachedCharContext : null,
       existingDraft,
-      lockedCore: lockedCoreInput.value,
+      lockedCore: getCombinedLockedPointsText(),
       userMustHaves,
       tasteProfile: settings.tasteProfile,
       dualLayer: state.dualLayer,
       targetSection: targetSec,
+      modelHint,
     });
   }
 
@@ -2262,7 +2545,10 @@ export function createStudioUI(options = {}) {
         state.baselineDraft = existingDraftInput.value.trim() || draftTextarea.value.trim();
       }
 
-      setStatus(targetSection ? `正在局部重生成【${targetSection}】…` : '正在生成人设…');
+      if (state.narrowPane === 'left') {
+        setNarrowPane('right');
+      }
+      setStatus(targetSection ? `正在重写【${targetSection}】…` : '正在生成人设…');
 
       const res = await hostApi.runStudioGeneration({
         settings,
@@ -2500,13 +2786,10 @@ export function createStudioUI(options = {}) {
     syncDraftRelatedViews();
   }, { signal });
 
-  popoverTailSelect.addEventListener('change', () => {
-    const active = getActiveScheme(settings);
-    if (!active) return;
-    active.tailMode = popoverTailSelect.value;
-    tailModeSelect.value = active.tailMode;
-    persistSettings();
-  }, { signal });
+  // Narrow-pane view switcher (<720px)
+  narrowBothBtn.addEventListener('click', () => setNarrowPane('both'), { signal });
+  narrowLeftBtn.addEventListener('click', () => setNarrowPane('left'), { signal });
+  narrowRightBtn.addEventListener('click', () => setNarrowPane('right'), { signal });
 
   // Tab 1 controls
   modeABtn.addEventListener('click', () => setMode('A'), { signal });
@@ -2517,6 +2800,47 @@ export function createStudioUI(options = {}) {
     updateSchemeSelects();
     syncDraftRelatedViews();
     persistSettings();
+    const active = getActiveScheme(settings);
+    setStatus(`已切换风格：${active?.name || ''}（目标约 ${active?.targetChars || 1500} 字）`);
+  }, { signal });
+
+  function applyChosenTargetChars(rawChars) {
+    const active = getActiveScheme(settings);
+    if (!active) return;
+    const nextScheme = applyTargetCharsToScheme(active, rawChars);
+    settings.schemes = settings.schemes.map((s) => (s.id === active.id ? nextScheme : s));
+    updateSchemeSelects();
+    syncDraftRelatedViews();
+    if (state.activeTab === 'presets') renderStackTab();
+    persistSettings();
+    const budget = computeLengthBudget(nextScheme.targetChars);
+    setStatus(`已设目标字数：约 ${budget.chars} 字（约 ${budget.tokensApprox} tokens，生成规则已自动同步）`);
+  }
+
+  wordCountSelect.addEventListener('change', () => {
+    const val = wordCountSelect.value;
+    if (val === 'custom') {
+      customCharsInput.hidden = false;
+      const active = getActiveScheme(settings);
+      customCharsInput.value = String(active?.targetChars || 1500);
+      if (canAutoFocusDesktop(win)) {
+        customCharsInput.focus?.();
+        customCharsInput.select?.();
+      }
+      setStatus('请输入自定义目标汉字数（200～12000 字）');
+      return;
+    }
+    customCharsInput.hidden = true;
+    applyChosenTargetChars(Number(val) || 1500);
+  }, { signal });
+
+  customCharsInput.addEventListener('change', () => {
+    const raw = customCharsInput.value.trim();
+    if (!raw) {
+      syncWordCountControls(getActiveScheme(settings));
+      return;
+    }
+    applyChosenTargetChars(Number(raw) || 1500);
   }, { signal });
 
   generateABtn.addEventListener('click', () => executeGeneration(), { signal });
@@ -2528,6 +2852,29 @@ export function createStudioUI(options = {}) {
     executeGeneration({ targetSection: sec });
   }, { signal });
 
+  async function resolveSelectedOrActivePersona() {
+    const chosenId = personaPickerSelect.value;
+    const picked =
+      state.cachedPersonas.find((p) => p.avatarId === chosenId) ||
+      state.cachedActivePersona;
+    if (picked?.description !== undefined) return picked;
+    const fresh = await hostApi.getActivePersona().catch(() => null);
+    if (fresh) state.cachedActivePersona = fresh;
+    return fresh;
+  }
+
+  pickFromPersonaABtn.addEventListener('click', async () => {
+    const picked = await resolveSelectedOrActivePersona();
+    const desc = picked?.description || existingDraftInput.value || draftTextarea.value || '';
+    if (!desc.trim()) {
+      setStatus('当前酒馆人设为空，暂无可提取的设定条目', 'warn');
+      return;
+    }
+    const pts = populateExtractedPointsFromText(desc, { defaultMode: 'smart', scrollToBox: true });
+    flashButtonFeedback(pickFromPersonaABtn, `✓ 已提取 ${pts.length} 条`);
+    setStatus(`已从「${picked?.name || '当前人设'}」提取 ${pts.length} 条可勾选设定`);
+  }, { signal });
+
   loadPersonaBtn.addEventListener('click', () => {
     const chosenId = personaPickerSelect.value;
     const picked =
@@ -2535,38 +2882,69 @@ export function createStudioUI(options = {}) {
       state.cachedActivePersona;
 
     if (picked?.description !== undefined) {
-      existingDraftInput.value = picked.description || '';
-      state.baselineDraft = picked.description || '';
-      state.tasteBaselineDraft = picked.description || '';
-      setDraftValue(picked.description || '', { recordHistory: true });
+      const desc = picked.description || '';
+      existingDraftInput.value = desc;
+      state.baselineDraft = desc;
+      state.tasteBaselineDraft = desc;
+      setDraftValue(desc, { recordHistory: true });
       if (picked.name) saveNameInput.value = picked.name;
-      setStatus(`已载入人设：${picked.name || '当前人设'}`);
+      const pts = populateExtractedPointsFromText(desc, { defaultMode: 'smart', scrollToBox: false });
+      flashButtonFeedback(loadPersonaBtn, '✓ 已载入');
+      setStatus(`已载入「${picked.name || '当前人设'}」，并提取 ${pts.length} 条可勾选保留项`);
       return;
     }
 
     hostApi.getActivePersona().then((fresh) => {
       if (!fresh || state.isGenerating) return;
+      const desc = fresh.description || '';
       state.cachedActivePersona = fresh;
-      existingDraftInput.value = fresh.description || '';
-      state.baselineDraft = fresh.description || '';
-      state.tasteBaselineDraft = fresh.description || '';
-      setDraftValue(fresh.description || '', { recordHistory: true });
+      existingDraftInput.value = desc;
+      state.baselineDraft = desc;
+      state.tasteBaselineDraft = desc;
+      setDraftValue(desc, { recordHistory: true });
       if (fresh.name) saveNameInput.value = fresh.name;
-      setStatus(`已载入人设：${fresh.name}`);
+      const pts = populateExtractedPointsFromText(desc, { defaultMode: 'smart', scrollToBox: false });
+      flashButtonFeedback(loadPersonaBtn, '✓ 已载入');
+      setStatus(`已载入「${fresh.name}」，并提取 ${pts.length} 条可勾选保留项`);
     }).catch(() => {});
   }, { signal });
 
-  lockCoreBtn.addEventListener('click', () => {
+  extractPointsBtn.addEventListener('click', () => {
     const src = existingDraftInput.value.trim() || draftTextarea.value.trim();
-    const { core } = splitCoreAndShell(src);
-    lockedCoreInput.value = core || src;
-    setStatus(core ? '已提取并锁定人物本体核' : '未检测到本体核标题，已填入全文供参考');
+    if (!src) {
+      setStatus('请先载入人设或粘贴旧人设文本再提取', 'warn');
+      return;
+    }
+    const pts = populateExtractedPointsFromText(src, { defaultMode: 'smart', scrollToBox: true });
+    flashButtonFeedback(extractPointsBtn, `✓ 已提取 ${pts.length} 条`);
+    setStatus(pts.length ? `已提取 ${pts.length} 条设定供勾选保留` : '文本较短，可直接勾选或改写');
+  }, { signal });
+
+  pointsSelectAllBtn.addEventListener('click', () => {
+    state.selectedPointIds = new Set((state.extractedPoints || []).map((p) => p.id));
+    renderExtractedPoints();
+    setStatus('已全选全部原人设条目');
+  }, { signal });
+
+  pointsSelectCoreBtn.addEventListener('click', () => {
+    state.selectedPointIds = new Set(
+      (state.extractedPoints || []).filter((p) => p.keepByDefault).map((p) => p.id)
+    );
+    renderExtractedPoints();
+    setStatus('已勾选外貌、性格与习惯条目（排除当前身份）');
+  }, { signal });
+
+  pointsClearBtn.addEventListener('click', () => {
+    state.selectedPointIds.clear();
+    renderExtractedPoints();
+    setStatus('已清空勾选保留项');
   }, { signal });
 
   flattenBtn.addEventListener('click', () => {
     const flattened = normalizeFlatLayout(draftTextarea.value);
     setDraftValue(flattened, { recordHistory: true });
-    setStatus('已完成扁平化排版整理');
+    flashButtonFeedback(flattenBtn, '✓ 已清理');
+    setStatus('已清理多余缩进与格式标签');
   }, { signal });
 
   draftTextarea.addEventListener('input', () => {
@@ -2644,22 +3022,30 @@ export function createStudioUI(options = {}) {
   // Footer controls
   undoBtn.addEventListener('click', () => {
     setDraftValue(draftHistory.undo(), { recordHistory: false });
+    setStatus('已撤销上一步修改');
   }, { signal });
   redoBtn.addEventListener('click', () => {
     setDraftValue(draftHistory.redo(), { recordHistory: false });
+    setStatus('已重做修改');
   }, { signal });
   copyBtn.addEventListener('click', () => {
     win?.navigator?.clipboard?.writeText?.(draftTextarea.value || '').catch(() => {});
+    flashButtonFeedback(copyBtn, '✓ 已复制');
     setStatus('已复制当前人设正文');
   }, { signal });
-  exportPresetBtn.addEventListener('click', () => exportNativePresetNow(), { signal });
+  exportPresetBtn.addEventListener('click', () => {
+    exportNativePresetNow();
+    flashButtonFeedback(exportPresetBtn, '✓ 已导出');
+  }, { signal });
   footerSaveBtn.addEventListener('click', () => saveCurrentPersona('overwrite'), { signal });
 
   // Tab 2 controls
   stackSchemeSelect.addEventListener('change', () => {
     settings.activeSchemeId = stackSchemeSelect.value;
     renderStackTab();
+    syncDraftRelatedViews();
     persistSettings();
+    setStatus(`已切换编辑方案：${getActiveScheme(settings)?.name || ''}`);
   }, { signal });
 
   schemeSaveAsBtn.addEventListener('click', () => {
@@ -2669,6 +3055,7 @@ export function createStudioUI(options = {}) {
       schemeNameInput.value = '';
       renderStackTab();
       persistSettings();
+      flashButtonFeedback(schemeSaveAsBtn, '✓ 已另存');
       setStatus(`已另存方案：${getActiveScheme(settings)?.name}`);
     } catch (err) {
       setStatus(err.message, 'warn');
@@ -2703,8 +3090,8 @@ export function createStudioUI(options = {}) {
     const active = getActiveScheme(settings);
     if (!active) return;
     active.tailMode = tailModeSelect.value;
-    popoverTailSelect.value = active.tailMode;
     persistSettings();
+    setStatus('已更新收尾兼容策略');
   }, { signal });
 
   prefillInput.addEventListener('change', () => {
@@ -2778,17 +3165,31 @@ export function createStudioUI(options = {}) {
   addStackEntryBtn.addEventListener('click', () => {
     const active = getActiveScheme(settings);
     if (!active) return;
+    const hadFilter = Boolean(state.stackSearchQuery.trim());
+    if (hadFilter) {
+      state.stackSearchQuery = '';
+      stackSearchInput.value = '';
+    }
     const nextScheme = addCustomStackEntry(active, {
       name: '自定义补充规则',
       role: 'system',
       slotType: 'custom',
-      content: '在此填写补充写作要求或人物细节规则。',
+      content: '在此填写你想补充的写作要求或人物细节规则。',
     });
     settings.schemes = settings.schemes.map((s) => (s.id === active.id ? nextScheme : s));
     const added = nextScheme.entries[nextScheme.entries.length - 1];
-    if (added) state.expandedEntryIds.add(added.id);
+    if (added) {
+      state.expandedEntryIds.add(added.id);
+      state.justAddedEntryId = added.id;
+    }
     renderStackTab();
     persistSettings();
+    flashButtonFeedback(addStackEntryBtn, '✓ 已新增');
+    setStatus(
+      hadFilter
+        ? '已清空搜索遮挡，新增规则条目并自动跳转展开'
+        : '已新增规则条目并自动跳转展开'
+    );
   }, { signal });
 
   exportPresetModalBtn.addEventListener('click', () => {
@@ -2868,25 +3269,47 @@ export function createStudioUI(options = {}) {
 
   addAnchorBtn.addEventListener('click', () => {
     const val = addAnchorInput.value.trim();
-    if (!val) return;
+    if (!val) {
+      setStatus('请先输入想添加的喜好细节', 'warn');
+      return;
+    }
+    if (state.tasteSearchQuery.trim()) {
+      state.tasteSearchQuery = '';
+      tasteSearchInput.value = '';
+    }
     settings.tasteProfile.anchors = mergeTasteEntries(settings.tasteProfile.anchors, [
       { text: val, note: '手动添加' },
     ]);
+    const matched = settings.tasteProfile.anchors.find((x) => x.text === val);
+    if (matched) state.justAddedTasteId = matched.id;
     addAnchorInput.value = '';
     renderTasteTab();
     persistSettings();
+    flashButtonFeedback(addAnchorBtn, '✓ 已添加');
+    setStatus(`已添加喜好细节：${val.slice(0, 20)}`);
   }, { signal });
 
   addBannedBtn.addEventListener('click', () => {
     const val = addBannedInput.value.trim();
-    if (!val) return;
+    if (!val) {
+      setStatus('请先输入想屏蔽的禁写词句', 'warn');
+      return;
+    }
+    if (state.tasteSearchQuery.trim()) {
+      state.tasteSearchQuery = '';
+      tasteSearchInput.value = '';
+    }
     settings.tasteProfile.banned = mergeTasteEntries(settings.tasteProfile.banned, [
       { text: val, note: '手动添加' },
     ]);
+    const matched = settings.tasteProfile.banned.find((x) => x.text === val);
+    if (matched) state.justAddedTasteId = matched.id;
     addBannedInput.value = '';
     renderTasteTab();
     syncDraftRelatedViews();
     persistSettings();
+    flashButtonFeedback(addBannedBtn, '✓ 已添加');
+    setStatus(`已添加禁写词句：${val.slice(0, 20)}`);
   }, { signal });
 
   function abortPendingApiRequests() {

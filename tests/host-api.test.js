@@ -65,7 +65,7 @@ test('M1: manifest.json matches SillyTavern extension contract', () => {
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.0.0');
+  assert.equal(manifest.version, '1.1.0');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');
@@ -2454,4 +2454,96 @@ test('H15 (Tier 5 | R2): getActiveCharacterContext guards Object.prototype keys 
     skipDynamicImport: true,
   });
   assert.equal(valid?.name, '测试角色');
+});
+
+test('A25: runStudioGeneration auto-recovers when upstream rejects trailing assistant prefill and restores prefill heading', async () => {
+  const sentBatches = [];
+  const customSettings = {
+    activeSchemeId: 'manual_prefill_scheme',
+    schemes: [
+      {
+        id: 'manual_prefill_scheme',
+        name: '强制预填充测试',
+        tailMode: 'assistant_prefill',
+        maxTokens: 2048,
+        entries: [],
+      },
+    ],
+    api: {
+      provider: 'custom',
+      activeProfileId: 'p_strict',
+      profiles: [
+        {
+          id: 'p_strict',
+          name: '严格用户收尾中转',
+          baseUrl: 'https://relay.example.com/v1',
+          apiKey: 'sk-mock-strict-1111',
+          model: 'strict-model-v1',
+          maxTokens: 2048,
+          stream: false,
+        },
+      ],
+    },
+  };
+
+  let attempt = 0;
+  const res = await runStudioGeneration({
+    settings: customSettings,
+    messages: [
+      { role: 'system', content: '系统设定' },
+      { role: 'user', content: '请生成人设' },
+      { role: 'assistant', content: '【基础人设】' },
+    ],
+    deps: {
+      directFetch: async (_url, init) => {
+        attempt += 1;
+        const body = JSON.parse(init.body);
+        sentBatches.push(body.messages);
+        if (attempt === 1) {
+          return {
+            ok: false,
+            status: 400,
+            statusText: 'Bad Request',
+            text: async () => JSON.stringify({ error: { message: 'Conversation must end with a user message' } }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => 'application/json' },
+          text: async () =>
+            JSON.stringify({
+              choices: [{ message: { content: '【基础人设】\n## 外貌\n干净利落。' }, finish_reason: 'stop' }],
+            }),
+        };
+      },
+    },
+  });
+
+  assert.equal(attempt, 2);
+  assert.equal(sentBatches[0].at(-1).role, 'assistant');
+  assert.equal(sentBatches[1].at(-1).role, 'user');
+  assert.equal(res.retriedWithoutPrefill, true);
+  assert.ok(res.text.includes('【基础人设】'));
+
+  // Also verify prefill heading restoration when native prefill succeeds with continuation-only text
+  const resPrefillOk = await runStudioGeneration({
+    settings: customSettings,
+    messages: [
+      { role: 'user', content: '请生成人设' },
+      { role: 'assistant', content: '【基础人设】' },
+    ],
+    deps: {
+      directFetch: async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/json' },
+        text: async () =>
+          JSON.stringify({
+            choices: [{ message: { content: '## 外貌与印象\n短发清爽。' }, finish_reason: 'stop' }],
+          }),
+      }),
+    },
+  });
+  assert.equal(resPrefillOk.text, '【基础人设】\n## 外貌与印象\n短发清爽。');
 });

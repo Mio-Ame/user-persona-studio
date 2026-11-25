@@ -1908,3 +1908,98 @@ test('Tier 5 | R5: slash command registration respects persona-studio ownership 
   assert.equal(Object.hasOwn(commandsB, 'ups'), false);
   assert.equal(commandsB['persona-studio'], thirdPartyCmd);
 });
+
+test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, uncluttered footer & add-entry auto-scroll feedback', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800, coarse: false });
+  const capturedMessages = [];
+  const sampleOldPersona = [
+    '【基础人设】',
+    '- 黑发微卷，常戴细框眼镜。',
+    '- 偏爱安静环境与温热乌龙茶。',
+    '【当前背景与关系】',
+    '- 现担任档案馆见习整理员。',
+  ].join('\n');
+
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona }),
+      listPersonas: async () => [{ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona, isActive: true }],
+      getActiveCharacterContext: async () => null,
+      runStudioGeneration: async ({ messages }) => {
+        capturedMessages.push(messages);
+        return { text: '【基础人设】\n## 外貌\n黑发微卷。', source: 'mock' };
+      },
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 15));
+  const sr = ui.shadow;
+
+  // 1. Two-pane workbench exists & popover has NO manual prefill dropdown
+  assert.ok(sr.querySelector('.ups-workbench'));
+  assert.ok(sr.querySelector('[data-ups-pane="left"]'));
+  assert.ok(sr.querySelector('[data-ups-pane="right"]'));
+  assert.equal(sr.querySelector('[data-ups-popover-tail]'), null);
+
+  // 2. Footer uncluttered: exportPresetBtn moved out of footer into Tab 2 (presets)
+  const footer = sr.querySelector('[data-ups-footer]');
+  assert.equal(footer.querySelector('[data-ups-export-preset]'), null);
+  assert.ok(sr.querySelector('[data-ups-tab-panel="presets"]').querySelector('[data-ups-export-preset]'));
+
+  // 3. Word count selector updates active scheme & dual char/token badge
+  const wcSel = sr.querySelector('[data-ups-word-count]');
+  wcSel.value = '1000';
+  wcSel.dispatchEvent({ type: 'change', bubbles: true });
+  const activeScheme = ui.getState().settings.schemes.find((s) => s.id === ui.getState().settings.activeSchemeId);
+  assert.equal(activeScheme.targetChars, 1000);
+  assert.match(sr.querySelector('[data-ups-status]').textContent, /约 1000 字/);
+
+  // 4. Mode B loadPersona populates selectable points checklist without manual copy-paste
+  sr.querySelector('[data-ups-mode="B"]').click();
+  sr.querySelector('[data-ups-load-persona]').click();
+  const pointsBox = sr.querySelector('[data-ups-points-box]');
+  assert.equal(pointsBox.hidden, false);
+  const pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(pointCbs.length, 3);
+  // First two (appearance/habit) checked by default, 3rd (current role) unchecked by default
+  assert.equal(pointCbs[0].checked, true);
+  assert.equal(pointCbs[1].checked, true);
+  assert.equal(pointCbs[2].checked, false);
+
+  sr.querySelector('[data-ups-generate-b]').click();
+  await new Promise((r) => setTimeout(r, 20));
+  const sentText = capturedMessages[0].map((m) => m.content).join('\n');
+  assert.ok(sentText.includes('黑发微卷，常戴细框眼镜'));
+  assert.ok(sentText.includes('约 1000 字'));
+
+  // 5. Tab 2 + 新增条目 clears filter, expands, highlights (.ups-just-added), scrolls into view & updates status
+  ui.switchTab('presets');
+  const searchIn = sr.querySelector('[data-ups-stack-search]');
+  searchIn.value = '不存在的筛选词';
+  searchIn.dispatchEvent({ type: 'input', bubbles: true });
+
+  let scrolledCount = 0;
+  env.doc.createElement_orig = env.doc.createElement;
+  const origCreate = env.doc.createElement.bind(env.doc);
+  env.doc.createElement = (tag) => {
+    const el = origCreate(tag);
+    el.scrollIntoView = () => {
+      scrolledCount += 1;
+    };
+    return el;
+  };
+
+  sr.querySelector('[data-ups-add-entry]').click();
+  assert.equal(searchIn.value, '');
+  assert.ok(scrolledCount >= 1);
+  const addedCard = sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-entry-card').at(-1);
+  assert.equal(addedCard.classList.contains('ups-just-added'), true);
+  assert.ok(addedCard.querySelector('.ups-entry-editor'));
+  assert.match(sr.querySelector('[data-ups-status]').textContent, /新增规则条目并自动跳转展开/);
+
+  ui.destroy();
+});

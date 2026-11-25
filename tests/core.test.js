@@ -9,6 +9,7 @@ import {
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
   VISIBILITY_MARKERS,
+  WORD_COUNT_PRESETS,
   BUILTIN_USAGE_GUIDE,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
@@ -30,6 +31,11 @@ import {
   saveSchemeAs,
   renameScheme,
   deleteScheme,
+  countReadableChars,
+  computeLengthBudget,
+  applyTargetCharsToScheme,
+  inferOptimalTailMode,
+  extractPersonaPoints,
   buildGenerationMessages,
   applyTailRoleStrategy,
   exportSillyTavernPreset,
@@ -58,14 +64,17 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 // ============================================================================
 
 test('Group 1.1: presets.js exports complete structural constants and 20 original banned phrases', () => {
-  assert.equal(CORE_SECTION_HEADER, '【人物本体核（跨卡可锁）】');
-  assert.equal(SHELL_SECTION_HEADER, '【当前剧场壳（随卡可换）】');
+  assert.equal(CORE_SECTION_HEADER, '【基础人设】');
+  assert.equal(SHELL_SECTION_HEADER, '【当前背景与关系】');
   assert.equal(WORLDBOOK_DIVIDER, '【补充世界书条目】');
   assert.deepEqual(VISIBILITY_MARKERS, [
-    '[外显可感知]',
-    '[既有共识 / 开场起点]',
-    '[未公开私事 / 旁人无从知晓]',
+    '[外表可见]',
+    '[开场已知]',
+    '[私密未公开]',
   ]);
+  assert.equal(CORE_SECTION_HEADER.includes('本体核'), false);
+  assert.equal(SHELL_SECTION_HEADER.includes('剧场壳'), false);
+  assert.ok(WORD_COUNT_PRESETS.length >= 5);
   assert.ok(BUILTIN_USAGE_GUIDE.includes('SillyTavern'));
   assert.equal(DEFAULT_BANNED_PHRASES.length, 20);
   const trimmedUnique = new Set(DEFAULT_BANNED_PHRASES.map((p) => p.trim()).filter(Boolean));
@@ -88,13 +97,15 @@ test('Group 1.2: QUALITATIVE_LABEL_PATTERNS has 16 detectors matching their own 
 test('Group 1.3: BUILTIN_PRESET_SCHEMES defines longform_coact & player_controlled with 7 modular slots', () => {
   const { longform_coact, player_controlled } = BUILTIN_PRESET_SCHEMES;
   assert.equal(longform_coact.style, 'longform');
-  assert.deepEqual(longform_coact.targetTokens, { min: 1500, max: 2800 });
+  assert.equal(longform_coact.targetChars, 1500);
+  assert.deepEqual(longform_coact.targetTokens, { min: 1780, max: 2270 });
   assert.equal(player_controlled.style, 'objective');
-  assert.deepEqual(player_controlled.targetTokens, { min: 600, max: 1000 });
+  assert.equal(player_controlled.targetChars, 600);
+  assert.deepEqual(player_controlled.targetTokens, { min: 720, max: 900 });
 
   const requiredSlots = ['role', 'context', 'craft', 'taste', 'banned', 'pacing', 'format'];
   for (const scheme of [longform_coact, player_controlled]) {
-    assert.equal(scheme.tailMode, 'user');
+    assert.equal(scheme.tailMode, 'auto');
     assert.ok(scheme.prefillText.length > 0);
     assert.ok(scheme.triggerText.length > 0);
     assert.equal(scheme.entries.length, 7);
@@ -105,6 +116,7 @@ test('Group 1.3: BUILTIN_PRESET_SCHEMES defines longform_coact & player_controll
     const joined = scheme.entries.map((e) => e.content).join('\n');
     assert.ok(joined.includes(CORE_SECTION_HEADER));
     assert.ok(joined.includes(SHELL_SECTION_HEADER));
+    assert.equal(joined.includes('人物本体核'), false);
     for (const marker of VISIBILITY_MARKERS) {
       assert.ok(joined.includes(marker), `${scheme.id} missing marker ${marker}`);
     }
@@ -150,7 +162,7 @@ test('Group 2.1: createDefaultSettings returns valid deep-isolated defaults', ()
   assert.equal(s1.schemes.length, 2);
   assert.equal(s1.tasteProfile.useBuiltinBanned, true);
   assert.equal(s1.api.provider, 'host');
-  assert.equal(s1.ui.geometry.width, 820);
+  assert.equal(s1.ui.geometry.width, 1040);
 
   s1.schemes[0].entries[0].content = 'changed';
   assert.notEqual(s2.schemes[0].entries[0].content, 'changed');
@@ -208,12 +220,12 @@ test('Group 2.2: Stack entry CRUD (clone, toggle, move, update, add, remove) is 
 test('Group 2.3: Scheme CRUD (saveSchemeAs, renameScheme, deleteScheme) enforces invariants', () => {
   const s0 = createDefaultSettings();
   assert.throws(() => saveSchemeAs(s0, 'longform_coact', '   '), /方案名称不能为空/);
-  assert.throws(() => saveSchemeAs(s0, 'longform_coact', '长文代演主力方案'), /方案名称已存在/);
+  assert.throws(() => saveSchemeAs(s0, 'longform_coact', '细致代演方案'), /方案名称已存在/);
 
-  const s1 = saveSchemeAs(s0, 'longform_coact', '长文代演主力方案', { autoSuffix: true });
+  const s1 = saveSchemeAs(s0, 'longform_coact', '细致代演方案', { autoSuffix: true });
   assert.equal(s1.schemes.length, 3);
   const customScheme = s1.schemes[2];
-  assert.equal(customScheme.name, '长文代演主力方案 (2)');
+  assert.equal(customScheme.name, '细致代演方案 (2)');
   assert.equal(customScheme.builtin, false);
   assert.equal(s1.activeSchemeId, customScheme.id);
 
@@ -313,7 +325,7 @@ test('Group 3.2: buildGenerationMessages supports Mode B aliases, useBuiltinBann
     targetSection: '当前身份',
     charContext: { name: '林栖', scenario: '冬夜山间气象站' },
   });
-  assert.ok(r2.assembledPromptText.includes('锁死'));
+  assert.ok(r2.assembledPromptText.includes('严格保留'));
   assert.ok(r2.assembledPromptText.includes('局部重生成目标小节'));
   assert.ok(r2.assembledPromptText.includes('当前身份'));
 });
@@ -471,7 +483,7 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
 
   const schemePrefill = cloneScheme(BUILTIN_PRESET_SCHEMES.longform_coact, {
     tailMode: 'assistant_prefill',
-    prefillText: '【人物本体核（跨卡可锁）】\n   ',
+    prefillText: `${CORE_SECTION_HEADER}\n   `,
   });
   const expPrefill = exportSillyTavernPreset({ scheme: schemePrefill });
   // Keep top-level assistant_prefill empty so ST Claude connections do not duplicate ups_tail_prefill
@@ -999,7 +1011,7 @@ test('Group 8.7: sanitizeScheme & cloneScheme boundary hardening', () => {
     targetTokens: { min: 3000, max: 600 },
     entries: [{ id: 'custom_1', name: '覆盖条目', role: 'invalid_role', content: '新条目正文' }],
   });
-  assert.equal(cloned.name, '长文代演主力方案 (副本)');
+  assert.equal(cloned.name, '细致代演方案 (副本)');
   assert.equal(cloned.temperature, 2);
   assert.equal(cloned.maxTokens, 256);
   assert.equal(cloned.targetTokens.min, 3000);
@@ -1065,4 +1077,82 @@ test('Group 9.3 (Tier 5 | R2): saveSchemeAs rejects Object.prototype keys in dic
       (err) => err.message.includes('未找到可另存的源方案')
     );
   }
+});
+
+// ============================================================================
+// Group 10: Word Count Sync, Auto Model Tail Adaptation & Persona Point Extractor
+// ============================================================================
+
+test('Group 10.1: computeLengthBudget, applyTargetCharsToScheme & countReadableChars sync narrow budgets into prompts', () => {
+  assert.equal(countReadableChars('  你好 世界\n123  '), 7);
+  const b1000 = computeLengthBudget(1000);
+  assert.equal(b1000.chars, 1000);
+  assert.equal(b1000.charsMin, 880);
+  assert.equal(b1000.charsMax, 1120);
+  assert.ok(b1000.tokensMin >= 1150 && b1000.tokensMax <= 1550);
+
+  const updatedScheme = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.longform_coact, 1000);
+  assert.equal(updatedScheme.targetChars, 1000);
+  assert.equal(updatedScheme.targetTokens.min, b1000.tokensMin);
+  assert.equal(updatedScheme.targetTokens.max, b1000.tokensMax);
+
+  const built = buildGenerationMessages({
+    mode: 'create',
+    scheme: updatedScheme,
+    inspiration: '钟表铺学徒',
+  });
+  assert.ok(built.assembledPromptText.includes('约 1000 字'));
+  assert.ok(built.assembledPromptText.includes('880～1120 汉字'));
+});
+
+test('Group 10.2: inferOptimalTailMode & applyTailRoleStrategy auto-adapt to Claude, Gemini, GPT & thinking models', () => {
+  assert.equal(inferOptimalTailMode({ model: 'claude-3-7-sonnet-20250219', source: 'claude' }), 'assistant_prefill');
+  assert.equal(inferOptimalTailMode({ model: 'claude-3-7-sonnet-thinking', source: 'claude' }), 'user');
+  assert.equal(inferOptimalTailMode({ model: 'gemini-2.5-pro', source: 'makersuite' }), 'user');
+  assert.equal(inferOptimalTailMode({ model: 'gpt-4o', source: 'openai' }), 'user');
+  assert.equal(inferOptimalTailMode({ model: 'deepseek-reasoner', source: 'deepseek' }), 'user');
+  assert.equal(inferOptimalTailMode({}), 'user');
+
+  const msgs = [
+    { role: 'system', content: '规则' },
+    { role: 'user', content: '生成请求' },
+  ];
+  const autoClaude = applyTailRoleStrategy(msgs, {
+    tailMode: 'auto',
+    prefillText: '【基础人设】\n',
+    modelHint: { model: 'claude-sonnet-4', baseUrl: 'https://api.anthropic.com/v1' },
+  });
+  assert.equal(autoClaude.at(-1).role, 'assistant');
+  assert.equal(autoClaude.at(-1).content, '【基础人设】');
+
+  const autoGemini = applyTailRoleStrategy(msgs, {
+    tailMode: 'auto',
+    prefillText: '【基础人设】\n',
+    modelHint: { model: 'gemini-2.5-flash' },
+  });
+  assert.equal(autoGemini.at(-1).role, 'user');
+});
+
+test('Group 10.3: extractPersonaPoints extracts categorized selectable points without manual copy-paste', () => {
+  const samplePersona = [
+    '【基础人设】',
+    '## 外貌与印象 [外表可见]',
+    '- 黑发微卷，左眼下方有一颗浅褐色小痣。',
+    '- 说话语速偏慢，冬天习惯戴针织手套。',
+    '## 喜好与习惯',
+    '偏好热茶与清淡汤面，讨厌烟味和刺耳鸣笛。',
+    '',
+    '【当前背景与关系】',
+    '- 现居港城，担任气象台夜班记录员，与值班长共事半年。',
+  ].join('\n');
+
+  const pts = extractPersonaPoints(samplePersona);
+  assert.equal(pts.length, 4);
+  assert.equal(pts[0].category, '外貌与印象');
+  assert.equal(pts[0].keepByDefault, true);
+  assert.equal(pts[0].text.includes('[外表可见]'), false);
+  assert.equal(pts[2].category, '习惯与喜好');
+  assert.equal(pts[2].keepByDefault, true);
+  assert.equal(pts[3].category, '当前身份与关系');
+  assert.equal(pts[3].keepByDefault, false);
 });

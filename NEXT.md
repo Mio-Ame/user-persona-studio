@@ -1,27 +1,25 @@
 # NEXT — user-persona-studio 交接文档
 
 ## 1. 当前目标与范围
-- 项目目标：独立可发布的 SillyTavern / TauriTavern 扩展「客制化成长型 User 人设工坊」，提供新建直出与旧人设重构双引擎、模块化预设条目栈、末尾消息角色/预填充策略、个人审美成长库、酒馆原生预设导出、自定义多方案 API 以及四态自适应非阻塞悬浮工作窗。
-- 当前状态：核心引擎、宿主与传输适配层、Shadow DOM 四态交互界面、96 项单元测试、157 项 Tiers 1–4 E2E、Chrome/Edge 四态浏览器 CDP 实测、Tier 5 对抗加固及静态原创性/安全审计均已全部通过；独立 Git 仓库已初始化于 `dev` 分支并完成首次提交，进入真机冒烟验收阶段。
+- 项目目标：独立可公开发布的 SillyTavern / TauriTavern 扩展「客制化成长型 User 人设工坊」，提供左右双栏对照工作台、新建与旧人设改写双引擎、原人设一键勾选保留（免手动粘贴）、用户自选目标字数自动同步预设、模型收尾全自动适配与失败自愈重试、个人偏好词库、酒馆原生预设导出及自定义多方案 API。
+- 当前状态：已根据首轮真机实测 7 项反馈完成全面迭代（双栏免滚动对照、全界面去黑话小白化、窄区间目标字数自选与字数/Token 双显、原人设可勾选保留条目、底栏精简并将导出预设归位至「生成规则」页签、模型自动收尾适配免勾选预填充、新增条目自动展开滚动定位高亮），全量单测与四态 CDP 验证通过并推送 `origin/dev`。
 
 ## 2. 已完成与改动文件
-- `manifest.json` / `package.json` / `.gitignore`：插件元数据、`node --test` 运行配置与仓库忽略规则。
-- `src/presets.js` / `src/core.js`：原创内置流派方案、20 条初始套话禁词、16 类定性标签检测、Mode A/B 组装、末尾角色策略、原生 ST 预设导出、双层拆分、Diff 与局部重生成、审美库去重、自定义 API 校验与 SSE 解析。
-- `src/host.js` / `src/api.js`：SillyTavern / TauriTavern 原生人设读写与头像上传、世界书写入与绑定、`ups:persona-saved` 事件派发、宿主生成与自定义 API 请求转发、密钥脱敏。
-- `style.css` / `src/styles.js` / `src/ui.js` / `index.js`：宿主入口样式、6 套不透明配色、Shadow DOM 四态响应式工作窗（`pointer-events: none` 外层、冒泡拦截防误关抽屉、拖动缩放、挂起胶囊、小窗对照、4 页签全流程绑定）、斜杠命令 `/ups` 与生命周期清理。
-- `tests/core.test.js` / `tests/host-api.test.js` / `tests/ui-entry.test.js`：`node --test` 单元测试 96/96 全部通过；Tiers 1–4 E2E 157/157、Chrome/Edge 四态浏览器 CDP 与 Tier 5 对抗加固全部通过；静态原创性与安全审计 0 违规。
-- `README.md` / `NEXT.md`：用户说明文档与交接文档。
+- `src/presets.js` / `src/core.js`：改用直观的 `【基础人设】` + `【当前背景与关系】` 与 `[外表可见]` / `[开场已知]` / `[私密未公开]`（同时兼容旧标题与标记），新增 `WORD_COUNT_PRESETS`、`countReadableChars`、`computeLengthBudget`、`applyTargetCharsToScheme`、`inferOptimalTailMode`、`extractPersonaPoints`。
+- `src/api.js`：接入 `inferOptimalTailMode` 模型自动收尾适配 + 上游 400/422 角色限制自动降级重试 + 预填充标题缺失自动补回。
+- `src/styles.js` / `src/ui.js`：升级桌面 `1040×680` 左右双栏工作台（窄屏带「上下同屏 / 只看要求 / 只看结果」切换）、目标字数下拉与自定义字数同步、原人设一键提取勾选框、底栏精简（导出预设移入第 2 页签）、移除用户侧预填充困扰、新增条目/规则自动清除遮挡并滚动定位脉冲高亮 + 按钮瞬时反馈。
+- `tests/core.test.js` / `tests/host-api.test.js` / `tests/ui-entry.test.js`：覆盖全部原有及新增特性的 `node --test` 单元测试。
+- `README.md` / `NEXT.md`：同步更新功能说明与交接状态。
 
 ## 3. 绝对不能碰的红线/已确认偏好
-- 100% 原创与脱敏：严禁引入任何第三方插件、预设、主题、作者名或真实角色卡内容；严禁出现本地文件系统路径或示例密钥；严禁提供外部预设导入或转换功能。
-- 严格 XSS 防护：`.js` 文件禁止使用非空 `.innerHTML`、`.outerHTML`、`.insertAdjacentHTML`、`document.write`、`eval`、`new Function` 或内联事件属性。
-- 体验底线：保持顶栏、页签栏与底栏常驻固定（切页/搜索/展开不跳动）；不透明实底配色；外层容器不阻塞底层聊天滚动与点击；冒泡阻断防止误关未钉住抽屉；全部输入框禁用 `spellcheck`；移动端打开禁止自动聚焦弹软键盘。
-- 宿主兼容：SillyTavern `eventSource` 仅提供 `removeListener`，清理监听器时优先调用 `removeListener` 再回退 `off`。
+- 100% 原创与脱敏：严禁引入第三方插件/预设/作者名或本地角色卡内容；严禁外部预设导入转换。
+- 文案说人话：禁用“人物本体核 / 当前剧场壳”等自造黑话；不把模型预填充等底层概念甩给普通用户勾选。
+- 操作即时可见反馈：新增条目、添加偏好、复制、载入、整理等动作必须自动展开定位高亮或给出明确按钮/状态反馈，绝不静默无感。
+- 体验与安全底线：`.js` 严禁 `innerHTML` 等 XSS 风险点；顶栏、页签栏与底栏常驻固定零跳动；外层透明不阻塞底层，窗口冒泡阻断防误关未钉住抽屉；移动端禁自动 `.focus()`。
 
 ## 4. 已知坑与未解决阻塞
-- 独立 Git 仓库已关联公开远程仓库 `https://github.com/Mio-Ame/user-persona-studio` 并推送 `dev` 分支，临时验证产物已清理。
-- 真实 SillyTavern / TauriTavern 宿主环境（含 iOS WKWebView）下的在线生成、原生预设导出导入及真机排版表现，尚待通过 `dev` 分支完成真机冒烟实测确认。
+- 独立仓库已推送至 `https://github.com/Mio-Ame/user-persona-studio`（`dev` 分支），待用户在酒馆拉取更新做第二轮真机体验确认。
 
 ## 5. 下一步最小动作
-1. 在真实 SillyTavern / TauriTavern（覆盖桌面端与 iOS WKWebView）通过 `https://github.com/Mio-Ame/user-persona-studio`（`dev` 分支）拉取安装，完成 Mode A/B 生成、旧人设重构、双层世界书绑定、原生预设导出、自定义 API 连通与 `ups:persona-saved` 事件联动冒烟实测。
-2. 真机实测确认无误后，将 `dev` 分支合并推送至 `main` 正式版。
+1. 用户在酒馆扩展面板点击更新（`dev` 分支）验证双栏布局、字数选择、原人设勾选提取与新增条目自动定位体验。
+2. 确认满意后将 `dev` 合并至 `main` 正式版。

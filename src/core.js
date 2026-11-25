@@ -6,6 +6,7 @@ import {
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
   VISIBILITY_MARKERS,
+  WORD_COUNT_PRESETS,
   BUILTIN_USAGE_GUIDE,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
@@ -17,13 +18,14 @@ export {
   SHELL_SECTION_HEADER,
   WORLDBOOK_DIVIDER,
   VISIBILITY_MARKERS,
+  WORD_COUNT_PRESETS,
   BUILTIN_USAGE_GUIDE,
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   BUILTIN_PRESET_SCHEMES,
 };
 
-export const DEFAULT_PREFILL = `${CORE_SECTION_HEADER}\n## 基础档案\n-`;
+export const DEFAULT_PREFILL = `${CORE_SECTION_HEADER}\n## 外貌与日常印象\n-`;
 export const DEFAULT_TRIGGER = '请直接按以上要求输出完整结果，不要寒暄或附加解释。';
 
 export const ST_SENSITIVE_FIELDS = Object.freeze([
@@ -51,7 +53,7 @@ const VALID_SLOT_TYPES = new Set([
   'format',
   'custom',
 ]);
-const VALID_TAIL_MODES = new Set(['user', 'assistant_prefill', 'prefill_plus_user']);
+const VALID_TAIL_MODES = new Set(['auto', 'user', 'assistant_prefill', 'prefill_plus_user']);
 const VALID_PALETTES = new Set(['paper', 'ink', 'warm', 'sakura', 'glass-dark', 'host']);
 const VALID_COLOR_MODES = new Set(['auto', 'light', 'dark']);
 
@@ -106,8 +108,42 @@ function validSlotType(slotType, fallback = 'custom') {
   return VALID_SLOT_TYPES.has(slotType) ? slotType : fallback;
 }
 
-function validTailMode(tailMode, fallback = 'user') {
+function validTailMode(tailMode, fallback = 'auto') {
   return VALID_TAIL_MODES.has(tailMode) ? tailMode : fallback;
+}
+
+export function countReadableChars(text) {
+  const str = String(text ?? '');
+  if (!str.trim()) return 0;
+  return str.replace(/\s+/g, '').length;
+}
+
+export function computeLengthBudget(targetChars) {
+  const chars = clampInt(targetChars, 200, 12000, 1500);
+  const charsMin = Math.max(150, Math.round((chars * 0.88) / 10) * 10);
+  const charsMax = Math.max(charsMin + 40, Math.round((chars * 1.12) / 10) * 10);
+  const tokensApprox = Math.max(1, Math.round(chars * 1.35));
+  const tokensMin = Math.max(100, Math.round((charsMin * 1.35) / 10) * 10);
+  const tokensMax = Math.max(tokensMin + 40, Math.round((charsMax * 1.35) / 10) * 10);
+  const recommendedMaxTokens = clampInt(Math.max(1024, Math.round(tokensMax * 1.45)), 512, 32768, 3300);
+  return {
+    chars,
+    charsMin,
+    charsMax,
+    tokensApprox,
+    tokensMin,
+    tokensMax,
+    recommendedMaxTokens,
+  };
+}
+
+export function applyTargetCharsToScheme(scheme, targetChars) {
+  const next = sanitizeScheme(scheme);
+  const budget = computeLengthBudget(targetChars);
+  next.targetChars = budget.chars;
+  next.targetTokens = { min: budget.tokensMin, max: budget.tokensMax };
+  next.maxTokens = budget.recommendedMaxTokens;
+  return next;
 }
 
 function extractEntryText(item) {
@@ -136,7 +172,8 @@ function sanitizeSchemeEntry(entry, index = 0) {
 function sanitizeScheme(scheme, fallbackIndex = 0) {
   const raw = scheme && typeof scheme === 'object' ? scheme : {};
   const style = raw.style === 'objective' ? 'objective' : 'longform';
-  const defaultTokens = style === 'objective' ? { min: 600, max: 1000 } : { min: 1500, max: 2800 };
+  const defaultChars = style === 'objective' ? 600 : 1500;
+  const defaultBudget = computeLengthBudget(defaultChars);
   const rawEntries = Array.isArray(raw.entries) ? raw.entries : [];
   const seenIds = new Set();
   const entries = rawEntries.map((item, idx) => {
@@ -148,11 +185,37 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     return clean;
   });
 
-  const minTokens = clampInt(raw.targetTokens?.min, 100, 16000, defaultTokens.min);
-  const maxTokens = Math.max(
-    minTokens,
-    clampInt(raw.targetTokens?.max, 200, 32000, defaultTokens.max)
+  const hasExplicitChars =
+    raw.targetChars !== undefined &&
+    raw.targetChars !== null &&
+    String(raw.targetChars).trim() !== '' &&
+    Number.isFinite(Number(raw.targetChars));
+  const hasExplicitTokens = Boolean(
+    raw.targetTokens &&
+      typeof raw.targetTokens === 'object' &&
+      (Number.isFinite(Number(raw.targetTokens.min)) || Number.isFinite(Number(raw.targetTokens.max)))
   );
+
+  let targetChars = hasExplicitChars
+    ? clampInt(raw.targetChars, 200, 12000, defaultChars)
+    : defaultChars;
+  const charBudget = computeLengthBudget(targetChars);
+
+  let minTokens;
+  let maxTokens;
+  if (hasExplicitTokens) {
+    minTokens = clampInt(raw.targetTokens?.min, 100, 16000, charBudget.tokensMin);
+    maxTokens = Math.max(
+      minTokens,
+      clampInt(raw.targetTokens?.max, 200, 32000, charBudget.tokensMax)
+    );
+    if (!hasExplicitChars) {
+      targetChars = clampInt(Math.round((minTokens + maxTokens) / 2 / 1.35 / 10) * 10, 200, 12000, defaultChars);
+    }
+  } else {
+    minTokens = charBudget.tokensMin;
+    maxTokens = charBudget.tokensMax;
+  }
 
   return {
     id: String(raw.id || '').trim() || generateId(`scheme_${fallbackIndex}`),
@@ -160,15 +223,16 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     style,
     builtin: Boolean(raw.builtin),
     description: String(raw.description ?? ''),
+    targetChars,
     targetTokens: {
       min: minTokens,
       max: maxTokens,
     },
-    tailMode: validTailMode(raw.tailMode, 'user'),
+    tailMode: validTailMode(raw.tailMode, 'auto'),
     prefillText: String(raw.prefillText ?? `${CORE_SECTION_HEADER}\n`),
     triggerText: String(raw.triggerText ?? DEFAULT_TRIGGER),
     temperature: clampNumber(raw.temperature, 0, 2, 0.78),
-    maxTokens: clampInt(raw.maxTokens, 256, 32768, 3200),
+    maxTokens: clampInt(raw.maxTokens, 256, 32768, defaultBudget.recommendedMaxTokens),
     entries,
   };
 }
@@ -240,10 +304,10 @@ export function createDefaultSettings(overrides = {}) {
       showPersonaBtn: rawUi.showPersonaBtn !== false,
       showWandMenu: rawUi.showWandMenu !== false,
       geometry: {
-        x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? rawGeo.x : 230,
-        y: Number.isFinite(rawGeo.y) && rawGeo.y >= 0 ? rawGeo.y : 80,
-        width: clampInt(rawGeo.width, 320, 1920, 820),
-        height: clampInt(rawGeo.height, 360, 1440, 640),
+        x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? rawGeo.x : 120,
+        y: Number.isFinite(rawGeo.y) && rawGeo.y >= 0 ? rawGeo.y : 60,
+        width: clampInt(rawGeo.width, 320, 1920, 1040),
+        height: clampInt(rawGeo.height, 360, 1440, 680),
       },
       minimized: Boolean(rawUi.minimized),
       miniMode: Boolean(rawUi.miniMode),
@@ -646,9 +710,13 @@ function normalizeSubMode(subMode) {
 }
 
 function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true) {
+  const budget = computeLengthBudget(scheme.targetChars || 1500);
   let content = String(entry.content ?? '')
-    .replaceAll('{{targetMin}}', String(scheme.targetTokens?.min ?? 1500))
-    .replaceAll('{{targetMax}}', String(scheme.targetTokens?.max ?? 2800));
+    .replaceAll('{{targetChars}}', String(budget.chars))
+    .replaceAll('{{targetCharsMin}}', String(budget.charsMin))
+    .replaceAll('{{targetCharsMax}}', String(budget.charsMax))
+    .replaceAll('{{targetMin}}', String(scheme.targetTokens?.min ?? budget.tokensMin))
+    .replaceAll('{{targetMax}}', String(scheme.targetTokens?.max ?? budget.tokensMax));
 
   const anchors = includeTaste
     ? (Array.isArray(tasteProfile?.anchors) ? tasteProfile.anchors : [])
@@ -666,15 +734,15 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
 
   if (entry.slotType === 'taste') {
     if (anchors.length > 0) {
-      content += `\n\n【个人长期偏爱特质锚点】\n${anchors.map((a) => `- ${a}`).join('\n')}`;
+      content += `\n\n【个人喜欢的细节偏好】\n${anchors.map((a) => `- ${a}`).join('\n')}`;
     }
   } else if (entry.slotType === 'banned') {
     const blocks = [];
     if (useBuiltinBanned && DEFAULT_BANNED_PHRASES.length > 0) {
-      blocks.push(`【常见人设腔禁写词库】\n${DEFAULT_BANNED_PHRASES.map((p) => `- ${p}`).join('\n')}`);
+      blocks.push(`【常见套话禁写词库】\n${DEFAULT_BANNED_PHRASES.map((p) => `- ${p}`).join('\n')}`);
     }
     if (userBanned.length > 0) {
-      blocks.push(`【个人额外拉黑写法】\n${userBanned.map((p) => `- ${p}`).join('\n')}`);
+      blocks.push(`【个人屏蔽的不爱看写法】\n${userBanned.map((p) => `- ${p}`).join('\n')}`);
     }
     if (blocks.length > 0) {
       content += `\n\n${blocks.join('\n\n')}`;
@@ -703,22 +771,49 @@ function formatCharContextBlock(charContext) {
   }
   if (lines.length === 0) return '';
   return [
-    '【当前角色卡公开舞台参考】',
-    '（仅用于对齐时代背景、基调与开场关系起点；不得抄袭角色卡私有秘密，也不要写系统说教词）',
+    '【当前角色卡公开背景参考】',
+    '（仅用于对齐时代背景、基调与开场关系；不得抄袭角色卡私有秘密，也不要写系统说教口号）',
     lines.join('\n\n'),
   ].join('\n');
 }
 
 function buildDualLayerDirective(scheme) {
   const isObjective = scheme?.style === 'objective';
-  const mainRange = isObjective ? '450–700 tokens' : '800–1200 tokens';
+  const mainRange = isObjective ? '350～550 字' : '650～950 字';
   return [
-    '【双层输出模式（已开启）】',
-    `请将主档案正文精简至约 ${mainRange} 并置于上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2–4 条按关键词触发的补充背景世界书条目，严格使用以下扁平格式：`,
+    '【长设定自动拆出世界书（已开启）】',
+    `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条按关键词触发的补充背景条目，严格使用以下格式：`,
     '[条目：条目标题]',
     '关键词：关键词1, 关键词2',
-    '内容：补充事实与触发边界说明。',
+    '内容：补充事实与触发范围说明。',
   ].join('\n');
+}
+
+export function inferOptimalTailMode(modelHint = {}) {
+  const hint = modelHint && typeof modelHint === 'object' ? modelHint : {};
+  const model = String(hint.model ?? '').trim().toLowerCase();
+  const source = String(hint.source ?? '').trim().toLowerCase();
+  const baseUrl = String(hint.baseUrl ?? '').trim().toLowerCase();
+
+  if (!model && !source && !baseUrl) {
+    return 'user';
+  }
+
+  // Reasoning / thinking models reject or break on assistant prefill
+  if (/\b(?:o1|o3|o4|qwq|r1)\b|reasoner|thinking/i.test(model)) {
+    return 'user';
+  }
+
+  // Native Anthropic Claude (non-thinking) supports clean assistant prefill
+  if (
+    model.includes('claude') &&
+    (source === 'claude' || source === 'anthropic' || baseUrl.includes('anthropic.com'))
+  ) {
+    return 'assistant_prefill';
+  }
+
+  // Gemini, OpenAI, DeepSeek, Grok, OpenRouter, and general OpenAI-compatible relays: end with user
+  return 'user';
 }
 
 export function buildGenerationMessages(options = {}) {
@@ -726,6 +821,8 @@ export function buildGenerationMessages(options = {}) {
   const scheme = sanitizeScheme(opts.scheme || BUILTIN_PRESET_SCHEMES.longform_coact);
   const { mode, subMode } = normalizeMode(opts.mode || 'create', opts.subMode);
   const tasteProfile = opts.tasteProfile && typeof opts.tasteProfile === 'object' ? opts.tasteProfile : {};
+  const effectiveTailMode =
+    scheme.tailMode === 'auto' ? inferOptimalTailMode(opts.modelHint) : scheme.tailMode;
 
   const messages = [];
   for (const entry of scheme.entries) {
@@ -745,16 +842,20 @@ export function buildGenerationMessages(options = {}) {
   const lockedCore = String(opts.lockedCore ?? '').trim();
   const targetSection = String(opts.targetSection ?? '').trim();
   const charBlock = formatCharContextBlock(opts.charContext);
+  const budget = computeLengthBudget(scheme.targetChars);
 
   if (mode === 'create') {
-    taskParts.push('【任务模式：新建直出 {{user}} 人设】');
+    taskParts.push(`【任务模式：新建 {{user}} 人设（目标约 ${budget.chars} 字）】`);
     if (inspiration) {
-      taskParts.push(`【玩家一句话灵感】\n${inspiration}`);
-    } else if (!userMustHaves) {
-      taskParts.push('【玩家灵感】\n请根据当前方案风格与舞台背景，构建一个细节扎实、逻辑自洽的 {{user}} 人物档案。');
+      taskParts.push(`【玩家想法与定位】\n${inspiration}`);
+    } else if (!userMustHaves && !lockedCore) {
+      taskParts.push('【玩家想法】\n请根据当前流派与角色卡背景，构建一个细节扎实、自然好读的 {{user}} 人设档案。');
+    }
+    if (lockedCore) {
+      taskParts.push(`【从已有人设沿用的保留设定（必须原样保留）】\n${lockedCore}`);
     }
     if (userMustHaves) {
-      taskParts.push(`【玩家必带偏好与核心要求】\n${userMustHaves}`);
+      taskParts.push(`【必须包含的设定要求】\n${userMustHaves}`);
     }
     if (charBlock) {
       taskParts.push(charBlock);
@@ -765,20 +866,20 @@ export function buildGenerationMessages(options = {}) {
     }
     const directiveMap = {
       de_label_reformat:
-        '【任务模式：无损去标签与排版重整】\n请完整保留原人设中的所有既定事实、经历细节与私人偏爱，绝不擅自删改核心设定；消除嵌套缩进与套话，把所有定性标签词改写为具体的成因、舒适基准、取舍顺序与亲疏弹性区间，并规范为两层扁平结构。',
+        '【任务模式：无损去标签与排版整理】\n请完整保留原人设中的所有既定事实、经历细节与个人喜好，绝不擅自删改；消除混乱缩进与套话，把性格标签词改写为具体的养成原因、好恶界线、遇事取舍与生熟人相处差别，并整理为清晰的上下两部分结构。',
       core_expand:
-        `【任务模式：保核扩写丰满】\n请完整保留原人设骨架与既有事实，在当前方案篇幅预算（${scheme.targetTokens.min}–${scheme.targetTokens.max} tokens）内扩充感官与舒适基准线、价值取舍优先级、生活烟火气细节与反应张力空间。`,
+        `【任务模式：扩写细节（目标约 ${budget.chars} 字，区间 ${budget.charsMin}～${budget.charsMax} 字）】\n请完整保留原人设既有事实骨架，围绕目标字数补充日常好恶界线、遇事取舍习惯、生活烟火气细节与不同关系下的相处变化。`,
       cross_card_adapt:
-        `【任务模式：旧人设跨卡合理化改编】\n请完全锁死${CORE_SECTION_HEADER}中的底色、性情成因与生活习惯不作篡改，仅结合下方当前角色卡舞台背景重写${SHELL_SECTION_HEADER}，使人物身份、职责与开场关系自然融入新故事。`,
+        `【任务模式：换卡改背景】\n请严格保留下方指定的固定人设内容（外貌、性格习惯、喜好与核心过往）不作篡改，仅结合新角色卡背景重写${SHELL_SECTION_HEADER}，让身份、职责与开场关系自然融入新故事。`,
     };
     taskParts.push(directiveMap[subMode]);
 
     if (lockedCore) {
-      taskParts.push(`【锁定的人物本体核（严禁改动）】\n${lockedCore}`);
+      taskParts.push(`【必须保留不变的设定（严禁改动）】\n${lockedCore}`);
     } else if (subMode === 'cross_card_adapt' && existingDraft) {
       const split = splitCoreAndShell(existingDraft);
       if (split.core) {
-        taskParts.push(`【提取并锁定的人物本体核（严禁改动）】\n${split.core}`);
+        taskParts.push(`【自动提取的固定保留设定（严禁改动）】\n${split.core}`);
       }
     }
 
@@ -803,7 +904,7 @@ export function buildGenerationMessages(options = {}) {
     taskParts.push(buildDualLayerDirective(scheme));
   }
 
-  if (scheme.tailMode === 'user' && scheme.triggerText && scheme.triggerText.trim()) {
+  if (effectiveTailMode === 'user' && scheme.triggerText && scheme.triggerText.trim()) {
     taskParts.push(scheme.triggerText.trim());
   }
 
@@ -813,9 +914,10 @@ export function buildGenerationMessages(options = {}) {
   });
 
   const finalMessages = applyTailRoleStrategy(messages, {
-    tailMode: scheme.tailMode,
+    tailMode: effectiveTailMode,
     prefillText: scheme.prefillText,
     triggerText: scheme.triggerText,
+    modelHint: opts.modelHint,
   });
 
   const assembledPromptText = finalMessages
@@ -831,7 +933,8 @@ export function buildGenerationMessages(options = {}) {
 
 export function applyTailRoleStrategy(messages, options = {}) {
   const opts = options && typeof options === 'object' ? options : {};
-  const tailMode = validTailMode(opts.tailMode, 'user');
+  const rawMode = validTailMode(opts.tailMode, 'auto');
+  const tailMode = rawMode === 'auto' ? inferOptimalTailMode(opts.modelHint) : rawMode;
   const rawPrefill = String(opts.prefillText ?? '').trimEnd();
   const prefill = rawPrefill || DEFAULT_PREFILL.trimEnd();
   const trigger = String(opts.triggerText ?? '').trim() || DEFAULT_TRIGGER;
@@ -1330,8 +1433,12 @@ export function lintPersonaText(text, tasteProfile = {}) {
 
   // 6. Structural headers & visibility markers (advisory only; keep issues clean for markerless factual prose)
   const hasCoreShell =
-    normalized.includes('人物本体核') && normalized.includes('当前剧场壳');
+    (normalized.includes('基础人设') && normalized.includes('当前背景')) ||
+    (normalized.includes('人物本体核') && normalized.includes('当前剧场壳'));
   const hasVisibilityMarkers =
+    normalized.includes('[外表可见]') ||
+    normalized.includes('[开场已知]') ||
+    normalized.includes('[私密未公开]') ||
     normalized.includes('[外显可感知]') ||
     normalized.includes('[既有共识') ||
     normalized.includes('[未公开私事');
@@ -1344,8 +1451,8 @@ export function lintPersonaText(text, tasteProfile = {}) {
       term: '',
       match: '',
       line: 0,
-      message: '尚未检测到信息可见性标识（如 [外显可感知]、[未公开私事 / 旁人无从知晓]）',
-      suggestion: '补充可见性标识有助于区分公开表象与未公开私事，无需写系统禁止口号。',
+      message: '尚未检测到信息标记（如 [外表可见]、[私密未公开]）',
+      suggestion: '补充标记有助于区分外表能看出的特征与未公开的心事，无需写系统禁止口号。',
     });
   }
 
@@ -1362,6 +1469,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
     stats: {
       tokens: estimateTokens(normalized),
       charCount: normalized.length,
+      readableChars: countReadableChars(normalized),
       lineCount: normalized ? lines.length : 0,
       hasCoreShell,
       hasVisibilityMarkers,
@@ -1384,9 +1492,9 @@ export function splitCoreAndShell(text) {
     const isBoxHeading = /^【[^】]+】\s*$/.test(trimmed);
     const isTopHeading = isBoxHeading || /^#{1,3}\s+/.test(trimmed);
     if (isTopHeading) {
-      if (/(?:人物本体核|本体核)/.test(trimmed)) {
+      if (/(?:基础人设|固定人设|人物本体核|本体核)/.test(trimmed)) {
         active = 'core';
-      } else if (/(?:当前剧场壳|剧场壳)/.test(trimmed)) {
+      } else if (/(?:当前背景与关系|当前身份与关系|当前背景|当前剧场壳|剧场壳)/.test(trimmed)) {
         active = 'shell';
       } else if (isBoxHeading) {
         active = 'other';
@@ -1408,6 +1516,92 @@ export function splitCoreAndShell(text) {
     shell: buckets.shell.join('\n').trim(),
     other: buckets.other.join('\n').trim(),
   };
+}
+
+function classifyPersonaPointCategory(sectionTitle, lineText) {
+  const combined = `${sectionTitle} ${lineText}`;
+  if (/(?:当前身份|当前背景|开场|与.*关系|剧场壳|阵营|职位|就职|现居)/.test(combined)) {
+    return { category: '当前身份与关系', keepByDefault: false };
+  }
+  if (/(?:外貌|体貌|身高|体型|发色|瞳色|眼|穿搭|衣着|声线|声音|外表)/.test(combined)) {
+    return { category: '外貌与印象', keepByDefault: true };
+  }
+  if (/(?:喜好|偏爱|饮食|作息|习惯|爱好|忌口|过敏|日常)/.test(combined)) {
+    return { category: '习惯与喜好', keepByDefault: true };
+  }
+  if (/(?:过往|经历|出身|家庭|童年|秘密|私事|旧事|技能|擅长)/.test(combined)) {
+    return { category: '经历与技能', keepByDefault: true };
+  }
+  return { category: '性格与底色', keepByDefault: true };
+}
+
+export function extractPersonaPoints(text, maxPoints = 24) {
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return [];
+
+  const limit = Math.max(1, Math.min(60, Math.round(Number(maxPoints) || 24)));
+  const lines = normalized.split('\n');
+  const points = [];
+  const seenKeys = new Set();
+  let currentSection = '';
+  let inWorldbook = false;
+
+  const pushPoint = (rawItem) => {
+    if (points.length >= limit) return;
+    const cleaned = String(rawItem ?? '')
+      .replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '')
+      .replace(/\[(?:外表可见|开场已知|私密未公开|外显可感知|既有共识[^\]]*|未公开私事[^\]]*)\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.length < 2) return;
+    if (/^【[^】]+】$/.test(cleaned) || /^#{1,6}\s/.test(cleaned)) return;
+    const dedupKey = normalizeTasteKey(cleaned);
+    if (!dedupKey || seenKeys.has(dedupKey)) return;
+    seenKeys.add(dedupKey);
+    const { category, keepByDefault } = classifyPersonaPointCategory(currentSection, cleaned);
+    points.push({
+      id: `pt_${points.length + 1}`,
+      category,
+      text: cleaned.length > 110 ? `${cleaned.slice(0, 108)}…` : cleaned,
+      fullText: cleaned,
+      keepByDefault,
+    });
+  };
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    if (/^(?:【补充世界书条目】|【延展背景世界书】|={3,}\s*WORLDBOOK\s*={3,})/i.test(trimmed)) {
+      inWorldbook = true;
+      continue;
+    }
+    if (inWorldbook) continue;
+
+    const boxMatch = trimmed.match(/^【([^】]+)】\s*$/);
+    const mdMatch = trimmed.match(/^#{1,4}\s+(.+?)\s*$/);
+    if (boxMatch || mdMatch) {
+      currentSection = (boxMatch?.[1] || mdMatch?.[1] || '').trim();
+      continue;
+    }
+
+    // Bullet or short key:value line -> keep as one intact point
+    const stripped = trimmed.replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '');
+    if (stripped.length <= 85 || /^[^\s:：]{1,10}[:：]/.test(stripped)) {
+      pushPoint(stripped);
+      continue;
+    }
+
+    // Long prose paragraph -> split by sentence boundaries
+    const sentences = stripped
+      .split(/(?<=[。！？；!?])\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const sentence of sentences) {
+      pushPoint(sentence);
+    }
+  }
+
+  return points;
 }
 
 export function splitDualLayerOutput(text) {

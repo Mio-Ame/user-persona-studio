@@ -5,8 +5,44 @@ import {
   normalizeBaseUrl,
   buildCustomChatPayload,
   parseChatCompletionChunkOrJson,
+  inferOptimalTailMode,
 } from './core.js';
 import { getHostContext, getHostRequestHeaders } from './host.js';
+
+const ROLE_PREFILL_ERROR_RE =
+  /last message|final message|must end with|user message|assistant message.*(?:end|final|last)|prefill|roles? must alternate|conversation must end/i;
+
+function coerceTrailingAssistantToUser(messages) {
+  const list = Array.isArray(messages) ? messages.map((m) => ({ ...m })) : [];
+  if (list.length === 0 || list[list.length - 1].role !== 'assistant') {
+    return { changed: false, messages: list };
+  }
+  while (list.length > 0 && list[list.length - 1].role === 'assistant') {
+    list.pop();
+  }
+  const trigger = '请严格按照以上规则与目标字数直接输出完整的 User 人设正文，不要附加任何寒暄或解释。';
+  if (list.length === 0 || list[list.length - 1].role !== 'user') {
+    list.push({ role: 'user', content: trigger });
+  } else if (!list[list.length - 1].content.includes('直接输出')) {
+    list[list.length - 1] = {
+      role: 'user',
+      content: `${list[list.length - 1].content}\n\n${trigger}`.trim(),
+    };
+  }
+  return { changed: true, messages: list };
+}
+
+function restorePrefillHeaderIfMissing(text, sentMessages) {
+  const out = String(text ?? '');
+  if (!out.trim() || !Array.isArray(sentMessages) || sentMessages.length === 0) return out;
+  const lastMsg = sentMessages[sentMessages.length - 1];
+  if (lastMsg?.role !== 'assistant') return out;
+  const prefill = String(lastMsg.content ?? '').trim();
+  if (!prefill) return out;
+  const trimmedOut = out.trimStart();
+  if (trimmedOut.startsWith(prefill)) return out;
+  return `${prefill}\n${trimmedOut}`;
+}
 
 function getBridge() {
   return globalThis.__UPS_HOST_BRIDGE__ && typeof globalThis.__UPS_HOST_BRIDGE__ === 'object'
@@ -896,7 +932,7 @@ export async function runStudioGeneration({
     throw new Error('消息列表不能为空');
   }
 
-  const cleanMessages = messages.map((m) => ({
+  let cleanMessages = messages.map((m) => ({
     role: String(m?.role || 'user'),
     content: String(m?.content ?? ''),
   }));
@@ -911,14 +947,70 @@ export async function runStudioGeneration({
   const { ctx, fetchFn, useDirectTransport, getHeaders } = resolveDeps(deps);
   const provider = settings?.api?.provider === 'custom' ? 'custom' : 'host';
 
+  // Auto-adapt trailing assistant prefill to active model before sending when scheme uses 'auto'
+  if (
+    (!activeScheme || !activeScheme.tailMode || activeScheme.tailMode === 'auto') &&
+    cleanMessages[cleanMessages.length - 1]?.role === 'assistant'
+  ) {
+    let model = '';
+    let source = '';
+    let baseUrl = '';
+    if (provider === 'custom') {
+      const profiles = Array.isArray(settings?.api?.profiles) ? settings.api.profiles : [];
+      const prof = profiles.find((p) => p && p.id === settings?.api?.activeProfileId) || profiles[0];
+      model = prof?.model || '';
+      baseUrl = prof?.baseUrl || '';
+      source = 'custom';
+    } else if (ctx?.chatCompletionSettings) {
+      const oai = ctx.chatCompletionSettings;
+      source = oai.chat_completion_source || '';
+      model =
+        (typeof ctx.getChatCompletionModel === 'function' ? ctx.getChatCompletionModel(oai) : '') ||
+        oai.openai_model ||
+        oai.claude_model ||
+        oai.google_model ||
+        oai.custom_model ||
+        '';
+    }
+    if (inferOptimalTailMode({ model, source, baseUrl }) === 'user') {
+      cleanMessages = coerceTrailingAssistantToUser(cleanMessages).messages;
+    }
+  }
+
   if (provider === 'host') {
-    return runHostGeneration({
-      ctx,
-      cleanMessages,
-      effectiveMaxTokens,
-      signal,
-      onChunk,
-    });
+    try {
+      const hostRes = await runHostGeneration({
+        ctx,
+        cleanMessages,
+        effectiveMaxTokens,
+        signal,
+        onChunk,
+      });
+      return {
+        ...hostRes,
+        text: restorePrefillHeaderIfMissing(hostRes.text, cleanMessages),
+      };
+    } catch (err) {
+      if (
+        !signal?.aborted &&
+        err?.code !== 'ABORTED' &&
+        cleanMessages[cleanMessages.length - 1]?.role === 'assistant' &&
+        (err?.status === 400 || err?.status === 422 || ROLE_PREFILL_ERROR_RE.test(String(err?.message || '')))
+      ) {
+        const coerced = coerceTrailingAssistantToUser(cleanMessages);
+        if (coerced.changed) {
+          const retryRes = await runHostGeneration({
+            ctx,
+            cleanMessages: coerced.messages,
+            effectiveMaxTokens,
+            signal,
+            onChunk,
+          });
+          return { ...retryRes, retriedWithoutPrefill: true };
+        }
+      }
+      throw err;
+    }
   }
 
   // Branch B: provider === 'custom'
@@ -937,81 +1029,102 @@ export async function runStudioGeneration({
 
   const profileForRequest = explicitLen ? { ...profile, maxTokens: explicitLen } : profile;
   const wantStream = Boolean(profile.stream);
-  const payload = buildCustomChatPayload(profileForRequest, cleanMessages, {
-    stream: wantStream,
-    target: useDirectTransport ? 'openai_direct' : undefined,
-  });
 
-  const linked = createLinkedAbortSignal(signal, profile.timeoutSeconds ?? 120);
-  const createLinkedSignalError = () => {
-    if (linked.isCallerAborted()) return createAbortError('已取消生成');
-    if (linked.isTimedOut()) return classifyApiError({ timedOut: true, apiKey: profile.apiKey });
-    return createAbortError('已取消生成');
+  const sendCustomOnce = async (msgs) => {
+    const payload = buildCustomChatPayload(profileForRequest, msgs, {
+      stream: wantStream,
+      target: useDirectTransport ? 'openai_direct' : undefined,
+    });
+
+    const linked = createLinkedAbortSignal(signal, profile.timeoutSeconds ?? 120);
+    const createLinkedSignalError = () => {
+      if (linked.isCallerAborted()) return createAbortError('已取消生成');
+      if (linked.isTimedOut()) return classifyApiError({ timedOut: true, apiKey: profile.apiKey });
+      return createAbortError('已取消生成');
+    };
+
+    try {
+      let res;
+      if (useDirectTransport) {
+        res = await raceWithAbortSignal(
+          fetchFn(payload.url, {
+            method: 'POST',
+            headers: payload.headers,
+            cache: 'no-cache',
+            body: JSON.stringify(payload.body),
+            signal: linked.signal,
+          }),
+          linked.signal,
+          createLinkedSignalError
+        );
+      } else {
+        const headers = await raceWithAbortSignal(
+          getHeaders(),
+          linked.signal,
+          createLinkedSignalError
+        );
+        if (linked.signal.aborted) {
+          throw createLinkedSignalError();
+        }
+        res = await raceWithAbortSignal(
+          fetchFn('/api/backends/chat-completions/generate', {
+            method: 'POST',
+            headers,
+            cache: 'no-cache',
+            body: JSON.stringify(payload),
+            signal: linked.signal,
+          }),
+          linked.signal,
+          createLinkedSignalError
+        );
+      }
+
+      const fullText = await readCompletionResponse(res, {
+        stream: wantStream,
+        onChunk,
+        apiKey: profile.apiKey,
+        linked,
+      });
+
+      if (!String(fullText ?? '').trim()) {
+        throw new Error('模型未返回有效文本内容，请检查模型名称与接口配置。');
+      }
+
+      return {
+        text: restorePrefillHeaderIfMissing(fullText, msgs),
+        source: useDirectTransport ? 'custom:direct' : 'custom:proxy',
+      };
+    } catch (err) {
+      if (err && err[UPS_CLASSIFIED_ERROR]) {
+        throw err;
+      }
+      throw classifyApiError({
+        error: err,
+        timedOut: linked.isTimedOut(),
+        callerAborted: linked.isCallerAborted(),
+        apiKey: profile.apiKey,
+      });
+    } finally {
+      linked.cleanup();
+    }
   };
 
   try {
-    let res;
-    if (useDirectTransport) {
-      res = await raceWithAbortSignal(
-        fetchFn(payload.url, {
-          method: 'POST',
-          headers: payload.headers,
-          cache: 'no-cache',
-          body: JSON.stringify(payload.body),
-          signal: linked.signal,
-        }),
-        linked.signal,
-        createLinkedSignalError
-      );
-    } else {
-      const headers = await raceWithAbortSignal(
-        getHeaders(),
-        linked.signal,
-        createLinkedSignalError
-      );
-      if (linked.signal.aborted) {
-        throw createLinkedSignalError();
-      }
-      res = await raceWithAbortSignal(
-        fetchFn('/api/backends/chat-completions/generate', {
-          method: 'POST',
-          headers,
-          cache: 'no-cache',
-          body: JSON.stringify(payload),
-          signal: linked.signal,
-        }),
-        linked.signal,
-        createLinkedSignalError
-      );
-    }
-
-    const fullText = await readCompletionResponse(res, {
-      stream: wantStream,
-      onChunk,
-      apiKey: profile.apiKey,
-      linked,
-    });
-
-    if (!String(fullText ?? '').trim()) {
-      throw new Error('模型未返回有效文本内容，请检查模型名称与接口配置。');
-    }
-
-    return {
-      text: fullText,
-      source: useDirectTransport ? 'custom:direct' : 'custom:proxy',
-    };
+    return await sendCustomOnce(cleanMessages);
   } catch (err) {
-    if (err && err[UPS_CLASSIFIED_ERROR]) {
-      throw err;
+    if (
+      !signal?.aborted &&
+      err?.code !== 'ABORTED' &&
+      cleanMessages[cleanMessages.length - 1]?.role === 'assistant' &&
+      (err?.status === 400 || err?.status === 422 || ROLE_PREFILL_ERROR_RE.test(String(err?.message || '')))
+    ) {
+      const coerced = coerceTrailingAssistantToUser(cleanMessages);
+      if (coerced.changed) {
+        const retried = await sendCustomOnce(coerced.messages);
+        return { ...retried, retriedWithoutPrefill: true };
+      }
     }
-    throw classifyApiError({
-      error: err,
-      timedOut: linked.isTimedOut(),
-      callerAborted: linked.isCallerAborted(),
-      apiKey: profile.apiKey,
-    });
-  } finally {
-    linked.cleanup();
+    throw err;
   }
 }
 
