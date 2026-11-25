@@ -713,6 +713,7 @@ export function createDefaultSettings(overrides = {}) {
       pureCrossCardReuse: Boolean(rawUi.pureCrossCardReuse),
       visibilityTags: Boolean(rawUi.visibilityTags),
       draftAudit: rawUi.draftAudit !== false,
+      debugAudit: rawUi.debugAudit === true,
       hideDraftAudit: rawUi.hideDraftAudit !== false,
       antiParrot: rawUi.antiParrot !== false,
       worldbookPosition: clampInt(rawUi.worldbookPosition, 0, 7, DEFAULT_USER_WORLDBOOK_PLACEMENT.position),
@@ -2992,11 +2993,11 @@ function formatCompanionPromptBlock(companions = [], companionPlans = null) {
       const slicedText = explicitVerbatim || extractVerbatimCompanionSlices(effectiveCardCtx, effectiveEntries, budget).text;
       if (slicedText) {
         lines.push(
-          '- 承载方式：随本次人设正文精简锚定（下方为原卡原文切片，必须原样参考、不得改写措辞或添油加醋）：\n' +
+          '- 资料存放：随本次人设正文精简锚定（下方为原卡原文切片，必须原样参考、不得改写措辞或添油加醋）：\n' +
             slicedText
         );
       } else {
-        lines.push('- 承载方式：随本次人设正文精简写入关系锚点。');
+        lines.push('- 资料存放：随本次人设正文精简写入关系锚点。');
       }
     } else {
       const compLightText = c.lightMode === 'blue_constant' ? '蓝灯常驻生效' : '绿灯按名字/关系关键词触发';

@@ -456,6 +456,27 @@ function createSvgIcon(doc, pathDefs = [], size = 15, strokeWidth = 2) {
   return svg;
 }
 
+const ICON_PATHS = Object.freeze({
+  plus: ['M12 5v14', 'M5 12h14'],
+  chevronDown: ['M6 9l6 6 6-6'],
+  chevronUp: ['M6 15l6-6 6 6'],
+  refresh: ['M20 6v5h-5', 'M19 11a7 7 0 1 0 1 4'],
+  close: ['M6 6l12 12', 'M18 6 6 18'],
+  shield: ['M12 3l7 3v5c0 4.6-2.8 8-7 10-4.2-2-7-5.4-7-10V6l7-3z'],
+});
+
+function setButtonIconLabel(doc, button, label, iconPaths = [], { iconFirst = false } = {}) {
+  if (!button) return;
+  const labelEl = createEl(doc, 'span', { className: 'ups-btn-label', text: label });
+  const iconEl = iconPaths.length > 0 ? createSvgIcon(doc, iconPaths, 14) : null;
+  button.replaceChildren(...(iconFirst && iconEl ? [iconEl, labelEl] : iconEl ? [labelEl, iconEl] : [labelEl]));
+}
+
+function setDisclosureLabel(doc, button, label, expanded) {
+  button.setAttribute('aria-expanded', String(expanded));
+  setButtonIconLabel(doc, button, label, expanded ? ICON_PATHS.chevronUp : ICON_PATHS.chevronDown);
+}
+
 // Mandatory Gate 10: zero auto .focus() when <= 680px or pointer: coarse
 function canAutoFocusDesktop(win) {
   const w = Number(win?.innerWidth || 0);
@@ -721,7 +742,7 @@ export function createStudioUI(options = {}) {
       'data-ups-window': 'true',
       role: 'dialog',
       'aria-modal': 'false',
-      'aria-label': '客制化成长型 User 人设工坊',
+      'aria-label': 'User 人设工坊',
     },
   });
 
@@ -975,6 +996,7 @@ export function createStudioUI(options = {}) {
   const draftAuditCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.draftAudit });
   const antiParrotCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.antiParrot });
   const visibilityTagsCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.visibilityTags });
+  const debugAuditCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: settings.ui.debugAudit, attrs: { 'data-ups-debug-audit': 'true' } });
   const charContextHint = createEl(doc, 'div', { className: 'ups-muted', text: '当前角色：检测中…' });
 
   const popoverEl = createEl(
@@ -998,11 +1020,15 @@ export function createStudioUI(options = {}) {
       ]),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         draftAuditCheckbox,
-        createEl(doc, 'span', { text: '成稿前先做排雷自检（自动隐藏自检草稿）' }),
+        createEl(doc, 'span', { text: '生成前自检' }),
       ]),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         antiParrotCheckbox,
         createEl(doc, 'span', { text: '含“例如/比如”示例时自动附防照抄说明' }),
+      ]),
+      createEl(doc, 'label', { className: 'ups-check-row' }, [
+        debugAuditCheckbox,
+        createEl(doc, 'span', { text: '查看自检记录' }),
       ]),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         visibilityTagsCheckbox,
@@ -1213,16 +1239,17 @@ export function createStudioUI(options = {}) {
 
   const sectionsSummaryEl = createEl(doc, 'span', {
     className: 'ups-muted',
-    text: '结构化清单版 · 已选 7 个板块',
+    text: '已选板块',
     attrs: { 'data-ups-sections-summary': 'true' },
   });
 
   const ratioToggleBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '选择板块与比重 ▾',
+    text: '选择板块与比重',
     attrs: { 'data-ups-ratio-toggle': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, ratioToggleBtn, '选择板块与比重', ICON_PATHS.chevronDown);
 
   const sectionsBarEl = createEl(
     doc,
@@ -1318,9 +1345,10 @@ export function createStudioUI(options = {}) {
   const customSectionAddBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '+ 添加板块',
+    text: '添加板块',
     attrs: { 'data-ups-custom-section-add': 'true' },
   });
+  setButtonIconLabel(doc, customSectionAddBtn, '添加板块', ICON_PATHS.plus, { iconFirst: true });
   const customSectionsListEl = createEl(doc, 'div', { className: 'ups-chip-group' });
   const pureReuseCheckbox = createEl(doc, 'input', {
     type: 'checkbox',
@@ -1372,14 +1400,16 @@ export function createStudioUI(options = {}) {
       customSectionsListEl,
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         pureReuseCheckbox,
-        createEl(doc, 'span', { text: '写成通用人设（基础人设剥离特定角色绑定，方便跨卡复用）' }),
+        createEl(doc, 'span', { text: '写成跨卡通用人设' }),
       ]),
       createEl(doc, 'div', { className: 'ups-field' }, [
-        createEl(doc, 'span', { className: 'ups-label', text: '各维度篇幅比重（私密默认 0%）' }),
+        createEl(doc, 'span', { className: 'ups-label', text: '各板块篇幅比重' }),
         ratioRowEl,
       ]),
     ]
   );
+
+  sectionsBarEl.appendChild(sectionsPanelEl);
 
   // Mode A inputs (capsule-grouped lexicon + must-have templates)
   const inspirationInput = createEl(doc, 'textarea', {
@@ -1393,16 +1423,18 @@ export function createStudioUI(options = {}) {
   const lexiconToggleBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '+ 常用词库 ▾',
+    text: '常用词库',
     attrs: { 'data-ups-lexicon-toggle': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, lexiconToggleBtn, '常用词库', ICON_PATHS.chevronDown);
 
   const toggleVibeTrayBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '+ 补充神韵词 ▾',
+    text: '补充神韵词',
     attrs: { 'data-ups-toggle-vibe-tray': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, toggleVibeTrayBtn, '补充神韵词', ICON_PATHS.chevronDown);
 
   const lexiconAllChips = [];
   const syncLexiconPickedChips = () => {
@@ -1548,9 +1580,10 @@ export function createStudioUI(options = {}) {
   const toggleMustTrayBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '+ 常用模板 ▾',
+    text: '常用模板',
     attrs: { 'data-ups-toggle-must-tray': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, toggleMustTrayBtn, '常用模板', ICON_PATHS.chevronDown);
   const saveMustTplBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
@@ -1653,6 +1686,20 @@ export function createStudioUI(options = {}) {
     placeholder: '点击上方“载入人设”读取酒馆当前人设，或直接粘贴旧人设文本……',
     attrs: { 'data-ups-existing-draft': 'true' },
   });
+  const lockSelectionBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-sm', hidden: true, text: '保留选中原句', attrs: { 'data-ups-lock-selection': 'true' } });
+  const selectedOldText = () => existingDraftInput.value.slice(existingDraftInput.selectionStart, existingDraftInput.selectionEnd);
+  for (const event of ['select', 'input', 'mouseup', 'keyup', 'touchend']) {
+    existingDraftInput.addEventListener(event, () => { lockSelectionBtn.hidden = !selectedOldText().trim(); }, { signal });
+  }
+  lockSelectionBtn.addEventListener('click', () => {
+    const phrase = selectedOldText();
+    if (!phrase.trim()) return;
+    if (!`\n${lockedCoreInput.value}\n`.includes(`\n${phrase}\n`)) {
+      lockedCoreInput.value += (lockedCoreInput.value ? '\n' : '') + phrase;
+    }
+    lockedCoreInput.parentElement.open = true;
+    setStatus('已保留原句', 'ok');
+  }, { signal });
   const lockedCoreInput = createEl(doc, 'textarea', {
     className: 'ups-textarea',
     rows: 2,
@@ -1698,6 +1745,7 @@ export function createStudioUI(options = {}) {
       createEl(doc, 'div', { className: 'ups-field' }, [
         createEl(doc, 'label', { className: 'ups-label', text: '旧人设原稿' }),
         existingDraftInput,
+        lockSelectionBtn,
       ]),
       createEl(doc, 'div', { className: 'ups-field' }, [
         createEl(doc, 'label', { className: 'ups-label', text: '补充改写要求' }),
@@ -1730,6 +1778,7 @@ export function createStudioUI(options = {}) {
     title: '关闭原人设勾选面板并不再沿用勾选条目',
     attrs: { 'data-ups-points-close': 'true' },
   });
+  const pointsNavEl = createEl(doc, 'nav', { className: 'ups-chip-group', attrs: { 'aria-label': '旧人设分组' } });
   const pointsListEl = createEl(doc, 'div', { className: 'ups-points-list' });
   const extractedPointsBox = createEl(
     doc,
@@ -1753,7 +1802,7 @@ export function createStudioUI(options = {}) {
         createEl(doc, 'span', { className: 'ups-chip-label', text: '选择原人设：' }),
         pointsPersonaSelect,
       ]),
-      pointsListEl,
+      pointsNavEl, pointsListEl,
     ]
   );
 
@@ -1921,6 +1970,7 @@ export function createStudioUI(options = {}) {
     ]
   );
 
+  const openDiffBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-sm', text: '修改对比', hidden: true, attrs: { 'data-ups-open-diff': 'true' } });
   const diffViewEl = createEl(doc, 'div', {
     className: 'ups-diff-box',
     hidden: true,
@@ -2039,7 +2089,7 @@ export function createStudioUI(options = {}) {
     type: 'text',
     className: 'ups-input ups-input-sm',
     style: { flex: '1 1 130px' },
-    placeholder: '填写卡中角色的实际姓名（如：云舒霖）',
+    placeholder: '填写卡中角色的实际姓名',
     attrs: { 'data-ups-char-real-name': 'true', 'aria-label': '卡中角色实际姓名' },
   });
   const charRealNameAutoBadgeEl = createEl(doc, 'span', {
@@ -2065,17 +2115,19 @@ export function createStudioUI(options = {}) {
   const charFollowActiveBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '↻ 跟随当前对话',
+    text: '跟随当前对话',
     title: '恢复跟随酒馆当前打开的角色卡',
     attrs: { 'data-ups-char-follow-active': 'true' },
   });
+  setButtonIconLabel(doc, charFollowActiveBtn, '跟随当前对话', ICON_PATHS.refresh, { iconFirst: true });
   const wbToggleBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '世界书条目 (0/0) ▾',
+    text: '世界书条目 (0/0)',
     title: '展开或收起角色关联世界书条目（仅本次生成生效，不改动原书）',
     attrs: { 'data-ups-wb-toggle': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, wbToggleBtn, '世界书条目 (0/0)', ICON_PATHS.chevronDown);
   const wbFilterInput = createEl(doc, 'input', {
     type: 'search',
     className: 'ups-input ups-input-sm',
@@ -2160,15 +2212,17 @@ export function createStudioUI(options = {}) {
   const companionToggleBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '展开 ▾',
+    text: '展开',
     attrs: { 'data-ups-companion-toggle': 'true', 'aria-expanded': 'false' },
   });
+  setButtonIconLabel(doc, companionToggleBtn, '展开', ICON_PATHS.chevronDown);
   const companionAddBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn-sm',
-    text: '+ 添加客串角色',
+    text: '添加客串角色',
     attrs: { 'data-ups-companion-add': 'true' },
   });
+  setButtonIconLabel(doc, companionAddBtn, '添加客串角色', ICON_PATHS.plus, { iconFirst: true });
   const companionCarryModeSelect = createEl(
     doc,
     'select',
@@ -2263,7 +2317,6 @@ export function createStudioUI(options = {}) {
           ]),
         ]),
         sectionsBarEl,
-        sectionsPanelEl,
         splitBoxEl,
         generateARow,
         generateBRow,
@@ -2292,13 +2345,12 @@ export function createStudioUI(options = {}) {
         ]),
         createEl(doc, 'div', { className: 'ups-draft-toolbar', attrs: { 'data-ups-draft-toolbar': 'true' } }, [
           createEl(doc, 'span', { className: 'ups-draft-toolbar-hint', text: '成稿编辑快捷操作' }),
-          createEl(doc, 'div', { className: 'ups-btn-row' }, [historyBtn, undoBtn, redoBtn, copyBtn]),
+          createEl(doc, 'div', { className: 'ups-btn-row' }, [historyBtn, undoBtn, redoBtn, copyBtn, openDiffBtn]),
         ]),
         draftTextarea,
         selectionTasteBar,
         lintIssuesListEl,
         tasteCandidatesBox,
-        diffViewEl,
       ]),
       wbBox,
     ]
@@ -2398,9 +2450,10 @@ export function createStudioUI(options = {}) {
   const addStackEntryBtn = createEl(doc, 'button', {
     type: 'button',
     className: 'ups-btn',
-    text: '+ 新增条目',
+    text: '新增条目',
     attrs: { 'data-ups-add-entry': 'true' },
   });
+  setButtonIconLabel(doc, addStackEntryBtn, '新增条目', ICON_PATHS.plus, { iconFirst: true });
   const stackListEl = createEl(doc, 'div', { className: 'ups-acc-list', attrs: { 'data-ups-acc-list': 'true' } });
   const syncedEntriesListEl = createEl(doc, 'div', { className: 'ups-synced-list', attrs: { 'data-ups-synced-list': 'true' } });
 
@@ -2434,7 +2487,7 @@ export function createStudioUI(options = {}) {
               schemeTempInput,
             ]),
             createEl(doc, 'div', { className: 'ups-field' }, [
-              createEl(doc, 'label', { className: 'ups-label', text: '最大回复上限（随目标字数自动联动）' }),
+              createEl(doc, 'label', { className: 'ups-label', text: '最大回复字数（tokens）' }),
               schemeMaxTokensInput,
             ]),
           ]),
@@ -2456,8 +2509,7 @@ export function createStudioUI(options = {}) {
       ]),
       createEl(doc, 'div', { className: 'ups-card', attrs: { 'data-ups-synced-entries': 'true' } }, [
         createEl(doc, 'div', { className: 'ups-mod-head' }, [
-          createEl(doc, 'span', { className: 'ups-mod-title', text: '当前选项自动联动条目' }),
-          createEl(doc, 'span', { className: 'ups-muted', text: '随主页的草稿自检、世界书蓝绿灯与生成板块实时适配' }),
+          createEl(doc, 'span', { className: 'ups-mod-title', text: '本次生成条目' }),
         ]),
         syncedEntriesListEl,
       ]),
@@ -2776,7 +2828,7 @@ export function createStudioUI(options = {}) {
         profileSaveHintEl,
       ]),
       createEl(doc, 'details', { className: 'ups-advanced-details', attrs: { 'data-ups-conn-details': 'true' } }, [
-        createEl(doc, 'summary', { text: '连接诊断（按需展开手动测试，避免误点消耗额度）' }),
+        createEl(doc, 'summary', { text: '连接测试' }),
         createEl(doc, 'div', { className: 'ups-row' }, [testConnBtn, connStatusEl]),
       ]),
     ]
@@ -3202,9 +3254,9 @@ export function createStudioUI(options = {}) {
       const delBtn = createEl(doc, 'button', {
         type: 'button',
         className: 'ups-tpl-del',
-        text: '×',
         title: `移除自定义板块「${cs.name}」`,
-      });
+        attrs: { 'aria-label': `移除自定义板块 ${cs.name}` },
+      }, [createSvgIcon(doc, ICON_PATHS.close, 12)]);
       delBtn.addEventListener('click', () => {
         state.generationSections = normalizeGenerationSectionsConfig({
           ...state.generationSections,
@@ -3378,13 +3430,12 @@ export function createStudioUI(options = {}) {
     const toggleBtn = createEl(doc, 'button', {
       type: 'button',
       className: 'ups-btn-sm',
-      text: `关联世界书 (${countSelected()}/${entries.length}) ${slot.wbOpen ? '▴' : '▾'}`,
       attrs: { 'data-ups-companion-wb-toggle': slot.id },
     });
     const listWrap = createEl(doc, 'div', { className: 'ups-wb-list', hidden: !slot.wbOpen });
     const rebuildList = () => {
       listWrap.hidden = !slot.wbOpen;
-      toggleBtn.textContent = `关联世界书 (${countSelected()}/${entries.length}) ${slot.wbOpen ? '▴' : '▾'}`;
+      setDisclosureLabel(doc, toggleBtn, `关联世界书 (${countSelected()}/${entries.length})`, slot.wbOpen);
       if (!slot.wbOpen) return;
       const rows = entries.map((entry) => {
         const cb = createEl(doc, 'input', {
@@ -3395,7 +3446,7 @@ export function createStudioUI(options = {}) {
         cb.addEventListener('change', () => {
           if (cb.checked) slot.selectedWorldEntryKeys.add(entry.entryKey);
           else slot.selectedWorldEntryKeys.delete(entry.entryKey);
-          toggleBtn.textContent = `关联世界书 (${countSelected()}/${entries.length}) ${slot.wbOpen ? '▴' : '▾'}`;
+          setDisclosureLabel(doc, toggleBtn, `关联世界书 (${countSelected()}/${entries.length})`, slot.wbOpen);
           updateCompanionBudgetBadge();
         });
         return createEl(doc, 'label', { className: 'ups-check-row' }, [
@@ -3441,8 +3492,7 @@ export function createStudioUI(options = {}) {
     companionBodyEl.hidden = !isOpen;
     companionSectionEl.classList.toggle('has-companions', state.companions.length > 0);
     companionToggleBtn.classList.toggle('is-active', isOpen);
-    companionToggleBtn.setAttribute('aria-expanded', String(isOpen));
-    companionToggleBtn.textContent = isOpen ? '收起 ▴' : '展开 ▾';
+    setDisclosureLabel(doc, companionToggleBtn, isOpen ? '收起' : '展开', isOpen);
   }
 
   function renderCompanionSlots() {
@@ -3693,10 +3743,9 @@ export function createStudioUI(options = {}) {
       const delBtn = createEl(doc, 'button', {
         type: 'button',
         className: 'ups-tpl-del',
-        text: '×',
         title: `删除模板「${tpl.label}」`,
         attrs: { 'data-ups-del-must-tpl': tpl.id, 'aria-label': `删除模板 ${tpl.label}` },
-      });
+      }, [createSvgIcon(doc, ICON_PATHS.close, 12)]);
       delBtn.addEventListener('click', () => {
         settings.ui.mustHaveTemplates = (settings.ui.mustHaveTemplates || []).filter((x) => x.id !== tpl.id);
         renderMustHaveTray();
@@ -3759,6 +3808,7 @@ export function createStudioUI(options = {}) {
   }
 
   function renderExtractedPoints() {
+    pointsNavEl.replaceChildren();
     const pts = state.extractedPoints || [];
     if (!state.pointsBoxOpen && pts.length === 0) {
       extractedPointsBox.hidden = true;
@@ -3850,6 +3900,11 @@ export function createStudioUI(options = {}) {
       );
     });
     pointsListEl.replaceChildren(...groupNodes);
+    pointsNavEl.replaceChildren(...groups.map((group, i) => {
+      const jump = createEl(doc, 'button', { type: 'button', className: 'ups-lexicon-tab', text: group.category, attrs: { 'data-ups-point-jump': group.category } });
+      jump.addEventListener('click', () => groupNodes[i].scrollIntoView?.({ block: 'nearest' }));
+      return jump;
+    }));
   }
 
   function renderWorldbookEntriesChecklist() {
@@ -3860,17 +3915,13 @@ export function createStudioUI(options = {}) {
     if (total === 0) {
       wbPanelEl.hidden = true;
       wbListEl.replaceChildren();
-      wbToggleBtn.textContent = '世界书条目 (0/0) ▾';
-      wbToggleBtn.setAttribute('aria-expanded', 'false');
+      setDisclosureLabel(doc, wbToggleBtn, '世界书条目 (0/0)', false);
       return;
     }
 
     wbPanelEl.hidden = false;
     wbBodyEl.hidden = !state.worldEntriesOpen;
-    wbToggleBtn.setAttribute('aria-expanded', String(Boolean(state.worldEntriesOpen)));
-    wbToggleBtn.textContent = state.worldEntriesOpen
-      ? `世界书条目 (${selectedCount}/${total}) ▴`
-      : `世界书条目 (${selectedCount}/${total}) ▾`;
+    setDisclosureLabel(doc, wbToggleBtn, `世界书条目 (${selectedCount}/${total})`, state.worldEntriesOpen);
 
     if (!state.worldEntriesOpen) {
       return;
@@ -3914,9 +3965,7 @@ export function createStudioUI(options = {}) {
         const curKey = getCharContextSelectionKey(state.cachedCharContext);
         if (curKey) state.worldSelectionCharKey = curKey;
         const nowCount = entries.filter((e) => state.selectedWorldEntryKeys.has(e.entryKey)).length;
-        wbToggleBtn.textContent = state.worldEntriesOpen
-          ? `世界书条目 (${nowCount}/${total}) ▴`
-          : `世界书条目 (${nowCount}/${total}) ▾`;
+        setDisclosureLabel(doc, wbToggleBtn, `世界书条目 (${nowCount}/${total})`, state.worldEntriesOpen);
         updateCompanionBudgetBadge();
       });
 
@@ -4029,9 +4078,10 @@ export function createStudioUI(options = {}) {
       items.push({ value: '__no_match__', label: '未找到匹配角色', disabled: true });
     }
     for (const c of filteredChars) {
+      if (!q && c.isActive && String(c.chid) !== state.selectedCharTarget) continue;
       const suffixParts = [];
       if (c.isActive) suffixParts.push('当前对话');
-      if (c.worldName) suffixParts.push(c.worldName);
+      if (c.worldName && c.worldName !== c.name) suffixParts.push(c.worldName);
       const label = suffixParts.length > 0 ? `${c.name}（${suffixParts.join(' · ')}）` : c.name;
       items.push({ value: String(c.chid), label, disabled: false });
     }
@@ -4294,17 +4344,31 @@ export function createStudioUI(options = {}) {
   }
 
   function getCombinedLockedPointsText() {
-    const checkedLines = (state.extractedPoints || [])
-      .filter((pt) => state.selectedPointIds.has(pt.id))
-      .map((pt) => `- ${pt.fullText}`);
-    const manual = lockedCoreInput.value.trim();
-    if (checkedLines.length > 0 && manual) {
-      return `${checkedLines.join('\n')}\n${manual}`;
+    const lines = [];
+    const sections = new Map();
+    for (const point of state.extractedPoints) {
+      if (!state.selectedPointIds.has(point.id)) continue;
+      const field = /^(外貌与体型|性格与(?:行为)?逻辑)[：:]\s*(.+)$/u.exec(point.fullText);
+      if (!field) {
+        lines.push(`- ${point.fullText}`);
+        continue;
+      }
+      const [, heading, body] = field;
+      if (!sections.has(heading)) {
+        const section = { heading, bodies: new Set() };
+        sections.set(heading, section);
+        lines.push(section);
+      }
+      sections.get(heading).bodies.add(body.trim());
     }
-    if (checkedLines.length > 0) {
-      return checkedLines.join('\n');
-    }
-    return manual;
+    const checkedText = lines.map((line) => {
+      if (typeof line === 'string') return line;
+      const bodies = [...line.bodies];
+      return bodies.length === 1
+        ? `- ${line.heading}：${bodies[0]}`
+        : `${line.heading}：\n${bodies.map((body) => `- ${body}`).join('\n')}`;
+    }).join('\n');
+    return [checkedText, lockedCoreInput.value.trim()].filter(Boolean).join('\n');
   }
 
   function syncDraftRelatedViews() {
@@ -4314,7 +4378,7 @@ export function createStudioUI(options = {}) {
     const active = getActiveScheme(settings);
     const targetChars = active?.targetChars || 1500;
     tokenBadgeEl.textContent = `${chars} 字 · 约 ${tokens} tokens（目标 ${targetChars} 字）`;
-    viewDraftLogBtn.hidden = !state.lastDraftLog;
+    viewDraftLogBtn.hidden = !settings.ui.debugAudit || !state.lastDraftLog;
 
     // Sections
     const sections = parsePersonaSections(text);
@@ -4379,7 +4443,7 @@ export function createStudioUI(options = {}) {
           setStatus('✓ 已将文中破折号替换为清爽标点，防止正文模仿增殖', 'ok', { toast: true });
         });
         children.push(dashBtn);
-      } else if (issue.match) {
+      } else if (issue.match && !issue.noBanAction) {
         const banBtn = createEl(doc, 'button', {
           type: 'button',
           className: 'ups-btn-sm',
@@ -4401,7 +4465,8 @@ export function createStudioUI(options = {}) {
     lintIssuesListEl.replaceChildren(...issueNodes);
 
     // Diff View
-    if (state.baselineDraft && text && state.baselineDraft.trim() !== text.trim()) {
+    openDiffBtn.hidden = !(state.baselineDraft && text && state.baselineDraft.trim() !== text.trim());
+    if (diffViewEl.parentElement === submodalBodyEl && !openDiffBtn.hidden) {
       const diff = computeLineDiff(state.baselineDraft, text);
       diffViewEl.hidden = false;
       diffViewEl.replaceChildren(
@@ -4439,7 +4504,8 @@ export function createStudioUI(options = {}) {
   }
 
   function setDraftValue(nextText, { recordHistory = true } = {}) {
-    const val = String(nextText ?? '');
+    const { cleanText: val, draftLog } = stripDraftAuditBlocks(nextText);
+    if (draftLog) state.lastDraftLog = draftLog;
     draftTextarea.value = val;
     if (recordHistory) {
       draftHistory.push(val);
@@ -4585,7 +4651,7 @@ export function createStudioUI(options = {}) {
         });
         controls.push(sw);
       } else {
-        controls.push(createEl(doc, 'span', { className: 'ups-badge ups-badge-ok', text: '自动联动' }));
+        controls.push(createEl(doc, 'span', { className: 'ups-badge ups-badge-ok', text: '已启用' }));
       }
 
       return createEl(
@@ -5826,8 +5892,17 @@ export function createStudioUI(options = {}) {
     }
   }
 
+  openDiffBtn.addEventListener('click', () => {
+    openSubmodal({ title: '修改对比', bodyNodes: [diffViewEl] });
+    syncDraftRelatedViews();
+  }, { signal });
+  debugAuditCheckbox.addEventListener('change', () => {
+    settings.ui.debugAudit = debugAuditCheckbox.checked;
+    if (!settings.ui.debugAudit && submodalTitleEl.textContent === '自检记录') closeSubmodal();
+    syncDraftRelatedViews(); persistSettings();
+  }, { signal });
   viewDraftLogBtn.addEventListener('click', () => {
-    if (!state.lastDraftLog) return;
+    if (!settings.ui.debugAudit || !state.lastDraftLog) return;
     const logArea = createEl(doc, 'textarea', {
       className: 'ups-textarea',
       rows: 10,
@@ -5837,7 +5912,7 @@ export function createStudioUI(options = {}) {
     const closeLogBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '关闭' });
     closeLogBtn.addEventListener('click', closeSubmodal);
     openSubmodal({
-      title: '本次 AI 构思自检草稿',
+      title: '自检记录',
       bodyNodes: [logArea],
       footerNodes: [closeLogBtn],
     });
@@ -5926,7 +6001,12 @@ export function createStudioUI(options = {}) {
       if (strippedFinal.draftLog) {
         state.lastDraftLog = strippedFinal.draftLog;
       }
-      const cleaned = normalizeFlatLayout(strippedFinal.cleanText || res.text || '');
+      const cleaned = normalizeFlatLayout(strippedFinal.cleanText);
+      if (!cleaned.trim()) {
+        setDraftValue(prevDraftBeforeGen, { recordHistory: false });
+        setStatus('没有收到成稿正文', 'warn');
+        return;
+      }
       let finalDraft = cleaned;
       if (targetSection) {
         const returnedSecs = parsePersonaSections(cleaned);
@@ -5946,7 +6026,7 @@ export function createStudioUI(options = {}) {
       setDraftValue(finalDraft, { recordHistory: true });
       recordHistorySnapshot(finalDraft);
       setStatus(
-        targetSection ? `✓ 已完成【${targetSection}】重写` : `✓ 人设生成完成（来源：${res.source || 'host'}）`,
+        targetSection ? `✓ 已重写「${targetSection}」` : '✓ 人设已生成',
         'ok',
         { toast: true }
       );
@@ -6041,7 +6121,7 @@ export function createStudioUI(options = {}) {
 
   async function saveCurrentPersona(mode, explicitCreateName = '') {
     if (state.isSaving) return false;
-    const rawDraft = draftTextarea.value.trim();
+    const rawDraft = stripDraftAuditBlocks(draftTextarea.value).cleanText.trim();
     if (!rawDraft) {
       setStatus('请先生成或填写人设正文后再保存', 'warn');
       return false;
@@ -6567,7 +6647,7 @@ export function createStudioUI(options = {}) {
     sectionsPanelEl.hidden = !state.sectionsPanelOpen;
     ratioToggleBtn.classList.toggle('is-active', state.sectionsPanelOpen);
     ratioToggleBtn.setAttribute('aria-expanded', String(state.sectionsPanelOpen));
-    ratioToggleBtn.textContent = state.sectionsPanelOpen ? '收起板块与比重 ▴' : '选择板块与比重 ▾';
+    setDisclosureLabel(doc, ratioToggleBtn, state.sectionsPanelOpen ? '收起板块与比重' : '选择板块与比重', state.sectionsPanelOpen);
   }, { signal });
 
   layoutStyleSelect.addEventListener('change', () => {
@@ -6668,7 +6748,7 @@ export function createStudioUI(options = {}) {
     lexiconPanelEl.hidden = !state.lexiconOpen;
     lexiconToggleBtn.classList.toggle('is-active', state.lexiconOpen);
     lexiconToggleBtn.setAttribute('aria-expanded', String(state.lexiconOpen));
-    lexiconToggleBtn.textContent = state.lexiconOpen ? '收起常用词库 ▴' : '+ 常用词库 ▾';
+    setDisclosureLabel(doc, lexiconToggleBtn, '常用词库', state.lexiconOpen);
   }, { signal });
 
   companionToggleBtn.addEventListener('click', () => {
@@ -6745,7 +6825,7 @@ export function createStudioUI(options = {}) {
     vibeTrayEl.hidden = !state.vibeTrayOpen;
     toggleVibeTrayBtn.classList.toggle('is-active', state.vibeTrayOpen);
     toggleVibeTrayBtn.setAttribute('aria-expanded', String(state.vibeTrayOpen));
-    toggleVibeTrayBtn.textContent = state.vibeTrayOpen ? '收起神韵词 ▴' : '+ 选填神韵词 ▾';
+    setDisclosureLabel(doc, toggleVibeTrayBtn, '补充神韵词', state.vibeTrayOpen);
   }, { signal });
 
   toggleMustTrayBtn.addEventListener('click', () => {
@@ -6756,7 +6836,7 @@ export function createStudioUI(options = {}) {
     mustHaveTrayEl.hidden = !state.mustHaveTrayOpen;
     toggleMustTrayBtn.classList.toggle('is-active', state.mustHaveTrayOpen);
     toggleMustTrayBtn.setAttribute('aria-expanded', String(state.mustHaveTrayOpen));
-    toggleMustTrayBtn.textContent = state.mustHaveTrayOpen ? '收起模板 ▴' : '+ 常用模板 ▾';
+    setDisclosureLabel(doc, toggleMustTrayBtn, '常用模板', state.mustHaveTrayOpen);
   }, { signal });
 
   saveMustTplBtn.addEventListener('click', () => {
@@ -6806,7 +6886,7 @@ export function createStudioUI(options = {}) {
       mustHaveTrayEl.hidden = false;
       toggleMustTrayBtn.classList.add('is-active');
       toggleMustTrayBtn.setAttribute('aria-expanded', 'true');
-      toggleMustTrayBtn.textContent = '收起模板 ▴';
+      setDisclosureLabel(doc, toggleMustTrayBtn, '常用模板', true);
       persistSettings();
       closeSubmodal();
       flashButtonFeedback(saveMustTplBtn, '✓ 已保存');
@@ -7173,6 +7253,11 @@ export function createStudioUI(options = {}) {
   draftTextarea.addEventListener('touchend', () => captureDraftSelection({ clearIfCollapsed: false }), { signal });
 
   draftTextarea.addEventListener('input', () => {
+    const parsed = stripDraftAuditBlocks(draftTextarea.value);
+    if (parsed.draftLog || parsed.hasUnclosedDraft || /【\s*草稿自检\s*】/.test(draftTextarea.value)) {
+      state.lastDraftLog = parsed.draftLog;
+      draftTextarea.value = parsed.cleanText;
+    }
     state.draftSelection = null;
     syncSelectionBar();
     draftHistory.push(draftTextarea.value);
@@ -8544,6 +8629,7 @@ export function createStudioUI(options = {}) {
 
   function setSettings(nextSettings) {
     settings = createDefaultSettings(nextSettings);
+    debugAuditCheckbox.checked = settings.ui.debugAudit;
     state.miniMode = Boolean(settings.ui?.miniMode);
     state.hasUserPlacedWindow = Boolean(nextSettings?.ui?.geometry);
     state.worldbookLightMode = settings.ui?.worldbookLightMode || 'green_selective';

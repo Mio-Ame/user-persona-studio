@@ -506,12 +506,12 @@ test('T1-F04-05: reading non-active companion cards never switches active chat o
   assert.equal(stHost.getActiveChatMessages()[0].mes, '开场聊天记录不可被改动');
 });
 
-test('T1-F05-01: version parity equals 1.6.0 across manifest.json, package.json, and index.js', () => {
+test('T1-F05-01: version parity equals 1.6.1 across manifest.json, package.json, and index.js', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'manifest.json'), 'utf8'));
-  assert.equal(pkg.version, '1.6.0');
-  assert.equal(manifest.version, '1.6.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
+  assert.equal(pkg.version, '1.6.1');
+  assert.equal(manifest.version, '1.6.1');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.1');
 });
 
 test('T1-F05-02: mountStudioForTest opens .ups-modal at stable locked dimensions inside viewport', async () => {
@@ -549,19 +549,19 @@ test('T1-F05-04: switching across all 4 top tabs preserves identical .ups-modal 
   }
 });
 
-test('T1-F05-05: refreshExtensionStylesheet appends ?v=1.6.0 once and skips duplicates', () => {
+test('T1-F05-05: refreshExtensionStylesheet appends ?v=1.6.1 once and skips duplicates', () => {
   const env = createE2EEnvironment();
   const oldLink = env.doc.createElement('link');
   oldLink.setAttribute('rel', 'stylesheet');
   oldLink.setAttribute('href', '/scripts/extensions/third-party/user-persona-studio/style.css');
   env.doc.head.appendChild(oldLink);
 
-  const updated = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0');
+  const updated = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.1');
   assert.equal(updated, true);
   const links = env.doc.querySelectorAll('link[rel="stylesheet"]');
-  assert.equal(links.some((l) => String(l.getAttribute('href')).includes('v=1.6.0')), true);
+  assert.equal(links.some((l) => String(l.getAttribute('href')).includes('v=1.6.1')), true);
 
-  const second = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0');
+  const second = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.1');
   assert.equal(second, false);
 });
 
@@ -1679,16 +1679,16 @@ test('T2-F05-02: active runtime version constants contain zero stale 1.4.0/1.3.0
   assert.notEqual(pkg.version, '1.4.0');
   assert.notEqual(manifest.version, '1.4.0');
   assert.notEqual(mods.entry.EXTENSION_VERSION, '1.4.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.1');
 });
 
-test('T2-F05-03: refreshExtensionStylesheet returns false when ?v=1.6.0 is already present', () => {
+test('T2-F05-03: refreshExtensionStylesheet returns false when ?v=1.6.1 is already present', () => {
   const env = createE2EEnvironment();
   const link = env.doc.createElement('link');
   link.setAttribute('rel', 'stylesheet');
-  link.setAttribute('href', '/user-persona-studio/style.css?v=1.6.0');
+  link.setAttribute('href', '/user-persona-studio/style.css?v=1.6.1');
   env.doc.head.appendChild(link);
-  assert.equal(mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0'), false);
+  assert.equal(mods.entry.refreshExtensionStylesheet(env.doc, '1.6.1'), false);
 });
 
 test('T2-F05-04: mountStudioForTest degrades gracefully when host lacks worldbook list APIs', async () => {
@@ -3362,7 +3362,7 @@ test('T4-10: Scenario 10 - Token headroom recovery (over -> tight -> ok) & verba
   assert.equal(verbatim.text.includes('顾寒在巷口开了家修表铺。'), true);
 });
 
-test('T4-11: Scenario 11 (v1.6.0) - Searchable char combobox, live 卡中角色名 update, capsule lexicon, preset synced entries (draftAudit + blue/green light) & API save button', async () => {
+test('T4-11: Scenario 11 (v1.6.1) - Searchable char combobox, live 卡中角色名 update, capsule lexicon, preset synced entries (draftAudit + blue/green light) & API save button', async () => {
   const { env, stHost, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
 
@@ -3439,12 +3439,12 @@ test('T4-11: Scenario 11 (v1.6.0) - Searchable char combobox, live 卡中角色�
 // STATIC & COMPLIANCE GATE (16 Checks: S-01 .. S-16)
 // ============================================================================
 
-test('S-01: manifest.json, package.json, and index.js EXTENSION_VERSION equal 1.6.0', () => {
+test('S-01: manifest.json, package.json, and index.js EXTENSION_VERSION equal 1.6.1', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'manifest.json'), 'utf8'));
-  assert.equal(pkg.version, '1.6.0');
-  assert.equal(manifest.version, '1.6.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
+  assert.equal(pkg.version, '1.6.1');
+  assert.equal(manifest.version, '1.6.1');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.1');
 });
 
 test('S-02: src/ui.js has zero controlHintEl or deleted boilerplate hint string', () => {

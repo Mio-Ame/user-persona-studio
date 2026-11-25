@@ -1,3 +1,4 @@
+import util from 'node:util';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -39,7 +40,7 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 
 class MockClassList {
   constructor(el) {
-    this.el = el;
+    Object.defineProperty(this, 'el', { value: el });
     this.set = new Set();
   }
   _syncFromAttr(val) {
@@ -199,7 +200,9 @@ function matchSingleSelector(el, sel) {
 
 class MockNode {
   constructor(ownerDocument, nodeType, tagName = '') {
-    this.ownerDocument = ownerDocument;
+    for (const [key, value] of Object.entries({ ownerDocument, parentNode: null, defaultView: null, host: null, shadowRoot: null, activeElement: null })) {
+      Object.defineProperty(this, key, { value, writable: true });
+    }
     this.nodeType = nodeType;
     this.tagName = tagName ? tagName.toUpperCase() : '';
     this.childNodes = [];
@@ -221,6 +224,9 @@ class MockNode {
     this.offsetHeight = 120;
     this.focusCalls = 0;
   }
+
+  [util.inspect.custom]() { return '<MockNode ' + (this.tagName || '#node') + '>'; }
+  toJSON() { return this[util.inspect.custom](); }
 
   get parentElement() {
     return this.parentNode && this.parentNode.nodeType === 1 ? this.parentNode : null;
@@ -769,7 +775,9 @@ test('ui.js: Shadow DOM structure, bubble stopPropagation, spellcheck, mobile no
   await new Promise((r) => setTimeout(r, 20));
   sr.querySelector('[data-ups-generate-b]').click();
   await new Promise((r) => setTimeout(r, 20));
-  assert.ok(sr.querySelector('[data-ups-diff-view]').hidden === false);
+  assert.equal(sr.querySelector('[data-ups-diff-view]'), null);
+  sr.querySelector('[data-ups-open-diff]').click();
+  assert.ok(sr.querySelector('[data-ups-submodal]').contains(sr.querySelector('[data-ups-diff-view]')));
 
   // Modify draft & extract taste candidates
   draftEl.value = `${draftEl.value}\n习惯在值班表背面记下风速`;
@@ -960,7 +968,7 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   assert.ok(sr.querySelector('.ups-entry-editor'));
 
   // Add a custom entry and delete it via ··· menu
-  const addBtn = sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('button').find((b) => b.textContent === '+ 新增条目');
+  const addBtn = sr.querySelector('[data-ups-add-entry]');
   addBtn.click();
   const afterAddIds = getEntryIds();
   assert.equal(afterAddIds.length, initialIds.length + 1);
@@ -1343,6 +1351,7 @@ test('ui.js regression: Mode B preserves original-vs-optimized diff while tasteB
   await new Promise((r) => setTimeout(r, 20));
 
   // Original-vs-optimized diff still compares against pre-AI originalPersona
+  sr.querySelector('[data-ups-open-diff]').click();
   const diffView = sr.querySelector('[data-ups-diff-view]');
   assert.equal(diffView.hidden, false);
   assert.ok(diffView.textContent.includes('旧人设：习惯早起散步'));
@@ -2262,6 +2271,10 @@ test('UX v1.3: backstory & spotlight modes, anti-parrot & dash cleanup buttons, 
   const draftEl = sr.querySelector('[data-ups-draft]');
   assert.equal(draftEl.value.includes('草稿自检'), false);
   const viewLogBtn = sr.querySelector('[data-ups-view-draft-log]');
+  assert.equal(viewLogBtn.hidden, true);
+  const debug = sr.querySelector('[data-ups-debug-audit]');
+  debug.checked = true;
+  debug.dispatchEvent({ type: 'change', bubbles: true });
   assert.equal(viewLogBtn.hidden, false);
   viewLogBtn.click();
   assert.equal(sr.querySelector('[data-ups-submodal]').hidden, false);
@@ -2802,4 +2815,63 @@ test('R1 & R2 regression: empty worldbook selection persists across refreshConte
   assert.equal(pointsBox.querySelectorAll('[data-ups-point-cb]').filter((c) => c.checked).length, 3);
 
   ui.destroy();
+});
+
+test('M2: sections open in place, old text selection is exact and repeat-safe', () => {
+  const env = createMockEnvironment();
+  const ui = createStudioUI({ doc: env.doc, win: env.win });
+  try {
+    const sr = ui.shadow;
+    const sections = sr.querySelector('[data-ups-sections-panel]');
+    const bar = sr.querySelector('[data-ups-sections-bar]');
+    assert.ok(bar.contains(sections));
+    sr.querySelector('[data-ups-ratio-toggle]').click();
+    assert.equal(sections.hidden, false);
+    const old = sr.querySelector('[data-ups-existing-draft]');
+    old.value = '前文原句。后文'; old.selectionStart = 2; old.selectionEnd = 5;
+    old.dispatchEvent({ type: 'select' });
+    const add = sr.querySelector('[data-ups-lock-selection]');
+    assert.equal(add.hidden, false); add.click(); add.click();
+    assert.equal(sr.querySelector('[data-ups-locked-core]').value, '原句。');
+  } finally { ui.destroy(); }
+});
+
+test('M2: checked appearance lines share one heading and format warnings have no ban action', async () => {
+  const env = createMockEnvironment();
+  let prompt = '';
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    initialSettings: { ui: { mode: 'B' } },
+    onSaveSettings: () => {},
+    hostApi: {
+      getActivePersona: async () => null,
+      listPersonas: async () => [],
+      getActiveCharacterContext: async () => null,
+      runStudioGeneration: async ({ messages }) => {
+        prompt = messages.map((message) => message.content).join('\n');
+        return { text: '【草稿自检】仅有检查记录【/草稿自检】', source: 'mock' };
+      },
+    },
+  });
+  try {
+    await ui.open();
+    const sr = ui.shadow;
+    const draft = sr.querySelector('[data-ups-draft]');
+    draft.value = '外观自然。\n    - 多余缩进';
+    draft.dispatchEvent({ type: 'input' });
+    const formatWarning = [...sr.querySelectorAll('.ups-issue-item')].find((el) => el.textContent.includes('缩进'));
+    assert.ok(formatWarning);
+    assert.doesNotMatch(formatWarning.textContent, /加入禁写/);
+    sr.querySelector('[data-ups-existing-draft]').value = '外貌与体型：黑发齐肩\n外貌与体型：身形匀称\n敏感取向：需信任';
+    sr.querySelector('[data-ups-extract-points]').click();
+    assert.ok(sr.querySelector('[data-ups-point-jump="NSFW / 亲密设定"]'));
+    sr.querySelector('[data-ups-generate-b]').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const retained = prompt.split('【必须保留不变的设定（严禁改动）】')[1];
+    assert.match(retained ?? '', /外貌与体型：\n- 黑发齐肩\n- 身形匀称/);
+    assert.equal(draft.value, '外观自然。\n    - 多余缩进');
+  } finally {
+    ui.destroy();
+  }
 });

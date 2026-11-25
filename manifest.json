@@ -1,12 +1,12 @@
 {
-  "display_name": "客制化成长型 User 人设工坊",
+  "display_name": "User 人设工坊",
   "loading_order": 12,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "Mio-Ame",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "homePage": "https://github.com/Mio-Ame/user-persona-studio",
   "auto_update": true,
   "minimum_client_version": "1.12.0"

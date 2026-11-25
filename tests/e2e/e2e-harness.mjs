@@ -65,7 +65,7 @@ export class MockStorage {
 
 class MockClassList {
   constructor(el) {
-    this.el = el;
+    Object.defineProperty(this, 'el', { value: el });
     this.set = new Set();
   }
   _syncFromAttr(val) {

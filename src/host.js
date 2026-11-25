@@ -7,6 +7,7 @@ import {
   deepClone,
   detectMultiCharacterCard,
   estimateTokens,
+  stripDraftAuditBlocks,
   isNoiseWorldbookEntry,
   resolveCharacterRealName,
 } from './core.js';
@@ -1499,7 +1500,7 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
     if (targetId === LIVE_PERSONA_AVATAR_ID || !targetId) {
       const prevDescription = String(powerUser.persona_description ?? liveDom.description ?? '');
       const nextDescription =
-        payload.description !== undefined ? String(payload.description) : prevDescription;
+        stripDraftAuditBlocks(payload.description ?? prevDescription).cleanText;
       const finalLorebook =
         payload.lorebook !== undefined
           ? String(payload.lorebook)
@@ -1614,7 +1615,7 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
 
     const nextDesc = {
       description:
-        payload.description !== undefined ? String(payload.description) : String(prevDesc.description ?? ''),
+        stripDraftAuditBlocks(payload.description ?? prevDesc.description).cleanText,
       position:
         payload.position !== undefined && Number.isFinite(Number(payload.position))
           ? Number(payload.position)
@@ -1737,7 +1738,7 @@ export async function savePersonaToHost(payload = {}, deps = {}) {
     ? rawUploadPath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^User Avatars\//i, '').split('/').filter(Boolean).pop() || ''
     : '';
   const finalAvatarId = normalizedUploadId || candidateAvatarId;
-  const description = String(payload.description ?? '');
+  const description = stripDraftAuditBlocks(payload.description).cleanText;
   const title = payload.title !== undefined ? String(payload.title) : '';
   const lorebook = payload.lorebook !== undefined ? String(payload.lorebook) : '';
   const position =

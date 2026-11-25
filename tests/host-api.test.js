@@ -64,14 +64,14 @@ function makeByteStream(chunks) {
 test('M1: manifest.json matches SillyTavern extension contract', () => {
   const manifestPath = path.join(PROJECT_ROOT, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  assert.equal(manifest.display_name, '客制化成长型 User 人设工坊');
+  assert.equal(manifest.display_name, 'User 人设工坊');
   assert.equal(manifest.loading_order, 12);
   assert.deepEqual(manifest.requires, []);
   assert.deepEqual(manifest.optional, []);
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.6.0');
+  assert.equal(manifest.version, '1.6.1');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');

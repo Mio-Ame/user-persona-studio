@@ -60,8 +60,39 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 3px 0;
+  padding: 4px 0;
   cursor: pointer;
+}
+
+#ups-ext-settings .ups-ext-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--SmartThemeBorderColor, #888);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+}
+
+#ups-ext-settings .ups-ext-row input[type="checkbox"]:checked {
+  background-color: var(--SmartThemeQuoteColor, #9a1e2a);
+  border-color: var(--SmartThemeQuoteColor, #9a1e2a);
+}
+
+#ups-ext-settings .ups-ext-row input[type="checkbox"]:checked::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  transform: rotate(-45deg);
+  margin-top: -1.5px;
+  box-sizing: border-box;
 }
 
 #ups-ext-settings .ups-ext-open-btn {

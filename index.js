@@ -7,7 +7,7 @@ import {
 } from './src/host.js';
 import { createStudioUI } from './src/ui.js';
 
-export const EXTENSION_VERSION = '1.6.0';
+export const EXTENSION_VERSION = '1.6.1';
 
 function createDomEl(doc, tag, props = {}, children = []) {
   const node = doc.createElement(tag);
@@ -105,7 +105,7 @@ export async function createStudioController(options = {}) {
         (s) =>
           s &&
           ['longform_coact', 'player_controlled', 'persona_refactor'].includes(String(s.id || '')) &&
-          (Number(s.presetVersion) || 0) < 2
+          (Number(s.presetVersion) || 0) < 3
       )
   );
   let settings = createDefaultSettings(rawLoadedSettings);
@@ -271,7 +271,7 @@ export async function createStudioController(options = {}) {
           className: 'list-group-item flex-container flexGap5 interactable ups-wand-entry',
           role: 'button',
           tabindex: '0',
-          title: '打开客制化成长型 User 人设工坊',
+          title: '打开 User 人设工坊',
         },
         [
           createDomEl(doc, 'div', { className: 'fa-solid fa-wand-magic-sparkles extensionsMenuExtensionButton' }),
@@ -324,7 +324,7 @@ export async function createStudioController(options = {}) {
         [
           createDomEl(doc, 'div', { className: 'inline-drawer' }, [
             createDomEl(doc, 'div', { className: 'inline-drawer-toggle inline-drawer-header' }, [
-              createDomEl(doc, 'b', { text: '客制化成长型 User 人设工坊' }),
+              createDomEl(doc, 'b', { text: 'User 人设工坊' }),
               createDomEl(doc, 'div', { className: 'inline-drawer-icon fa-solid fa-circle-chevron-down down' }),
             ]),
             createDomEl(doc, 'div', { className: 'inline-drawer-content' }, [
@@ -396,7 +396,7 @@ export async function createStudioController(options = {}) {
           name: 'ups',
           callback,
           aliases: hasAlias ? [] : ['persona-studio'],
-          helpString: '打开客制化成长型 User 人设工坊',
+          helpString: '打开 User 人设工坊',
         });
         ctx.SlashCommandParser.addCommandObject(cmd);
         registeredSlashOwned = true;
@@ -408,7 +408,7 @@ export async function createStudioController(options = {}) {
           'ups',
           callback,
           hasAlias ? [] : ['persona-studio'],
-          '打开客制化成长型 User 人设工坊'
+          '打开 User 人设工坊'
         );
         registeredSlashOwned = true;
         registeredSlashAliasOwned = !hasAlias;

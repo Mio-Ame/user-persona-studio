@@ -298,15 +298,16 @@ export const SHADOW_CSS = String.raw`
   color-scheme: light;
   --modal-blur: 0px;
   --ups-bg: #f6f5f2;
-  --ups-bg-elevated: #e8e5de;
+  --ups-canvas: #ece9e2;
+  --ups-bg-elevated: #e6e2da;
   --ups-surface: #ffffff;
-  --ups-surface-strong: #eae7e0;
-  --ups-surface-hover: #f3f1ec;
-  --ups-input-bg: #f2f1ec;
-  --ups-border: #dfddd6;
-  --ups-border-strong: #c4c1b8;
-  --ups-fg: #1f2124;
-  --ups-fg-muted: #5c6066;
+  --ups-surface-strong: #e4e0d8;
+  --ups-surface-hover: #f2efe8;
+  --ups-input-bg: #f5f4f0;
+  --ups-border: #d6d3ca;
+  --ups-border-strong: #b8b3a7;
+  --ups-fg: #1c1e21;
+  --ups-fg-muted: #646870;
   --ups-accent: #9a1e2a;
   --ups-accent-hover: #7f1722;
   --ups-accent-fg: #ffffff;
@@ -320,7 +321,7 @@ export const SHADOW_CSS = String.raw`
   --ups-track-off: #c2bfb7;
   --ups-track-on: #9a1e2a;
   --ups-thumb: #ffffff;
-  --ups-card-shadow: 0 2px 6px rgba(24, 24, 26, 0.05);
+  --ups-card-shadow: 0 1px 4px rgba(20, 20, 22, 0.06);
   --ups-shadow: 0 16px 42px rgba(18, 22, 28, 0.22);
 }
 
@@ -328,6 +329,7 @@ export const SHADOW_CSS = String.raw`
   color-scheme: dark;
   --modal-blur: 0px;
   --ups-bg: #191b20;
+  --ups-canvas: #16181d;
   --ups-bg-elevated: #21242b;
   --ups-surface: #282c34;
   --ups-surface-strong: #333843;
@@ -990,7 +992,7 @@ export const SHADOW_CSS = String.raw`
   font-weight: 600;
 }
 
-/* Scrollable Middle Body — scrollbar-gutter: stable prevents mode-switch width bounce! */
+/* Scrollable Middle Body — distinct canvas tone & scrollbar-gutter: stable prevents bounce! */
 .ups-body {
   flex: 1 1 0;
   min-height: 0;
@@ -998,10 +1000,11 @@ export const SHADOW_CSS = String.raw`
   overflow-x: hidden;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+  background-color: var(--ups-canvas, var(--ups-bg));
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 11px;
 }
 
 .ups-body > * {
@@ -1099,10 +1102,10 @@ export const SHADOW_CSS = String.raw`
   border: 1px solid var(--ups-border);
   border-radius: 10px;
   box-shadow: var(--ups-card-shadow);
-  padding: 11px 13px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1112,7 +1115,7 @@ export const SHADOW_CSS = String.raw`
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
-  padding-bottom: 7px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--ups-border);
   min-width: 0;
 }
@@ -1121,24 +1124,99 @@ export const SHADOW_CSS = String.raw`
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 700;
   color: var(--ups-fg);
-  padding-left: 8px;
+  padding-left: 9px;
   border-left: 3px solid var(--ups-accent);
-  line-height: 1.25;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+}
+
+.ups-block-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ups-fg);
+  line-height: 1.35;
 }
 
 .ups-card-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 650;
   color: var(--ups-fg);
+  line-height: 1.35;
 }
 
 .ups-muted {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ups-fg-muted);
   line-height: 1.45;
+}
+
+/* Custom Vector-Style Checkboxes (Immune to ugly OS default checkboxes!) */
+.ups-theme-root input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  margin: 1px 0 0 0;
+  padding: 0;
+  border: 1.5px solid var(--ups-border-strong);
+  border-radius: 4px;
+  background-color: var(--ups-surface);
+  cursor: pointer;
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.ups-theme-root input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--ups-accent);
+}
+
+.ups-theme-root input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ups-accent-soft);
+  outline-offset: 1px;
+}
+
+.ups-theme-root input[type="checkbox"]:checked,
+.ups-theme-root input[type="checkbox"]:indeterminate {
+  background-color: var(--ups-accent);
+  border-color: var(--ups-accent);
+}
+
+.ups-theme-root input[type="checkbox"]:checked::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid var(--ups-accent-fg);
+  border-bottom: 2px solid var(--ups-accent-fg);
+  transform: rotate(-45deg);
+  margin-top: -1.5px;
+  box-sizing: border-box;
+}
+
+.ups-theme-root input[type="checkbox"]:indeterminate::after {
+  content: "";
+  width: 8px;
+  height: 2px;
+  background-color: var(--ups-accent-fg);
+  border-radius: 1px;
+}
+
+.ups-theme-root input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Extracted Persona Points Checklist (Semantic groups, spacious bounded height) */
@@ -1734,7 +1812,7 @@ export const SHADOW_CSS = String.raw`
   color: var(--ups-fg);
 }
 
-/* Categorized Capsule Lexicon, Prominent Sections Bar, Split Worldbook Box & Searchable Combobox */
+/* Categorized Capsule Lexicon, Unified In-Place Modules, Split Worldbook Box & Searchable Combobox */
 .ups-char-combobox {
   display: flex;
   flex-direction: column;
@@ -1744,17 +1822,17 @@ export const SHADOW_CSS = String.raw`
 
 .ups-char-combo-btn {
   width: 100%;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  padding: 0 10px;
+  height: 34px;
+  min-height: 34px;
+  max-height: 34px;
+  padding: 0 11px;
   border-radius: 7px;
   border: 1px solid var(--ups-border-strong);
   background-color: var(--ups-surface);
   color: var(--ups-fg);
   font-family: inherit;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1781,37 +1859,98 @@ export const SHADOW_CSS = String.raw`
   border-radius: 8px;
   background-color: var(--ups-surface);
   box-shadow: var(--ups-card-shadow);
-  padding: 7px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.ups-char-combo-search-wrap {
+  padding: 7px 8px;
+  background-color: var(--ups-input-bg);
+  border-bottom: 1px solid var(--ups-border);
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 
+.ups-char-combo-search-wrap > svg {
+  color: var(--ups-fg-muted);
+  flex-shrink: 0;
+}
+
+.ups-char-combo-search-wrap > .ups-input {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 0 4px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+}
+
+.ups-char-combo-search-wrap > .ups-input:focus {
+  outline: none;
+  background: transparent;
+}
+
+.ups-char-combo-modes {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+  border-bottom: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+}
+
+.ups-char-combo-sec-head {
+  padding: 5px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ups-fg-muted);
+  background-color: var(--ups-input-bg);
+  border-bottom: 1px solid var(--ups-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .ups-char-combo-list {
-  max-height: 176px;
+  max-height: 196px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
+.ups-char-combo-opt[data-ups-char-opt="__none__"] { border-bottom: 1px solid var(--ups-border-strong); }
 .ups-char-combo-opt {
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: 34px;
+  padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-bottom: 1px solid var(--ups-border);
+  border-radius: 0;
   background: transparent;
   color: var(--ups-fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   text-align: left;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+}
+
+.ups-char-combo-modes > .ups-char-combo-opt {
+  min-height: 32px;
+  padding: 5px 9px;
+  border-bottom: 0;
+  border-radius: 6px;
+}
+
+.ups-char-combo-list > .ups-char-combo-opt:last-child {
+  border-bottom: 0;
 }
 
 .ups-char-combo-opt:hover:not(:disabled) {
@@ -1824,6 +1963,60 @@ export const SHADOW_CSS = String.raw`
   font-weight: 600;
 }
 
+.ups-char-opt-main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ups-char-opt-name {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ups-char-combo-opt.is-selected .ups-char-opt-name {
+  font-weight: 650;
+}
+
+.ups-char-opt-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.ups-char-opt-wb {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ups-fg-muted);
+  max-width: 132px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ups-multichar-box {
+  border-top: 1px solid var(--ups-border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-multichar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 7px;
+  max-height: 132px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
 .ups-link-btn {
   padding: 0;
   border: 0;
@@ -1834,22 +2027,80 @@ export const SHADOW_CSS = String.raw`
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+  align-self: flex-start;
 }
 
 .ups-link-btn:hover {
   color: var(--ups-accent-hover);
 }
 
-.ups-lexicon-panel,
-.ups-sections-panel {
-  border: 1px solid var(--ups-border);
+/* Unified Composer Box & In-Place Expandable Module Box (Zero box-below-box clutter!) */
+.ups-composer-box {
+  border: 1px solid var(--ups-border-strong);
   border-radius: 8px;
-  background-color: var(--ups-input-bg);
-  padding: 8px 10px;
+  background-color: var(--ups-surface);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.14s ease;
+}
+
+.ups-composer-box:focus-within {
+  border-color: var(--ups-accent);
+}
+
+.ups-composer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  max-height: 300px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background-color: var(--ups-input-bg);
+  border-bottom: 1px solid var(--ups-border);
+}
+
+.ups-composer-box > .ups-textarea,
+.ups-composer-box > .ups-input {
+  border: 0;
+  border-radius: 0;
+  background-color: var(--ups-surface);
+}
+
+.ups-composer-box > .ups-textarea:focus,
+.ups-composer-box > .ups-input:focus {
+  outline: none;
+  background-color: var(--ups-surface);
+}
+
+.ups-composer-box > .ups-lexicon-panel,
+.ups-composer-box > .ups-tray {
+  border: 0;
+  border-top: 1px solid var(--ups-border);
+  border-radius: 0;
+  background-color: var(--ups-input-bg);
+}
+
+.ups-inline-module {
+  border: 1px solid var(--ups-border-strong);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ups-lexicon-panel,
+.ups-sections-panel {
+  border: 0;
+  border-top: 1px solid var(--ups-border);
+  border-radius: 0;
+  background-color: var(--ups-surface);
+  padding: 10px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 310px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -1910,7 +2161,7 @@ export const SHADOW_CSS = String.raw`
 .ups-lexicon-cat-title {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--ups-fg-muted);
+  color: var(--ups-fg);
 }
 
 .ups-lexicon-chips {
@@ -1925,12 +2176,13 @@ export const SHADOW_CSS = String.raw`
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 7px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--ups-border-strong);
+  padding: 8px 11px;
   background-color: var(--ups-input-bg);
 }
 
+.ups-sections-bar > .ups-sections-panel {
+  flex: 1 1 100%; min-width: 0; padding: 8px 0 0; background: none;
+}
 .ups-sections-bar-info {
   display: flex;
   flex-direction: column;
@@ -1948,17 +2200,23 @@ export const SHADOW_CSS = String.raw`
 .ups-section-group-box {
   border: 1px solid var(--ups-border);
   border-radius: 7px;
-  background-color: var(--ups-surface);
-  padding: 6px 8px;
+  background-color: var(--ups-input-bg);
+  padding: 7px 9px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+}
+
+.ups-section-group-title {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ups-fg);
 }
 
 .ups-section-items-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 7px 14px;
 }
 
 .ups-sec-group {
@@ -1997,17 +2255,17 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-companion-section {
-  border: 1px dashed var(--ups-border-strong);
-  border-radius: 9px;
+  border: 1px solid var(--ups-border);
+  border-radius: 10px;
   background-color: var(--ups-surface);
-  padding: 8px 11px;
+  box-shadow: var(--ups-card-shadow);
+  padding: 10px 13px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .ups-companion-section.has-companions {
-  border-style: solid;
   border-color: var(--ups-border-strong);
 }
 
@@ -2015,7 +2273,7 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 6px;
+  padding-top: 8px;
   border-top: 1px solid var(--ups-border);
 }
 
@@ -2037,14 +2295,32 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-split-box {
-  border: 1px solid var(--ups-border);
+  border: 1px solid var(--ups-border-strong);
   border-left: 3px solid var(--ups-accent);
   border-radius: 8px;
   background-color: var(--ups-input-bg);
-  padding: 8px 10px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+}
+
+.ups-split-head {
+  padding: 8px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ups-split-drawer {
+  padding: 8px 11px;
+  border-top: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .ups-split-hint {
@@ -2052,13 +2328,14 @@ export const SHADOW_CSS = String.raw`
   min-height: 28px;
   max-height: 28px;
   padding: 0 10px;
+  gap: 5px;
   border-radius: 6px;
   border: 1px solid var(--ups-border-strong);
   background-color: var(--ups-surface);
   color: var(--ups-fg);
   font-family: inherit;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2075,7 +2352,6 @@ export const SHADOW_CSS = String.raw`
   border-color: var(--ups-accent);
   background-color: var(--ups-accent-soft);
   color: var(--ups-accent);
-  font-weight: 600;
 }
 
 .ups-history-popover {
@@ -2148,9 +2424,9 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ups-fg-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ups-fg);
 }
 
 .ups-input,
@@ -2385,15 +2661,41 @@ export const SHADOW_CSS = String.raw`
   flex-wrap: wrap;
 }
 
-/* Compact Grouped Settings Row (No widescreen space-between chasm!) */
+/* Compact Bordered Setting Tiles & Tight Inline Toggle Pills (Zero mid-air floating switches & zero 600px chasms!) */
+.ups-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.ups-setting-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  min-width: 0;
+}
+
+.ups-setting-tile-wide {
+  grid-column: 1 / -1;
+}
+
 .ups-setting-row {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 16px;
-  padding: 5px 0;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
   min-width: 0;
-  max-width: 660px;
+  max-width: 480px;
 }
 
 .ups-setting-meta {
@@ -2401,12 +2703,28 @@ export const SHADOW_CSS = String.raw`
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  flex: 0 1 320px;
+  flex: 0 1 auto;
 }
 
 .ups-setting-control {
-  width: 168px;
+  width: 176px;
+  max-width: 100%;
   flex-shrink: 0;
+}
+
+.ups-inline-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-input-bg);
+  color: var(--ups-fg);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* Switch */
@@ -3172,20 +3490,20 @@ export const SHADOW_CSS = String.raw`
   }
 }
 
-@container plugin-win (max-width: 560px) {
-  .ups-grid-2 {
+@container plugin-win (max-width: 580px) {
+  .ups-grid-2,
+  .ups-setting-grid {
     grid-template-columns: 1fr;
   }
 
   .ups-setting-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
+    max-width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
   .ups-setting-meta {
-    flex: 1 1 auto;
-    width: 100%;
+    flex: 0 1 auto;
   }
 
   .ups-setting-control {
