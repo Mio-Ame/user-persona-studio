@@ -7,7 +7,7 @@ import {
 } from './src/host.js';
 import { createStudioUI } from './src/ui.js';
 
-export const EXTENSION_VERSION = '1.3.0';
+export const EXTENSION_VERSION = '1.4.0';
 
 function createDomEl(doc, tag, props = {}, children = []) {
   const node = doc.createElement(tag);
@@ -106,13 +106,26 @@ export async function createStudioController(options = {}) {
   let personaBtnEl = null;
   let drawerPersonaCheckbox = null;
   let drawerWandCheckbox = null;
+  let charListObserver = null;
+  let charListDebounceTimer = null;
   let registeredSlashOwned = false;
   let registeredSlashAliasOwned = false;
   let destroyed = false;
 
+  function syncCharAdaptButtonsVisibility(show) {
+    if (typeof doc.querySelectorAll !== 'function') return;
+    const btns = doc.querySelectorAll('[data-ups-char-adapt="true"]');
+    for (const btn of btns) {
+      btn.hidden = !show;
+      if (show) btn.removeAttribute('hidden');
+      else btn.setAttribute('hidden', '');
+    }
+  }
+
   function syncEntryVisibility(uiCfg) {
     const showPersona = uiCfg?.showPersonaBtn !== false;
     const showWand = uiCfg?.showWandMenu !== false;
+    const showCharAdapt = uiCfg?.showCharAdaptBtn !== false;
     if (personaBtnEl) {
       personaBtnEl.hidden = !showPersona;
       if (showPersona) personaBtnEl.removeAttribute('hidden');
@@ -123,6 +136,7 @@ export async function createStudioController(options = {}) {
       if (showWand) wandEntryEl.removeAttribute('hidden');
       else wandEntryEl.setAttribute('hidden', '');
     }
+    syncCharAdaptButtonsVisibility(showCharAdapt);
     if (drawerPersonaCheckbox) drawerPersonaCheckbox.checked = showPersona;
     if (drawerWandCheckbox) drawerWandCheckbox.checked = showWand;
   }
@@ -145,6 +159,88 @@ export async function createStudioController(options = {}) {
     mountTarget: options.mountTarget || doc.body,
     onEntryVisibilityChange: (uiCfg) => syncEntryVisibility(uiCfg),
   });
+
+  function mountCharacterListTriggers() {
+    if (destroyed) return;
+    const block = doc.getElementById('rm_print_characters_block') || doc.querySelector?.('#rm_print_characters_block');
+    if (!block || typeof block.querySelectorAll !== 'function') return;
+
+    const showCharAdapt = ui.getState().settings?.ui?.showCharAdaptBtn !== false;
+    const cards = block.querySelectorAll('.character_select');
+    for (const card of cards) {
+      if (!card || card.classList?.contains('bogus_folder_select') || card.classList?.contains('group_select')) {
+        continue;
+      }
+      const rawChid = card.getAttribute?.('data-chid') ?? card.getAttribute?.('chid');
+      const rawAvatar = card.getAttribute?.('data-avatar') ?? card.getAttribute?.('avatar') ?? '';
+      if ((rawChid === null || rawChid === undefined || String(rawChid).trim() === '') && !String(rawAvatar).trim()) {
+        continue;
+      }
+      const existingBtn = card.querySelector?.('[data-ups-char-adapt="true"]');
+      if (existingBtn) {
+        existingBtn.hidden = !showCharAdapt;
+        if (showCharAdapt) existingBtn.removeAttribute('hidden');
+        else existingBtn.setAttribute('hidden', '');
+        continue;
+      }
+
+      const btn = createDomEl(doc, 'button', {
+        type: 'button',
+        className: 'menu_button interactable ups-char-adapt-btn',
+        title: '基于此角色卡适配 User 人设（不切换当前对话）',
+        'data-ups-char-adapt': 'true',
+        'aria-label': '基于此角色卡适配 User 人设',
+        text: '人设适配',
+        hidden: !showCharAdapt,
+      });
+
+      const isolateEvent = (ev) => {
+        ev.preventDefault?.();
+        ev.stopPropagation?.();
+      };
+      btn.addEventListener('mousedown', isolateEvent, { signal });
+      btn.addEventListener('touchstart', isolateEvent, { passive: false, signal });
+      btn.addEventListener('click', (ev) => {
+        isolateEvent(ev);
+        if (destroyed) return;
+        const chidVal = card.getAttribute?.('data-chid') ?? card.getAttribute?.('chid') ?? rawChid;
+        const avatarVal = card.getAttribute?.('data-avatar') ?? card.getAttribute?.('avatar') ?? rawAvatar;
+        ui.openForCharacter({ chid: chidVal, avatar: avatarVal }).catch(() => {});
+      }, { signal });
+
+      const targetContainer =
+        card.querySelector?.('.character_name_block') ||
+        card.querySelector?.('.character_select_container') ||
+        card;
+      targetContainer.appendChild(btn);
+    }
+  }
+
+  function ensureCharacterListObserver() {
+    if (destroyed || charListObserver) return;
+    const ObserverCtor = win.MutationObserver || globalThis.MutationObserver;
+    if (typeof ObserverCtor !== 'function') return;
+    const observeRoot =
+      doc.getElementById('rm_print_characters_block') ||
+      doc.getElementById('right-nav-panel') ||
+      doc.body;
+    if (!observeRoot) return;
+
+    charListObserver = new ObserverCtor(() => {
+      if (destroyed) return;
+      if (charListDebounceTimer) clearTimeout(charListDebounceTimer);
+      charListDebounceTimer = setTimeout(() => {
+        charListDebounceTimer = null;
+        mountCharacterListTriggers();
+      }, 60);
+      charListDebounceTimer?.unref?.();
+    });
+    try {
+      charListObserver.observe(observeRoot, { childList: true, subtree: true });
+    } catch {
+      charListObserver = null;
+    }
+  }
 
   function mountHostEntries() {
     if (destroyed) return;
@@ -264,6 +360,8 @@ export async function createStudioController(options = {}) {
       personaRow.appendChild(personaBtnEl);
     }
 
+    mountCharacterListTriggers();
+    ensureCharacterListObserver();
     syncEntryVisibility(ui.getState().settings.ui);
   }
 
@@ -303,11 +401,13 @@ export async function createStudioController(options = {}) {
     }
   }
 
-  // Subscribe to SillyTavern APP_READY & CHAT_CHANGED using exact EventEmitter API
+  // Subscribe to SillyTavern APP_READY, CHAT_CHANGED & character list updates using exact EventEmitter API
   const eventSource = ctx?.eventSource || null;
   const eventTypes = ctx?.eventTypes || ctx?.event_types || {};
   const appReadyEvent = eventTypes.APP_READY || 'app_ready';
   const chatChangedEvent = eventTypes.CHAT_CHANGED || 'chat_changed';
+  const charEditedEvent = eventTypes.CHARACTER_EDITED || 'character_edited';
+  const charDeletedEvent = eventTypes.CHARACTER_DELETED || 'character_deleted';
 
   const onAppReady = () => {
     mountHostEntries();
@@ -316,10 +416,16 @@ export async function createStudioController(options = {}) {
   const onChatChanged = () => {
     ui.refreshContext();
   };
+  const onCharactersChanged = () => {
+    mountCharacterListTriggers();
+    ui.refreshContext();
+  };
 
   if (eventSource && typeof eventSource.on === 'function') {
     eventSource.on(appReadyEvent, onAppReady);
     eventSource.on(chatChangedEvent, onChatChanged);
+    eventSource.on(charEditedEvent, onCharactersChanged);
+    eventSource.on(charDeletedEvent, onCharactersChanged);
   }
 
   mountHostEntries();
@@ -330,11 +436,26 @@ export async function createStudioController(options = {}) {
     destroyed = true;
     controller.abort();
 
+    if (charListDebounceTimer) {
+      clearTimeout(charListDebounceTimer);
+      charListDebounceTimer = null;
+    }
+    if (charListObserver) {
+      try {
+        charListObserver.disconnect();
+      } catch {
+        // ignore
+      }
+      charListObserver = null;
+    }
+
     if (eventSource) {
       const removeFn = eventSource.removeListener?.bind(eventSource) ?? eventSource.off?.bind(eventSource);
       if (removeFn) {
         removeFn(appReadyEvent, onAppReady);
         removeFn(chatChangedEvent, onChatChanged);
+        removeFn(charEditedEvent, onCharactersChanged);
+        removeFn(charDeletedEvent, onCharactersChanged);
       }
     }
 
@@ -361,6 +482,9 @@ export async function createStudioController(options = {}) {
       wandEntryEl?.remove();
       extSettingsCardEl?.remove();
       personaBtnEl?.remove();
+      for (const btn of doc.querySelectorAll?.('[data-ups-char-adapt="true"]') || []) {
+        btn.remove();
+      }
     } catch {
       // ignore
     }
@@ -374,6 +498,7 @@ export async function createStudioController(options = {}) {
 
   return {
     open: () => ui.open(),
+    openForCharacter: (ref, opts) => ui.openForCharacter(ref, opts),
     close: () => ui.close(),
     toggle: () => ui.toggle(),
     destroy,

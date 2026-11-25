@@ -735,34 +735,342 @@ export async function listPersonas(deps = {}) {
   return list;
 }
 
-export async function getActiveCharacterContext(options = {}, deps = {}) {
+function pickOwnCharacterEntry(map, id) {
+  if (!map || (typeof map !== 'object' && !Array.isArray(map))) return null;
+  if (id !== undefined && id !== null && id !== '') {
+    if (Object.hasOwn(map, id)) return map[id];
+    const strId = String(id);
+    if (Object.hasOwn(map, strId)) return map[strId];
+    const numId = Number(id);
+    if (Number.isFinite(numId) && Object.hasOwn(map, numId)) return map[numId];
+  }
+  return null;
+}
+
+function isValidCharacterEntry(ch) {
+  if (!ch || typeof ch !== 'object') return false;
+  const name = String(ch.name ?? '').trim();
+  const avatar = String(ch.avatar ?? '').trim();
+  if (!name || !avatar) return false;
+  if (name === 'SillyTavern System') return false;
+  return true;
+}
+
+function resolveCharacterPrimaryWorldName(character) {
+  return String(
+    character?.data?.extensions?.world ??
+      character?.extensions?.world ??
+      ''
+  ).trim();
+}
+
+function resolveCharLoreExtraBooks(character, ctx, deps, bridge, worldInfoMod) {
+  const avatar = String(character?.avatar ?? '').trim();
+  if (!avatar) return [];
+  const baseName = avatar.replace(/\.[^/.]+$/, '');
+  const charLoreList =
+    deps?.charLore ??
+    bridge?.charLore ??
+    ctx?.worldInfo?.charLore ??
+    worldInfoMod?.charLore ??
+    null;
+  if (!Array.isArray(charLoreList)) return [];
+
+  const extras = [];
+  for (const item of charLoreList) {
+    if (!item || typeof item !== 'object') continue;
+    const itemName = String(item.name ?? '').trim();
+    if (!itemName) continue;
+    if (itemName === avatar || itemName === baseName) {
+      if (Array.isArray(item.extraBooks)) {
+        for (const b of item.extraBooks) {
+          const clean = String(b ?? '').trim();
+          if (clean && !extras.includes(clean)) extras.push(clean);
+        }
+      }
+    }
+  }
+  return extras;
+}
+
+function normalizeRawWorldbookEntries(rawEntries, { bookName, sourceType }) {
+  const out = [];
+  if (!rawEntries) return out;
+  const list = Array.isArray(rawEntries)
+    ? rawEntries
+    : typeof rawEntries === 'object'
+      ? Object.values(rawEntries)
+      : [];
+
+  let fallbackIdx = 0;
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rawContent = String(entry.content ?? '').trim();
+    if (!rawContent) continue;
+
+    const uid =
+      entry.uid !== undefined && entry.uid !== null && String(entry.uid).trim() !== ''
+        ? String(entry.uid)
+        : String(entry.id ?? fallbackIdx);
+    fallbackIdx += 1;
+
+    const keys = Array.isArray(entry.key)
+      ? entry.key.map((k) => String(k ?? '').trim()).filter(Boolean)
+      : Array.isArray(entry.keys)
+        ? entry.keys.map((k) => String(k ?? '').trim()).filter(Boolean)
+        : [];
+    const comment = String(entry.comment ?? entry.name ?? '').trim() || keys[0] || `条目 ${uid}`;
+    const defaultEnabled =
+      entry.enabled !== undefined && entry.disable === undefined
+        ? Boolean(entry.enabled)
+        : !Boolean(entry.disable);
+    const order = Number.isFinite(Number(entry.order))
+      ? Number(entry.order)
+      : Number.isFinite(Number(entry.insertion_order))
+        ? Number(entry.insertion_order)
+        : 100;
+
+    out.push({
+      entryKey: `${sourceType}::${bookName}::${uid}`,
+      sourceType,
+      bookName,
+      uid,
+      comment,
+      keys,
+      content: rawContent,
+      constant: Boolean(entry.constant),
+      selective: entry.selective !== false,
+      defaultEnabled,
+      order,
+    });
+  }
+  return out;
+}
+
+async function fetchSingleWorldbookData(worldName, deps = {}, bridge = null) {
+  let wbData = null;
+  const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
+  if (typeof fetchImpl === 'function') {
+    try {
+      const headers = await getHostRequestHeaders({}, deps);
+      const res = await fetchImpl('/api/worldinfo/get', {
+        method: 'POST',
+        headers,
+        cache: 'no-cache',
+        body: JSON.stringify({ name: worldName }),
+      });
+      if (res && res.ok && typeof res.json === 'function') {
+        wbData = await res.json();
+      }
+    } catch {
+      wbData = null;
+    }
+  }
+
+  if (!wbData) {
+    const loadWorldInfoFn = deps?.loadWorldInfo ?? bridge?.loadWorldInfo ?? null;
+    if (typeof loadWorldInfoFn === 'function') {
+      try {
+        wbData = await loadWorldInfoFn(worldName);
+      } catch {
+        wbData = null;
+      }
+    } else {
+      const mods = await loadHostModules({ worldInfo: true }, deps);
+      if (typeof mods.worldInfo?.loadWorldInfo === 'function') {
+        try {
+          wbData = await mods.worldInfo.loadWorldInfo(worldName);
+        } catch {
+          wbData = null;
+        }
+      }
+    }
+  }
+
+  return wbData;
+}
+
+export async function listCharacters(deps = {}) {
+  const ctx = await resolveHostContext(deps);
+  if (!ctx) return [];
+  const characters = ctx.characters;
+  if (!characters || (typeof characters !== 'object' && !Array.isArray(characters))) {
+    return [];
+  }
+
+  const activeId =
+    ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== ''
+      ? String(ctx.characterId)
+      : '';
+
+  const list = [];
+  const keys = Array.isArray(characters)
+    ? characters.map((_, idx) => String(idx))
+    : Object.keys(characters);
+
+  for (const chid of keys) {
+    const ch = pickOwnCharacterEntry(characters, chid);
+    if (!isValidCharacterEntry(ch)) continue;
+    list.push({
+      chid: String(chid),
+      avatar: String(ch.avatar ?? ''),
+      name: String(ch.name ?? '').trim(),
+      worldName: resolveCharacterPrimaryWorldName(ch),
+      isActive: Boolean(activeId && String(chid) === activeId),
+      shallow: Boolean(ch.shallow),
+    });
+  }
+
+  list.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return a.name.localeCompare(b.name, 'zh-CN');
+  });
+  return list;
+}
+
+export async function loadCharacterWorldbookEntries(targetOrWorldNames = {}, deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+
+  const worldNames = [];
+  const pushWorldName = (name) => {
+    const clean = String(name ?? '').trim();
+    if (clean && !worldNames.includes(clean)) {
+      worldNames.push(clean);
+    }
+  };
+
+  let characterObj = null;
+  let includeEmbedded = true;
+
+  if (typeof targetOrWorldNames === 'string') {
+    pushWorldName(targetOrWorldNames);
+    includeEmbedded = false;
+  } else if (Array.isArray(targetOrWorldNames)) {
+    for (const n of targetOrWorldNames) pushWorldName(n);
+    includeEmbedded = false;
+  } else if (targetOrWorldNames && typeof targetOrWorldNames === 'object') {
+    includeEmbedded = targetOrWorldNames.includeEmbedded !== false;
+    if (Array.isArray(targetOrWorldNames.worldNames)) {
+      for (const n of targetOrWorldNames.worldNames) pushWorldName(n);
+    }
+    if (targetOrWorldNames.worldName) {
+      pushWorldName(targetOrWorldNames.worldName);
+    }
+    if (targetOrWorldNames.character && typeof targetOrWorldNames.character === 'object') {
+      characterObj = targetOrWorldNames.character;
+    } else if (
+      (targetOrWorldNames.chid !== undefined || targetOrWorldNames.avatar) &&
+      ctx?.characters
+    ) {
+      if (targetOrWorldNames.chid !== undefined && targetOrWorldNames.chid !== null && targetOrWorldNames.chid !== '') {
+        characterObj = pickOwnCharacterEntry(ctx.characters, targetOrWorldNames.chid);
+      }
+      if (!characterObj && targetOrWorldNames.avatar) {
+        const list = Array.isArray(ctx.characters) ? ctx.characters : Object.values(ctx.characters);
+        characterObj = list.find((c) => c && c.avatar === targetOrWorldNames.avatar) || null;
+      }
+    }
+
+    if (characterObj) {
+      pushWorldName(resolveCharacterPrimaryWorldName(characterObj));
+      let worldInfoMod = null;
+      if (!deps?.charLore && !bridge?.charLore && !ctx?.worldInfo?.charLore) {
+        const mods = await loadHostModules({ worldInfo: true }, deps);
+        worldInfoMod = mods.worldInfo;
+      }
+      const extras = resolveCharLoreExtraBooks(characterObj, ctx, deps, bridge, worldInfoMod);
+      for (const extra of extras) pushWorldName(extra);
+    }
+  }
+
+  const entries = [];
+  // Non-destructive, low-concurrency sequential disk reads with immediate GC nulling
+  for (const worldName of worldNames) {
+    let wbData = await fetchSingleWorldbookData(worldName, deps, bridge);
+    if (wbData && wbData.entries) {
+      const normalized = normalizeRawWorldbookEntries(wbData.entries, {
+        bookName: worldName,
+        sourceType: 'world',
+      });
+      entries.push(...normalized);
+    }
+    wbData = null;
+  }
+
+  if (includeEmbedded && characterObj) {
+    const embeddedBook = characterObj?.data?.character_book ?? characterObj?.character_book ?? null;
+    if (embeddedBook && typeof embeddedBook === 'object' && embeddedBook.entries) {
+      const bookName = String(embeddedBook.name ?? '').trim() || `${String(characterObj.name ?? '角色卡').trim()}内置世界书`;
+      const normalizedEmbedded = normalizeRawWorldbookEntries(embeddedBook.entries, {
+        bookName,
+        sourceType: 'embedded',
+      });
+      entries.push(...normalizedEmbedded);
+    }
+  }
+
+  return {
+    worldNames,
+    entries,
+  };
+}
+
+export async function getCharacterContext(target = null, options = {}, deps = {}) {
   const bridge = getBridge();
   const ctx = await resolveHostContext(deps);
   if (!ctx) return null;
-
-  const characterId = ctx.characterId;
-  if (characterId === undefined || characterId === null || characterId === '') {
-    return null;
-  }
 
   const characters = ctx.characters;
   if (!characters || (typeof characters !== 'object' && !Array.isArray(characters))) {
     return null;
   }
 
-  const pickOwnCharacter = (map, id) => {
-    if (!map || (typeof map !== 'object' && !Array.isArray(map))) return null;
-    if (Object.hasOwn(map, id)) return map[id];
-    const numId = Number(id);
-    if (Number.isFinite(numId) && Object.hasOwn(map, numId)) return map[numId];
-    return null;
-  };
+  let characterId = null;
+  let character = null;
 
-  let character = pickOwnCharacter(characters, characterId);
+  const targetObj =
+    target && typeof target === 'object'
+      ? target
+      : target !== null && target !== undefined && target !== ''
+        ? { chid: target }
+        : null;
+
+  if (targetObj) {
+    if (targetObj.chid !== undefined && targetObj.chid !== null && targetObj.chid !== '') {
+      const candidate = pickOwnCharacterEntry(characters, targetObj.chid);
+      if (candidate && typeof candidate === 'object') {
+        characterId = targetObj.chid;
+        character = candidate;
+      }
+    }
+    if (!character && targetObj.avatar) {
+      const keys = Array.isArray(characters)
+        ? characters.map((_, idx) => String(idx))
+        : Object.keys(characters);
+      for (const k of keys) {
+        const candidate = pickOwnCharacterEntry(characters, k);
+        if (candidate && candidate.avatar === targetObj.avatar) {
+          characterId = k;
+          character = candidate;
+          break;
+        }
+      }
+    }
+  } else {
+    characterId = ctx.characterId;
+    if (characterId === undefined || characterId === null || characterId === '') {
+      return null;
+    }
+    character = pickOwnCharacterEntry(characters, characterId);
+  }
+
   if (!character || typeof character !== 'object') {
     return null;
   }
 
+  // Hydrate shallow card WITHOUT ever switching ctx.characterId or calling selectCharacterById
+  let hydratedViaApi = false;
   if (character.shallow && options?.unshallow !== false) {
     try {
       if (typeof ctx.unshallowCharacter === 'function') {
@@ -773,14 +1081,45 @@ export async function getActiveCharacterContext(options = {}, deps = {}) {
     } catch {
       // Non-fatal: continue with currently available fields
     }
-    const refreshed = pickOwnCharacter(ctx.characters, characterId);
+    const refreshed = pickOwnCharacterEntry(ctx.characters, characterId);
     if (refreshed && typeof refreshed === 'object') {
       character = refreshed;
+    }
+    if (character.shallow && character.avatar) {
+      const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
+      if (typeof fetchImpl === 'function') {
+        try {
+          const headers = await getHostRequestHeaders({}, deps);
+          const res = await fetchImpl('/api/characters/get', {
+            method: 'POST',
+            headers,
+            cache: 'no-cache',
+            body: JSON.stringify({ avatar_url: character.avatar }),
+          });
+          if (res && res.ok && typeof res.json === 'function') {
+            const fullCard = await res.json();
+            if (fullCard && typeof fullCard === 'object') {
+              character = {
+                ...character,
+                ...fullCard,
+                data: {
+                  ...(character.data && typeof character.data === 'object' ? character.data : {}),
+                  ...(fullCard.data && typeof fullCard.data === 'object' ? fullCard.data : {}),
+                },
+                shallow: false,
+              };
+              hydratedViaApi = true;
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
     }
   }
 
   let fields = {};
-  if (typeof ctx.getCharacterCardFields === 'function') {
+  if (!hydratedViaApi && typeof ctx.getCharacterCardFields === 'function') {
     try {
       fields = ctx.getCharacterCardFields({ chid: characterId }) || {};
     } catch {
@@ -788,85 +1127,77 @@ export async function getActiveCharacterContext(options = {}, deps = {}) {
     }
   }
 
-  const worldName = String(character?.data?.extensions?.world ?? '').trim();
+  const worldName = resolveCharacterPrimaryWorldName(character);
   let worldSummary = worldName ? `关联世界书：${worldName}` : '';
+  let worldNames = worldName ? [worldName] : [];
+  let worldEntries = [];
 
-  if (worldName && options?.includeWorldSummary) {
-    let wbData = null;
-    const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
-    if (typeof fetchImpl === 'function') {
-      try {
-        const headers = await getHostRequestHeaders({}, deps);
-        const res = await fetchImpl('/api/worldinfo/get', {
-          method: 'POST',
-          headers,
-          cache: 'no-cache',
-          body: JSON.stringify({ name: worldName }),
-        });
-        if (res && res.ok && typeof res.json === 'function') {
-          wbData = await res.json();
-        }
-      } catch {
-        wbData = null;
-      }
+  if (options?.includeWorldSummary || options?.includeWorldEntries) {
+    const loaded = await loadCharacterWorldbookEntries({ character }, deps);
+    worldNames = loaded.worldNames.length > 0 ? loaded.worldNames : worldNames;
+    if (options?.includeWorldEntries) {
+      worldEntries = loaded.entries;
     }
-
-    if (!wbData) {
-      const loadWorldInfoFn = deps?.loadWorldInfo ?? bridge?.loadWorldInfo ?? null;
-      if (typeof loadWorldInfoFn === 'function') {
-        try {
-          wbData = await loadWorldInfoFn(worldName);
-        } catch {
-          wbData = null;
-        }
-      } else {
-        const mods = await loadHostModules({ worldInfo: true }, deps);
-        if (typeof mods.worldInfo?.loadWorldInfo === 'function') {
-          try {
-            wbData = await mods.worldInfo.loadWorldInfo(worldName);
-          } catch {
-            wbData = null;
-          }
-        }
-      }
+    const snippets = [];
+    for (const entry of loaded.entries) {
+      if (!entry.defaultEnabled) continue;
+      const label = entry.comment || entry.keys[0] || '设定';
+      snippets.push(`${label}：${entry.content}`);
+      if (snippets.length >= 3) break;
     }
-
-    if (wbData && wbData.entries && typeof wbData.entries === 'object') {
-      const snippets = [];
-      for (const entry of Object.values(wbData.entries)) {
-        if (!entry || entry.disable) continue;
-        const body = String(entry.content ?? '').trim();
-        if (!body) continue;
-        const label = String(entry.comment ?? '').trim() || (Array.isArray(entry.key) ? entry.key[0] : '') || '设定';
-        snippets.push(`${label}：${body}`);
-        if (snippets.length >= 3) break;
-      }
-      if (snippets.length > 0) {
-        const joined = snippets.join('\n');
-        worldSummary = joined.length > 600 ? `${joined.slice(0, 597)}...` : joined;
-      }
+    if (snippets.length > 0) {
+      const joined = snippets.join('\n');
+      worldSummary = joined.length > 600 ? `${joined.slice(0, 597)}...` : joined;
+    } else if (!worldSummary && worldNames.length > 0) {
+      worldSummary = `关联世界书：${worldNames.join('、')}`;
     }
-    // Clear reference immediately so large worldbook JSON can be GC'd
-    wbData = null;
   }
 
-  const rawChatId =
-    typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId;
+  const activeId =
+    ctx.characterId !== undefined && ctx.characterId !== null && ctx.characterId !== ''
+      ? String(ctx.characterId)
+      : '';
+  const isActive = Boolean(activeId && String(characterId) === activeId);
+  const rawChatId = isActive
+    ? typeof ctx.getCurrentChatId === 'function'
+      ? ctx.getCurrentChatId()
+      : ctx.chatId
+    : null;
+
+  const pickNonEmptyField = (...candidates) => {
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null) {
+        const text = String(candidate);
+        if (text !== '') return text;
+      }
+    }
+    return '';
+  };
 
   // Strictly public-only fields (omits system, jailbreak, creatorNotes, charDepthPrompt, mesExamples, persona)
-  return {
+  const result = {
     characterId: String(characterId),
     avatar: String(character.avatar ?? ''),
-    name: String(character.name ?? ctx.name2 ?? '').trim(),
+    name: String(character.name ?? (isActive ? ctx.name2 : '') ?? '').trim(),
     chatId: rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null,
+    isActive,
     worldName,
+    worldNames,
     worldSummary,
-    description: String(fields.description ?? character.description ?? character.data?.description ?? ''),
-    personality: String(fields.personality ?? character.personality ?? character.data?.personality ?? ''),
-    scenario: String(fields.scenario ?? character.scenario ?? character.data?.scenario ?? ''),
-    firstMessage: String(fields.firstMessage ?? character.first_mes ?? character.data?.first_mes ?? ''),
+    description: pickNonEmptyField(fields.description, character.description, character.data?.description),
+    personality: pickNonEmptyField(fields.personality, character.personality, character.data?.personality),
+    scenario: pickNonEmptyField(fields.scenario, character.scenario, character.data?.scenario),
+    firstMessage: pickNonEmptyField(fields.firstMessage, character.first_mes, character.data?.first_mes),
     shallow: Boolean(character.shallow),
   };
+  if (options?.includeWorldEntries) {
+    result.worldEntries = worldEntries;
+  }
+  return result;
+}
+
+export async function getActiveCharacterContext(options = {}, deps = {}) {
+  return getCharacterContext(null, options, deps);
 }
 
 export async function savePersonaToHost(payload = {}, deps = {}) {

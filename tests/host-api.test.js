@@ -18,7 +18,10 @@ import {
   saveSettings,
   getActivePersona,
   listPersonas,
+  listCharacters,
+  getCharacterContext,
   getActiveCharacterContext,
+  loadCharacterWorldbookEntries,
   savePersonaToHost,
   saveSupplementaryWorldbook,
   estimateHostTokens,
@@ -67,7 +70,7 @@ test('M1: manifest.json matches SillyTavern extension contract', () => {
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.3.0');
+  assert.equal(manifest.version, '1.4.0');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');
@@ -2897,4 +2900,173 @@ test('A26: runStudioGeneration honors minMaxTokens across host & custom transpor
   });
   assert.equal(capturedDirectBody.max_tokens, 8192);
   assert.deepEqual(customSettings, highSnapshot);
+});
+
+test('H7 (R1): listCharacters, getCharacterContext & loadCharacterWorldbookEntries read non-active cards and worldbooks non-destructively', async () => {
+  let saveWorldInfoCalls = 0;
+  let selectCharacterCalls = 0;
+
+  const primaryWorldbook = {
+    entries: {
+      0: { uid: 0, comment: '雾港规则', key: ['雾港'], content: '入夜后码头封锁。', disable: false, constant: true, order: 10 },
+      1: { uid: 1, comment: '隐藏禁区', key: ['灯塔'], content: '灯塔底层禁止外人进入。', disable: true, constant: false, order: 20 },
+    },
+  };
+  const extraWorldbook = {
+    entries: {
+      5: { uid: 5, comment: '补充商行', key: ['商行'], content: '港务局由沈氏代行调度。', disable: false, order: 30 },
+    },
+  };
+  const primarySnapshot = structuredClone(primaryWorldbook);
+  const extraSnapshot = structuredClone(extraWorldbook);
+
+  const characters = [
+    {
+      avatar: 'active_char.png',
+      name: '当前对话角色',
+      shallow: false,
+      data: { description: '当前角色简介', extensions: { world: '' } },
+    },
+    {
+      avatar: 'non_active.png',
+      name: '沈砚',
+      shallow: true,
+      data: {
+        extensions: { world: '雾港主书' },
+        character_book: {
+          name: '沈砚内置设定',
+          entries: [
+            { id: 'emb1', comment: '怀表秘密', keys: ['怀表'], content: '怀表内侧刻有年份。', enabled: true, order: 5 },
+          ],
+        },
+      },
+    },
+    {
+      avatar: 'sys.png',
+      name: 'SillyTavern System',
+      shallow: false,
+    },
+  ];
+
+  const ctx = {
+    characterId: 0,
+    name2: '当前对话角色',
+    chatId: 'chat-active',
+    characters,
+    selectCharacterById: () => {
+      selectCharacterCalls += 1;
+    },
+    unshallowCharacter: async (chid) => {
+      if (String(chid) === '1') {
+        characters[1].shallow = false;
+        characters[1].data.description = '港务局调度员';
+        characters[1].data.personality = '寡言克制';
+        characters[1].data.scenario = '雨夜港务大厅';
+        characters[1].data.first_mes = '灯还亮着。';
+        characters[1].data.system_prompt = 'PRIVATE_SYS';
+      }
+    },
+  };
+
+  const deps = {
+    ctx,
+    charLore: [{ name: 'non_active', extraBooks: ['补充商行书'] }],
+    saveWorldInfo: async () => {
+      saveWorldInfoCalls += 1;
+    },
+    fetch: async (url, init) => {
+      if (url === '/api/worldinfo/get') {
+        const body = JSON.parse(init.body);
+        if (body.name === '雾港主书') {
+          return { ok: true, json: async () => structuredClone(primaryWorldbook) };
+        }
+        if (body.name === '补充商行书') {
+          return { ok: true, json: async () => structuredClone(extraWorldbook) };
+        }
+      }
+      return { ok: false, status: 404 };
+    },
+    skipDynamicImport: true,
+  };
+
+  const listed = await listCharacters(deps);
+  assert.equal(listed.length, 2); // SillyTavern System filtered out
+  assert.equal(listed[0].chid, '0');
+  assert.equal(listed[0].isActive, true);
+  assert.equal(listed[1].chid, '1');
+  assert.equal(listed[1].isActive, false);
+
+  const nonActiveCtx = await getCharacterContext(
+    { chid: '1' },
+    { includeWorldSummary: true, includeWorldEntries: true },
+    deps
+  );
+  assert.equal(ctx.characterId, 0);
+  assert.equal(selectCharacterCalls, 0);
+  assert.equal(nonActiveCtx.name, '沈砚');
+  assert.equal(nonActiveCtx.isActive, false);
+  assert.equal(nonActiveCtx.description, '港务局调度员');
+  assert.equal(nonActiveCtx.worldEntries.length, 4);
+  assert.equal(nonActiveCtx.worldEntries.some((e) => e.comment === '隐藏禁区' && e.defaultEnabled === false), true);
+  assert.equal(nonActiveCtx.worldEntries.some((e) => e.comment === '补充商行' && e.sourceType === 'world'), true);
+  assert.equal(nonActiveCtx.worldEntries.some((e) => e.comment === '怀表秘密' && e.sourceType === 'embedded'), true);
+  assert.equal(Object.hasOwn(nonActiveCtx, 'system'), false);
+
+  // Original worldbooks and saveWorldInfo remain completely untouched
+  assert.equal(saveWorldInfoCalls, 0);
+  assert.deepEqual(primaryWorldbook, primarySnapshot);
+  assert.deepEqual(extraWorldbook, extraSnapshot);
+
+  // Shallow non-active fallback via /api/characters/get must NOT be shadowed by empty strings from getCharacterCardFields
+  const shallowCharacters = [
+    { avatar: 'active.png', name: '当前甲', shallow: false, data: { description: '甲' } },
+    { avatar: 'shallow_api.png', name: '浅卡乙', shallow: true },
+  ];
+  let shallowSelectCalls = 0;
+  const shallowCtx = {
+    characterId: 0,
+    characters: shallowCharacters,
+    selectCharacterById: () => {
+      shallowSelectCalls += 1;
+    },
+    getCharacterCardFields: () => ({
+      description: '',
+      personality: '',
+      scenario: '',
+      firstMessage: '',
+    }),
+  };
+  const shallowResult = await getCharacterContext(
+    { chid: '1' },
+    { includeWorldSummary: false },
+    {
+      ctx: shallowCtx,
+      fetch: async (url, init) => {
+        if (url === '/api/characters/get') {
+          const body = JSON.parse(init.body);
+          assert.equal(body.avatar_url, 'shallow_api.png');
+          return {
+            ok: true,
+            json: async () => ({
+              data: {
+                description: '来自API的真实角色简介',
+                personality: '沉稳克制',
+                scenario: '雨夜码头',
+                first_mes: '你比约定时间晚了五分钟。',
+              },
+            }),
+          };
+        }
+        return { ok: false, status: 404 };
+      },
+      skipDynamicImport: true,
+    }
+  );
+  assert.equal(shallowCtx.characterId, 0);
+  assert.equal(shallowSelectCalls, 0);
+  assert.equal(shallowResult.shallow, false);
+  assert.equal(shallowResult.description, '来自API的真实角色简介');
+  assert.equal(shallowResult.personality, '沉稳克制');
+  assert.equal(shallowResult.scenario, '雨夜码头');
+  assert.equal(shallowResult.firstMessage, '你比约定时间晚了五分钟。');
 });

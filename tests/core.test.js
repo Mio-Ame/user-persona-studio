@@ -12,6 +12,7 @@ import {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
   ANTI_PARROT_CLAUSE,
@@ -91,8 +92,12 @@ test('Group 1.1: presets.js exports structural constants, balanced vibe anchors,
     '[私密未公开]',
   ]);
   assert.equal(VIBE_ANCHOR_EXAMPLES.length, 20);
-  for (const v of ['清冷感', '娇气包', '高冷寡言', '冷脸萌', '外冷内热', '嘴硬心软']) {
+  for (const v of ['沉稳可靠', '外冷内热', '痞帅散漫', '少年意气', '冷面护短', '清冷克制', '冷脸萌', '嘴硬心软']) {
     assert.ok(VIBE_ANCHOR_EXAMPLES.includes(v), `Missing vibe anchor: ${v}`);
+  }
+  assert.equal(DEFAULT_MUST_HAVE_TEMPLATES.length, 4);
+  for (const tpl of DEFAULT_MUST_HAVE_TEMPLATES) {
+    assert.ok(tpl.id && tpl.label && tpl.content);
   }
   assert.deepEqual(SPOTLIGHT_MODES.map((m) => m.id), ['balanced', 'featured', 'light_daily']);
   assert.deepEqual(BACKSTORY_MODES.map((m) => m.id), ['light_vibe', 'blank_self', 'rich_arc']);
@@ -158,19 +163,21 @@ test('Group 1.3: BUILTIN_PRESET_SCHEMES defines 3 relatable built-in presets wit
   assert.equal(longform_coact.style, 'longform');
   assert.equal(longform_coact.targetChars, 1500);
   assert.deepEqual(longform_coact.targetTokens, { min: 1780, max: 2270 });
+  assert.equal(longform_coact.maxTokens, 5200);
 
   assert.equal(player_controlled.name, '适合不抢话党');
   assert.equal(player_controlled.style, 'objective');
   assert.equal(player_controlled.targetChars, 600);
   assert.deepEqual(player_controlled.targetTokens, { min: 720, max: 900 });
+  assert.equal(player_controlled.maxTokens, 2800);
 
-  assert.equal(persona_refactor.name, '旧人设改写与跨卡重构');
+  assert.equal(persona_refactor.name, '旧人设改写');
   assert.equal(persona_refactor.style, 'refactor');
   assert.equal(persona_refactor.builtin, true);
   assert.equal(persona_refactor.targetChars, 1500);
   assert.deepEqual(persona_refactor.targetTokens, { min: 1780, max: 2270 });
   assert.equal(persona_refactor.temperature, 0.65);
-  assert.equal(persona_refactor.maxTokens, 3300);
+  assert.equal(persona_refactor.maxTokens, 5200);
 
   const requiredSlots = ['role', 'context', 'craft', 'taste', 'banned', 'pacing', 'format'];
   for (const scheme of [longform_coact, player_controlled, persona_refactor]) {
@@ -253,6 +260,24 @@ test('Group 2.1: createDefaultSettings returns valid deep-isolated defaults, 3 s
   assert.equal(s1.ui.geometry.width, 1080);
   assert.equal(s1.ui.geometry.height, 700);
   assert.equal(s1.ui.minimized, false);
+  assert.equal(s1.ui.mustHaveTemplates.length, 4);
+
+  // Legacy v1.0 saved scheme names & old tight maxTokens automatically migrate to clean beginner names & higher maxTokens
+  const migratedLegacy = createDefaultSettings({
+    schemes: [
+      { ...BUILTIN_PRESET_SCHEMES.longform_coact, name: '长文代演主力方案（含语气与反应）', maxTokens: 3200 },
+      { ...BUILTIN_PRESET_SCHEMES.player_controlled, name: '纯手控客观方案（零代演台词）', maxTokens: 1200 },
+      { ...BUILTIN_PRESET_SCHEMES.persona_refactor, name: '旧人设改写与跨卡重构', maxTokens: 3300 },
+    ],
+  });
+  assert.deepEqual(
+    migratedLegacy.schemes.map((s) => s.name),
+    ['适合抢话党', '适合不抢话党', '旧人设改写']
+  );
+  assert.deepEqual(
+    migratedLegacy.schemes.map((s) => s.maxTokens),
+    [5200, 2800, 5200]
+  );
 
   s1.schemes[0].entries[0].content = 'changed';
   assert.notEqual(s2.schemes[0].entries[0].content, 'changed');
@@ -691,7 +716,7 @@ test('Group 4.2: exportSillyTavernPreset handles user / assistant_prefill tail m
   assert.equal(expUserJson.includes('私密拉黑条目'), false);
   assert.equal(expUser.prompts.some((p) => p.identifier === 'ups_draft_audit'), false);
   assert.equal(expUser.temperature, 0.55);
-  assert.equal(expUser.openai_max_tokens, 1400);
+  assert.equal(expUser.openai_max_tokens, 2800);
   const orderUser = expUser.prompt_order[0].order;
   const chatIdx = orderUser.findIndex((o) => o.identifier === 'chatHistory');
   assert.equal(orderUser[chatIdx + 1].identifier, 'ups_tail_trigger');
@@ -1471,4 +1496,242 @@ test('Group 10.3: extractPersonaPoints extracts categorized selectable points wi
   assert.equal(pts[2].keepByDefault, true);
   assert.equal(pts[3].category, '当前身份与关系');
   assert.equal(pts[3].keepByDefault, false);
+});
+
+test('Group 11.1 (R3): extractPersonaPoints parses structured/YAML personas cleanly without misclassifying basic info as personality', () => {
+  const ningYumianYaml = [
+    '姓名: "宁雨眠"',
+    '别名:',
+    '  - "Undine"  # English name',
+    '  - "眠眠" #家人、熟人、{{char}}一般称呼',
+    '  - "小棉花"  # 幼时乳名，因为小时候特别爱抓着棉花玩',
+    '  - "心与共栖"  # 网络博主id',
+    '',
+    '基本身份:',
+    '  年龄: "19岁"',
+    '  性别: "女"',
+    '  生日："7月16日"',
+    '  职业或身份: "重点大学在读本科生、生活与穿搭博主、宁家养女"',
+    '  居住地: "和{{char}}一起住"',
+    '',
+    '外貌与体型: |',
+    '  幼态鹅蛋脸，睫毛浓密，浅杏眼眸清澈明亮，肤色白润。',
+    '  身材纤细偏娇小，常穿柔和针织衫。',
+    '',
+    '性格与行为逻辑: |',
+    '  在外人面前温和有礼，日常相处时会把脆弱藏在微笑后面。',
+    '',
+    '成长经历: |',
+    '  十岁那年被宁家收养，自小学会察言观色。',
+    '',
+    '生活习惯: |',
+    '  偏爱热牛奶和软糯甜点，睡前习惯听白噪音。',
+  ].join('\n');
+
+  const pts = extractPersonaPoints(ningYumianYaml, 36);
+  // Zero dangling empty header points like "别名:" or "基本身份:" or "外貌与体型: |"
+  assert.equal(pts.some((p) => /^(?:别名|基本身份|外貌与体型|性格与行为逻辑|成长经历|生活习惯)[:：]?$/.test(p.text.trim())), false);
+
+  const namePt = pts.find((p) => p.text.includes('宁雨眠'));
+  assert.ok(namePt);
+  assert.equal(namePt.category, '基础信息');
+  assert.equal(namePt.keepByDefault, true);
+
+  const aliasPts = pts.filter((p) => p.text.startsWith('别名：'));
+  assert.ok(aliasPts.length >= 1);
+  for (const ap of aliasPts) {
+    assert.equal(ap.category, '基础信息');
+    assert.equal(ap.keepByDefault, true);
+  }
+  assert.ok(aliasPts.some((p) => p.fullText.includes('眠眠（家人、熟人、{{char}}一般称呼）')));
+
+  const identityAgePt = pts.find((p) => p.text.includes('19岁') && p.text.includes('7月16日'));
+  assert.ok(identityAgePt);
+  assert.equal(identityAgePt.category, '基础信息');
+
+  const occPt = pts.find((p) => p.text.includes('职业或身份'));
+  assert.ok(occPt);
+  assert.equal(occPt.category, '当前身份与关系');
+  assert.equal(occPt.keepByDefault, false);
+
+  const resPt = pts.find((p) => p.text.includes('和{{char}}一起住'));
+  assert.ok(resPt);
+  assert.equal(resPt.category, '当前身份与关系');
+  assert.equal(resPt.keepByDefault, false);
+
+  const appPt = pts.find((p) => p.text.includes('幼态鹅蛋脸'));
+  assert.ok(appPt);
+  assert.equal(appPt.category, '外貌与印象');
+
+  const persPt = pts.find((p) => p.text.includes('日常相处时会把脆弱藏在微笑后面'));
+  assert.ok(persPt);
+  assert.equal(persPt.category, '性格与底色');
+
+  const bgPt = pts.find((p) => p.text.includes('被宁家收养'));
+  assert.ok(bgPt);
+  assert.equal(bgPt.category, '经历与技能');
+
+  const habitPt = pts.find((p) => p.text.includes('热牛奶'));
+  assert.ok(habitPt);
+  assert.equal(habitPt.category, '习惯与喜好');
+});
+
+test('Group 11.2 (R3): extractPersonaPoints handles XML wrappers, nested YAML trees, Markdown nested bullets, and continuation lines', () => {
+  const mixedPersona = [
+    '<USER人设>',
+    '```yaml',
+    '外貌:',
+    '  面容:',
+    '    类型: "浓颜系"',
+    '    特点: "左眼下有一颗淡痣"',
+    '```',
+    '## 基本信息',
+    '- 姓名：程以窈',
+    '- 昵称或别称：',
+    '  - 窈窈：家人称呼',
+    '  - 小程：同事简称',
+    '- 住址：',
+    '  - 上海：静安公寓',
+    '别人对他的称呼: 楚霁寒/小师叔',
+    '楚小子/小寒',
+    '【目前处境】',
+    '- 刚接手城南旧书铺。',
+    '</USER人设>',
+  ].join('\n');
+
+  const pts = extractPersonaPoints(mixedPersona, 36);
+  const facePt = pts.find((p) => p.text.includes('浓颜系'));
+  assert.ok(facePt);
+  assert.equal(facePt.category, '外貌与印象');
+
+  const namePt = pts.find((p) => p.text.includes('程以窈'));
+  assert.ok(namePt);
+  assert.equal(namePt.category, '基础信息');
+
+  const nickPt = pts.find((p) => p.text.includes('窈窈') && p.text.includes('小程'));
+  assert.ok(nickPt);
+  assert.equal(nickPt.category, '基础信息');
+
+  const addrPt = pts.find((p) => p.text.includes('静安公寓'));
+  assert.ok(addrPt);
+  assert.equal(addrPt.category, '当前身份与关系');
+  assert.equal(addrPt.keepByDefault, false);
+
+  const contPt = pts.find((p) => p.text.includes('楚霁寒') && p.text.includes('楚小子'));
+  assert.ok(contPt);
+  assert.equal(contPt.category, '基础信息');
+
+  const sitPt = pts.find((p) => p.text.includes('城南旧书铺'));
+  assert.ok(sitPt);
+  assert.equal(sitPt.category, '当前身份与关系');
+});
+
+test('Group 11.3 (R1): buildGenerationMessages honors charContext.selectedWorldEntries including explicit empty array', () => {
+  const baseChar = {
+    name: '顾临',
+    description: '刑侦支队队长',
+    worldName: '港城档案',
+    worldSummary: '不该被兜底注入的旧摘要',
+  };
+
+  const filtered = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '法医搭档',
+    charContext: {
+      ...baseChar,
+      selectedWorldEntries: [
+        { comment: '港城警署架构', keys: ['警署', '支队'], content: '下设重案与法证两组。' },
+      ],
+    },
+  });
+  assert.ok(filtered.assembledPromptText.includes('港城警署架构'));
+  assert.ok(filtered.assembledPromptText.includes('下设重案与法证两组'));
+  assert.equal(filtered.assembledPromptText.includes('不该被兜底注入的旧摘要'), false);
+
+  const noneSelected = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '法医搭档',
+    charContext: {
+      ...baseChar,
+      selectedWorldEntries: [],
+    },
+  });
+  assert.equal(noneSelected.assembledPromptText.includes('港城警署架构'), false);
+  assert.equal(noneSelected.assembledPromptText.includes('不该被兜底注入的旧摘要'), false);
+});
+
+test('Group 11.4 (R3 regression): explicit core sections resist greedy prose heuristics, trailing # comments on empty containers preserve children, and times/URLs/apostrophes stay intact', () => {
+  const edgeYaml = [
+    '别名: # 称呼',
+    '  - "眠眠"',
+    '  - "小棉花"',
+    '性格与行为逻辑: |',
+    '  每次开场寒暄后就会迅速沉默，习惯观察他人反应。',
+    '成长经历: |',
+    '  自幼与父母关系冷淡，十八岁独自搬去外地求学。',
+    '外貌与体型: |',
+    '  开场给人冷淡距离感，常穿深灰大衣。',
+    '生活习惯: |',
+    '  19:30 准时吃晚饭。',
+    '  https://blog.example.com/u/123',
+    '  - don\'t panic # 遇事冷静',
+  ].join('\n');
+
+  const pts = extractPersonaPoints(edgeYaml, 36);
+
+  // 1. Empty container with trailing # comment keeps child bullets attached
+  assert.equal(pts.some((p) => p.fullText === '别名：称呼'), false);
+  const aliasPt = pts.find((p) => p.fullText.startsWith('别名：') && p.fullText.includes('眠眠') && p.fullText.includes('小棉花'));
+  assert.ok(aliasPt);
+  assert.equal(aliasPt.category, '基础信息');
+  assert.equal(aliasPt.keepByDefault, true);
+
+  // 2. Explicit core sections do NOT get misclassified as 当前身份与关系 by prose words like 开场 / 与...关系
+  const persPt = pts.find((p) => p.fullText.includes('每次开场寒暄后就会迅速沉默'));
+  assert.ok(persPt);
+  assert.equal(persPt.category, '性格与底色');
+  assert.equal(persPt.keepByDefault, true);
+
+  const histPt = pts.find((p) => p.fullText.includes('自幼与父母关系冷淡'));
+  assert.ok(histPt);
+  assert.equal(histPt.category, '经历与技能');
+  assert.equal(histPt.keepByDefault, true);
+
+  const appPt = pts.find((p) => p.fullText.includes('开场给人冷淡距离感'));
+  assert.ok(appPt);
+  assert.equal(appPt.category, '外貌与印象');
+  assert.equal(appPt.keepByDefault, true);
+
+  // 3. Unindented time (19:30) and URL (https://) are NOT rewritten to full-width colons
+  const unindentedTimeAndUrl = [
+    '19:30 准时吃晚饭。',
+    'https://blog.example.com/u/123',
+    '- don\'t panic # 遇事冷静',
+  ].join('\n');
+  const flatPts = extractPersonaPoints(unindentedTimeAndUrl, 36);
+  assert.ok(flatPts.some((p) => p.fullText === '19:30 准时吃晚饭。'));
+  assert.ok(flatPts.some((p) => p.fullText === 'https://blog.example.com/u/123'));
+  assert.ok(flatPts.some((p) => p.fullText === "don't panic（遇事冷静）"));
+
+  // 4. Nested relation keys under 基本身份: classify as 当前身份与关系 (keepByDefault: false)
+  const nestedRelationYaml = [
+    '基本身份:',
+    '  年龄: 20岁',
+    '  当前与{{char}}关系: 合租室友',
+    '  当前与char关系: 大学同学',
+    '  现在与{{char}}的关系: 青梅竹马',
+    '  和{{char}}的关系: 邻居',
+    '  人物关系: 互相照应',
+  ].join('\n');
+  const nestedRelPts = extractPersonaPoints(nestedRelationYaml, 36);
+  const nestedAgePt = nestedRelPts.find((p) => p.fullText.includes('20岁'));
+  assert.ok(nestedAgePt);
+  assert.equal(nestedAgePt.category, '基础信息');
+  assert.equal(nestedAgePt.keepByDefault, true);
+  for (const expectedVal of ['合租室友', '大学同学', '青梅竹马', '邻居', '互相照应']) {
+    const relPt = nestedRelPts.find((p) => p.fullText.includes(expectedVal));
+    assert.ok(relPt, `Expected relation point containing ${expectedVal}`);
+    assert.equal(relPt.category, '当前身份与关系');
+    assert.equal(relPt.keepByDefault, false);
+  }
 });

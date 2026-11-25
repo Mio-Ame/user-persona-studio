@@ -9,6 +9,7 @@ import {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
   ANTI_PARROT_CLAUSE,
@@ -30,6 +31,7 @@ export {
   DRAFT_END_MARKER,
   VISIBILITY_MARKERS,
   VIBE_ANCHOR_EXAMPLES,
+  DEFAULT_MUST_HAVE_TEMPLATES,
   SPOTLIGHT_MODES,
   BACKSTORY_MODES,
   ANTI_PARROT_CLAUSE,
@@ -167,7 +169,13 @@ export function computeLengthBudget(targetChars) {
   const tokensApprox = Math.max(1, Math.round(chars * 1.35));
   const tokensMin = Math.max(100, Math.round((charsMin * 1.35) / 10) * 10);
   const tokensMax = Math.max(tokensMin + 40, Math.round((charsMax * 1.35) / 10) * 10);
-  const recommendedMaxTokens = clampInt(Math.max(1024, Math.round(tokensMax * 1.45)), 512, 32768, 3300);
+  // Generous max_tokens headroom so draft self-check + reasoning/thinking + full persona never truncate
+  const recommendedMaxTokens = clampInt(
+    Math.max(2600, Math.round((tokensMax * 1.75 + 1200) / 100) * 100),
+    1024,
+    32768,
+    5200
+  );
   return {
     chars,
     charsMin,
@@ -209,6 +217,53 @@ function sanitizeSchemeEntry(entry, index = 0) {
     locked: Boolean(raw.locked),
     content: String(raw.content ?? ''),
   };
+}
+
+function normalizeBuiltinLegacyName(id, rawName) {
+  const trimmed = String(rawName || '').trim();
+  if (id === 'longform_coact') {
+    if (!trimmed || /^(?:长文代演|细致代演|适合抢话党)/u.test(trimmed)) return '适合抢话党';
+  } else if (id === 'player_controlled') {
+    if (!trimmed || /^(?:纯手控|适合不抢话党)/u.test(trimmed)) return '适合不抢话党';
+  } else if (id === 'persona_refactor') {
+    if (!trimmed || /^旧人设改写/u.test(trimmed)) return '旧人设改写';
+  }
+  return trimmed;
+}
+
+function normalizeBuiltinLegacyMaxTokens(id, rawMaxTokens, targetChars, fallbackMaxTokens) {
+  const num = Number(rawMaxTokens);
+  if (!Number.isFinite(num)) return fallbackMaxTokens;
+  if (id === 'longform_coact' && targetChars === 1500 && (num === 3200 || num === 3300)) {
+    return fallbackMaxTokens;
+  }
+  if (id === 'player_controlled' && targetChars === 600 && (num === 1200 || num === 1400)) {
+    return fallbackMaxTokens;
+  }
+  if (id === 'persona_refactor' && targetChars === 1500 && num === 3300) {
+    return fallbackMaxTokens;
+  }
+  return clampInt(rawMaxTokens, 256, 32768, fallbackMaxTokens);
+}
+
+function sanitizeMustHaveTemplates(rawTemplates) {
+  if (!Array.isArray(rawTemplates)) {
+    return deepClone(DEFAULT_MUST_HAVE_TEMPLATES);
+  }
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < rawTemplates.length; i += 1) {
+    const item = rawTemplates[i];
+    if (!item || typeof item !== 'object') continue;
+    const content = String(item.content ?? '').trim();
+    if (!content) continue;
+    const label = String(item.label ?? '').trim() || content.slice(0, 10);
+    let id = String(item.id || '').trim() || generateId(`tpl_${i}`);
+    while (seen.has(id)) id = generateId('tpl');
+    seen.add(id);
+    out.push({ id, label: label.slice(0, 24), content });
+  }
+  return out;
 }
 
 function sanitizeScheme(scheme, fallbackIndex = 0) {
@@ -260,11 +315,21 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     maxTokens = charBudget.tokensMax;
   }
 
+  const resolvedId = String(raw.id || '').trim() || generateId(`scheme_${fallbackIndex}`);
+  const isBuiltinId = BUILTIN_SCHEME_IDS.has(resolvedId);
+  const migratedName = isBuiltinId
+    ? normalizeBuiltinLegacyName(resolvedId, raw.name)
+    : String(raw.name || '').trim();
+  const effectiveBudget = computeLengthBudget(targetChars);
+  const migratedMaxTokens = isBuiltinId
+    ? normalizeBuiltinLegacyMaxTokens(resolvedId, raw.maxTokens, targetChars, effectiveBudget.recommendedMaxTokens)
+    : clampInt(raw.maxTokens, 256, 32768, defaultBudget.recommendedMaxTokens);
+
   return {
-    id: String(raw.id || '').trim() || generateId(`scheme_${fallbackIndex}`),
-    name: String(raw.name || '').trim() || `未命名方案 ${fallbackIndex + 1}`,
+    id: resolvedId,
+    name: migratedName || `未命名方案 ${fallbackIndex + 1}`,
     style,
-    builtin: Boolean(raw.builtin),
+    builtin: Boolean(raw.builtin || isBuiltinId),
     favorite: Boolean(raw.favorite),
     description: String(raw.description ?? ''),
     targetChars,
@@ -276,7 +341,7 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     prefillText: String(raw.prefillText ?? `${CORE_SECTION_HEADER}\n`),
     triggerText: String(raw.triggerText ?? DEFAULT_TRIGGER),
     temperature: clampNumber(raw.temperature, 0, 2, defaultTemp),
-    maxTokens: clampInt(raw.maxTokens, 256, 32768, defaultBudget.recommendedMaxTokens),
+    maxTokens: migratedMaxTokens,
     entries,
   };
 }
@@ -368,6 +433,7 @@ export function createDefaultSettings(overrides = {}) {
     ui: {
       showPersonaBtn: rawUi.showPersonaBtn !== false,
       showWandMenu: rawUi.showWandMenu !== false,
+      showCharAdaptBtn: rawUi.showCharAdaptBtn !== false,
       activeTab: VALID_UI_TABS.has(rawUi.activeTab) ? rawUi.activeTab : 'studio',
       mode: rawUi.mode === 'B' ? 'B' : 'A',
       subMode: VALID_UI_SUBMODES.has(rawUi.subMode) ? rawUi.subMode : 'de_label_reformat',
@@ -378,6 +444,7 @@ export function createDefaultSettings(overrides = {}) {
       visibilityTags: Boolean(rawUi.visibilityTags),
       draftAudit: rawUi.draftAudit !== false,
       antiParrot: rawUi.antiParrot !== false,
+      mustHaveTemplates: sanitizeMustHaveTemplates(rawUi.mustHaveTemplates),
       geometry: {
         x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? Math.round(rawGeo.x) : 120,
         y: Number.isFinite(rawGeo.y) && rawGeo.y >= 0 ? Math.round(rawGeo.y) : 60,
@@ -981,7 +1048,6 @@ function formatCharContextBlock(charContext) {
     ['性格设定', charContext.personality],
     ['当前场景', charContext.scenario],
     ['开场白参考', charContext.firstMessage],
-    ['世界观摘要', charContext.worldSummary],
   ];
   const lines = [];
   for (const [label, val] of fields) {
@@ -990,6 +1056,27 @@ function formatCharContextBlock(charContext) {
       lines.push(`${label}：\n${text}`);
     }
   }
+
+  if (Array.isArray(charContext.selectedWorldEntries)) {
+    const entryLines = [];
+    for (const entry of charContext.selectedWorldEntries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const body = String(entry.content ?? '').trim();
+      if (!body) continue;
+      const label = String(entry.comment ?? '').trim() || (Array.isArray(entry.keys) ? entry.keys[0] : '') || '设定';
+      const keys = Array.isArray(entry.keys) && entry.keys.length > 0 ? `（关键词：${entry.keys.slice(0, 5).join('、')}）` : '';
+      entryLines.push(`- ${label}${keys}：${body}`);
+    }
+    if (entryLines.length > 0) {
+      lines.push(`世界观设定参考：\n${entryLines.join('\n')}`);
+    }
+  } else {
+    const summaryText = String(charContext.worldSummary ?? '').trim();
+    if (summaryText) {
+      lines.push(`世界观摘要：\n${summaryText}`);
+    }
+  }
+
   if (lines.length === 0) return '';
   return [
     '【当前角色卡公开背景参考】',
@@ -2032,20 +2119,200 @@ export function splitCoreAndShell(text) {
 }
 
 function classifyPersonaPointCategory(sectionTitle, lineText) {
-  const combined = `${sectionTitle} ${lineText}`;
-  if (/(?:当前身份|当前背景|开场|与.*关系|剧场壳|阵营|职位|就职|现居)/.test(combined)) {
+  const sec = String(sectionTitle ?? '').trim();
+  const line = String(lineText ?? '').trim();
+  const keyPartMatch = line.match(/^([^:：\n]{1,36})[:：]/);
+  const lineKey = keyPartMatch ? keyPartMatch[1].trim() : '';
+
+  // 1. Explicit line-key current-role overrides (keepByDefault: false)
+  if (
+    /(?:^|·|\s)(?:当前身份|当前背景|当前处境|目前处境|当前状态|开场|(?:当前|目前|现在|初始)?(?:与|和).{0,24}的?关系|当前关系|目前关系|现在关系|人物关系|剧场壳|阵营|职位|就职|现居|居住地|当前住址|住址|职业或身份|当前职业|社会地位|生活阶级|经济状况|social_status|occupation|residence|address)(?:\s|$|·)/i.test(
+      lineKey
+    )
+  ) {
     return { category: '当前身份与关系', keepByDefault: false };
   }
-  if (/(?:外貌|体貌|身高|体型|发色|瞳色|眼|穿搭|衣着|声线|声音|外表)/.test(combined)) {
+
+  // 2. Specific line-key identity / basic info fields (keepByDefault: true)
+  if (
+    /(?:^|·|\s)(?:姓名|名字|中文名|英文名|别名|昵称|别称|乳名|称呼|别人对.*称呼|年龄|性别|生日|出生|星座|血型|mbti|种族|学历|语言|标签|name|char_name|chinese\s*name|english\s*name|nickname|alias|age|gender|sex|birthday|zodiac|tags)(?:\s|$|·|\/)/i.test(
+      lineKey
+    ) ||
+    /^(?:姓名|名字|中文名|英文名|别名|昵称|别称|乳名|称呼|年龄|性别|生日|出生|星座|血型|mbti|种族|学历|语言|name|char_name|nickname|age|gender|birthday)[:：\s]/i.test(
+      line
+    )
+  ) {
+    return { category: '基础信息', keepByDefault: true };
+  }
+
+  // 3. Strong explicit section-level classification (prevents prose words inside a named section from drifting)
+  if (
+    /(?:当前身份|当前背景|当前处境|目前处境|当前状态|剧场壳|开场|与.*关系|居住地|当前住址|住址|职业或身份|当前职业)/i.test(
+      sec
+    )
+  ) {
+    return { category: '当前身份与关系', keepByDefault: false };
+  }
+  if (/(?:外貌|体貌|面容|穿搭|衣着|外表|appearance)/i.test(sec)) {
     return { category: '外貌与印象', keepByDefault: true };
   }
-  if (/(?:喜好|偏爱|饮食|作息|习惯|爱好|忌口|过敏|日常)/.test(combined)) {
+  if (/(?:生活习惯|习惯与喜好|喜好|偏好|饮食|作息|爱好|preferences|hobby)/i.test(sec)) {
     return { category: '习惯与喜好', keepByDefault: true };
   }
-  if (/(?:过往|经历|出身|家庭|童年|秘密|私事|旧事|技能|擅长)/.test(combined)) {
+  if (/(?:成长经历|过往|经历|背景|技能|特长|能力|术式|background|history|technique)/i.test(sec)) {
     return { category: '经历与技能', keepByDefault: true };
   }
+  if (/(?:性格|行为逻辑|底色|性情|人格|personality)/i.test(sec)) {
+    return { category: '性格与底色', keepByDefault: true };
+  }
+  if (/(?:基本身份|基础信息|基本信息|basic_info|identity)/i.test(sec)) {
+    return { category: '基础信息', keepByDefault: true };
+  }
+
+  // 4. Unanchored line heuristic for unsectioned / generic-section lines
+  if (
+    /(?:当前身份|当前背景|开场|与.*关系|剧场壳|阵营|职位|就职|现居|居住地|当前住址|担任.*与.*共事|与.*共事)/.test(
+      line
+    )
+  ) {
+    return { category: '当前身份与关系', keepByDefault: false };
+  }
+
+  // 4. General combined keyword matching for flat / unsectioned lines
+  const combined = `${sec} ${line}`.trim();
+  if (
+    /(?:外貌|体貌|面容|脸型|五官|眉|眼|瞳|鼻|唇|肤色|发色|头发|发型|身高|体重|体型|身材|体态|身体|腿|手|疤|痣|耳饰|穿衣|穿搭|穿着|衣着|声线|声音|外表|气质|appearance|hair|skin|eyes|nose|lips|face|build|height|weight)/i.test(
+      combined
+    )
+  ) {
+    return { category: '外貌与印象', keepByDefault: true };
+  }
+  if (
+    /(?:喜好|偏好|偏爱|爱好|生活习惯|饮食|食物|忌口|过敏|作息|睡眠|熬夜|厌恶|讨厌|爱吃|不吃|习惯|日常|food|preferences|hobby|nsfw)/i.test(
+      combined
+    )
+  ) {
+    return { category: '习惯与喜好', keepByDefault: true };
+  }
+  if (
+    /(?:过往|成长经历|经历|出身|家庭|童年|少年|青年|介绍|背景|秘密|私事|旧事|技能|特长|擅长|不擅长|能力|术式|灵根|境界|background|history|timeline|technique)/i.test(
+      combined
+    )
+  ) {
+    return { category: '经历与技能', keepByDefault: true };
+  }
+
   return { category: '性格与底色', keepByDefault: true };
+}
+
+function measureLineIndent(rawLine) {
+  let count = 0;
+  for (let i = 0; i < rawLine.length; i += 1) {
+    const ch = rawLine[i];
+    if (ch === ' ') count += 1;
+    else if (ch === '\t') count += 2;
+    else break;
+  }
+  return count;
+}
+
+function unwrapOuterQuotes(str) {
+  const s = String(str ?? '').trim();
+  if (
+    s.length >= 2 &&
+    ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
+  ) {
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function stripTrailingYamlComment(rawLine) {
+  const src = String(rawLine ?? '');
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === "'" && !inDouble) {
+      if (i === 0 || (!inSingle && /[\s:：]/.test(src[i - 1]))) {
+        inSingle = true;
+      } else if (inSingle) {
+        if (src[i + 1] === "'") {
+          i += 1;
+        } else {
+          inSingle = false;
+        }
+      }
+    } else if (ch === '"' && !inSingle && src[i - 1] !== '\\') {
+      inDouble = !inDouble;
+    } else if (ch === '#' && !inSingle && !inDouble) {
+      const prev = i > 0 ? src[i - 1] : '';
+      if (i === 0 || /\s|"|'/.test(prev)) {
+        return src.slice(0, i).trim();
+      }
+    }
+  }
+  return src.trim();
+}
+
+function isTimeOrUrlText(str) {
+  const s = String(str ?? '').trim();
+  return /^\d{1,2}:\d{2}(?:\b|$)/.test(s) || /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s);
+}
+
+function parseYamlValueAndComment(rawVal) {
+  const src = String(rawVal ?? '').trim();
+  if (!src) return { value: '', comment: '' };
+
+  let inSingle = false;
+  let inDouble = false;
+  let commentIdx = -1;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === "'" && !inDouble) {
+      if (i === 0) {
+        inSingle = true;
+      } else if (inSingle) {
+        if (src[i + 1] === "'") {
+          i += 1;
+        } else {
+          inSingle = false;
+        }
+      }
+    } else if (ch === '"' && !inSingle && src[i - 1] !== '\\') {
+      inDouble = !inDouble;
+    } else if (ch === '#' && !inSingle && !inDouble) {
+      const prev = i > 0 ? src[i - 1] : '';
+      if (i === 0 || /\s|"|'/.test(prev)) {
+        commentIdx = i;
+        break;
+      }
+    }
+  }
+
+  const mainPart = commentIdx >= 0 ? src.slice(0, commentIdx).trim() : src;
+  const commentPart = commentIdx >= 0 ? src.slice(commentIdx + 1).trim() : '';
+  const unwrapped = unwrapOuterQuotes(mainPart);
+
+  // Format inline YAML flow map `{phase: 相遇, time: ...}` cleanly
+  if (unwrapped.startsWith('{') && unwrapped.endsWith('}')) {
+    const inner = unwrapped.slice(1, -1).replace(/\s*,\s*/g, ' · ').trim();
+    return { value: inner, comment: commentPart };
+  }
+
+  return { value: unwrapped, comment: commentPart };
+}
+
+function formatYamlItemWithComment(rawVal) {
+  const { value, comment } = parseYamlValueAndComment(rawVal);
+  if (value && comment) return `${value}（${comment}）`;
+  return value || comment;
+}
+
+function isPureIdentityScalarKey(key) {
+  return /^(?:姓名|名字|中文名|英文名|年龄|性别|生日|出生|星座|血型|mbti|身高|体重|民族|籍贯|name|char_name|chinese\s*name|english\s*name|age|gender|sex|birthday|zodiac|height|weight)$/i.test(
+    String(key ?? '').trim()
+  );
 }
 
 export function extractPersonaPoints(text, maxPoints = 24) {
@@ -2053,13 +2320,13 @@ export function extractPersonaPoints(text, maxPoints = 24) {
   if (!normalized) return [];
 
   const limit = Math.max(1, Math.min(60, Math.round(Number(maxPoints) || 24)));
-  const lines = normalized.split('\n');
+  const rawLines = normalized.split('\n');
   const points = [];
   const seenKeys = new Set();
   let currentSection = '';
   let inWorldbook = false;
 
-  const pushPoint = (rawItem) => {
+  const pushPoint = (rawItem, sectionOverride = currentSection) => {
     if (points.length >= limit) return;
     const cleaned = String(rawItem ?? '')
       .replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '')
@@ -2071,7 +2338,7 @@ export function extractPersonaPoints(text, maxPoints = 24) {
     const dedupKey = normalizeTasteKey(cleaned);
     if (!dedupKey || seenKeys.has(dedupKey)) return;
     seenKeys.add(dedupKey);
-    const { category, keepByDefault } = classifyPersonaPointCategory(currentSection, cleaned);
+    const { category, keepByDefault } = classifyPersonaPointCategory(sectionOverride, cleaned);
     points.push({
       id: `pt_${points.length + 1}`,
       category,
@@ -2081,37 +2348,294 @@ export function extractPersonaPoints(text, maxPoints = 24) {
     });
   };
 
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
-    if (/^(?:【补充世界书条目】|【延展背景世界书】|={3,}\s*WORLDBOOK\s*={3,})/i.test(trimmed)) {
-      inWorldbook = true;
+  // Pre-filter outer fenced code markers & standalone XML wrapper tags
+  const lines = [];
+  for (const raw of rawLines) {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      lines.push('');
       continue;
     }
-    if (inWorldbook) continue;
+    if (/^```[a-zA-Z0-9_-]*\s*$/.test(trimmed)) continue;
+    if (/^<\/?(?:USER人设|user|persona|world_patch|world_setting|setting)(?:\s+[^>]*)?>\s*$/i.test(trimmed)) {
+      continue;
+    }
+    lines.push(raw);
+  }
 
-    const boxMatch = trimmed.match(/^【([^】]+)】\s*$/);
+  let idx = 0;
+  let indentStack = []; // [{ indent, key }]
+
+  const getActiveSectionPath = () => {
+    const parts = [];
+    if (currentSection) parts.push(currentSection);
+    for (const s of indentStack) {
+      if (s.key && !parts.includes(s.key)) parts.push(s.key);
+    }
+    return parts.join(' · ');
+  };
+
+  const popStackForIndent = (indent) => {
+    while (indentStack.length > 0 && indent <= indentStack[indentStack.length - 1].indent) {
+      indentStack.pop();
+    }
+  };
+
+  const emitJoinedChunks = (prefixKey, items, sectionPath, maxChunkLen = 110) => {
+    if (!items || items.length === 0) return;
+    let bucket = [];
+    let bucketLen = 0;
+    const flushBucket = () => {
+      if (bucket.length === 0) return;
+      const body = bucket.join(' / ');
+      pushPoint(prefixKey ? `${prefixKey}：${body}` : body, sectionPath);
+      bucket = [];
+      bucketLen = 0;
+    };
+    for (const item of items) {
+      const cleanItem = String(item ?? '').trim();
+      if (!cleanItem) continue;
+      if (bucket.length > 0 && bucketLen + cleanItem.length + 3 > maxChunkLen) {
+        flushBucket();
+      }
+      bucket.push(cleanItem);
+      bucketLen += cleanItem.length + 3;
+    }
+    flushBucket();
+  };
+
+  while (idx < lines.length && points.length < limit) {
+    const rawLine = lines[idx];
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      idx += 1;
+      continue;
+    }
+
+    if (/^(?:【补充世界书条目】|【延展背景世界书】|={3,}\s*WORLDBOOK\s*={3,})/i.test(trimmed)) {
+      inWorldbook = true;
+      break;
+    }
+    if (inWorldbook) break;
+
+    // 1. Explicit section headers: 【标题】 or ## 标题
+    const boxMatch = trimmed.match(/^【([^】]+)】(?:（[^）]*）|\([^)]*\))?[:：]?\s*$/);
     const mdMatch = trimmed.match(/^#{1,4}\s+(.+?)\s*$/);
     if (boxMatch || mdMatch) {
       currentSection = (boxMatch?.[1] || mdMatch?.[1] || '').trim();
+      indentStack = [];
+      idx += 1;
       continue;
     }
 
-    // Bullet or short key:value line -> keep as one intact point
-    const stripped = trimmed.replace(/^\s*(?:[-*+•]|\d+[.、)])\s*/, '');
-    if (stripped.length <= 85 || /^[^\s:：]{1,10}[:：]/.test(stripped)) {
-      pushPoint(stripped);
+    const indent = measureLineIndent(rawLine);
+    popStackForIndent(indent);
+
+    // 2. Block scalar header: `外貌与体型: |` or `existential_definition: >-`
+    const blockScalarMatch = trimmed.match(/^([^\s:#【\[{][^:\n：]{0,36})[:：]\s*([|>][+-]?\d*)\s*$/);
+    if (blockScalarMatch) {
+      const blockKey = unwrapOuterQuotes(blockScalarMatch[1].replace(/^\s*[-*+•]\s*/, '').trim());
+      const sectionPath = [getActiveSectionPath(), blockKey].filter(Boolean).join(' · ');
+      const collectedLines = [];
+      idx += 1;
+      let blockMinIndent = null;
+      while (idx < lines.length) {
+        const nextRaw = lines[idx];
+        const nextTrimmed = nextRaw.trim();
+        if (!nextTrimmed) {
+          collectedLines.push('');
+          idx += 1;
+          continue;
+        }
+        const nextIndent = measureLineIndent(nextRaw);
+        if (nextIndent <= indent) break;
+        if (blockMinIndent === null || nextIndent < blockMinIndent) {
+          blockMinIndent = nextIndent;
+        }
+        collectedLines.push(nextTrimmed);
+        idx += 1;
+      }
+
+      // Parse collected lines as bullets or prose paragraphs
+      let paraBuf = [];
+      const flushPara = () => {
+        if (paraBuf.length === 0) return;
+        const para = paraBuf.join(' ').replace(/\s+/g, ' ').trim();
+        paraBuf = [];
+        if (!para) return;
+        const sentences = para
+          .split(/(?<=[。！？；!?])\s*/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const s of sentences) {
+          const formatted = s.startsWith(blockKey) || /^[【#]/.test(s) ? s : `${blockKey}：${s}`;
+          pushPoint(formatted, sectionPath);
+        }
+      };
+
+      for (const cl of collectedLines) {
+        if (!cl) {
+          flushPara();
+          continue;
+        }
+        if (/^(?:[-*+•]|\d+[.、)])\s+/.test(cl)) {
+          flushPara();
+          const bulletBody = formatYamlItemWithComment(cl.replace(/^(?:[-*+•]|\d+[.、)])\s+/, ''));
+          if (bulletBody) {
+            pushPoint(`${blockKey}：${bulletBody}`, sectionPath);
+          }
+        } else {
+          paraBuf.push(cl);
+        }
+      }
+      flushPara();
       continue;
     }
 
-    // Long prose paragraph -> split by sentence boundaries
-    const sentences = stripped
-      .split(/(?<=[。！？；!?])\s*/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    for (const sentence of sentences) {
-      pushPoint(sentence);
+    // 3. Empty-value container key (e.g. `别名:`, `别名: # 称呼`, `基本身份:`, `- 昵称或别称：`, `cursed_technique:`)
+    const bulletStripped = trimmed.replace(/^(?:[-*+•]|\d+[.、)])\s+/, '');
+    const isBulletLine = bulletStripped !== trimmed;
+    const containerCandidate = stripTrailingYamlComment(bulletStripped);
+    const emptyContainerMatch = containerCandidate.match(/^([^\s:#【\[{][^:\n：]{0,36})[:：]\s*$/);
+    if (emptyContainerMatch) {
+      const containerKey = unwrapOuterQuotes(emptyContainerMatch[1].trim());
+      // Peek ahead for children (indented OR unindented `-` bullets right after indent-0 `key:`)
+      const children = [];
+      let j = idx + 1;
+      while (j < lines.length) {
+        const peekRaw = lines[j];
+        const peekTrimmed = peekRaw.trim();
+        if (!peekTrimmed) {
+          // Stop on blank line if next non-blank line isn't deeper indented
+          let k = j + 1;
+          while (k < lines.length && !lines[k].trim()) k += 1;
+          if (k >= lines.length || measureLineIndent(lines[k]) <= indent) break;
+          j += 1;
+          continue;
+        }
+        const peekIndent = measureLineIndent(peekRaw);
+        const peekIsBullet = /^(?:[-*+•]|\d+[.、)])\s+/.test(peekTrimmed);
+        if (peekIndent > indent || (!isBulletLine && indent === 0 && peekIndent === 0 && peekIsBullet)) {
+          children.push({ raw: peekRaw, trimmed: peekTrimmed, indent: peekIndent, isBullet: peekIsBullet });
+          j += 1;
+        } else {
+          break;
+        }
+      }
+
+      if (children.length === 0) {
+        idx += 1;
+        continue;
+      }
+
+      // Check if direct children are pure bullet scalar/alias items (no nested sub-containers)
+      const directChildIndent = Math.min(...children.map((c) => c.indent));
+      const directChildren = children.filter((c) => c.indent === directChildIndent);
+      const hasSubBlocks = children.some((c) => {
+        const s = stripTrailingYamlComment(c.trimmed.replace(/^(?:[-*+•]|\d+[.、)])\s+/, ''));
+        return /^[^\s:#【\[{][^:\n：]{0,36}[:：]\s*(?:[|>][+-]?\d*)?$/.test(s);
+      });
+      const allDirectBullets = directChildren.every((c) => c.isBullet);
+
+      const sectionPath = [getActiveSectionPath(), containerKey].filter(Boolean).join(' · ');
+
+      if (allDirectBullets && !hasSubBlocks) {
+        const formattedItems = directChildren
+          .map((c) => formatYamlItemWithComment(c.trimmed.replace(/^(?:[-*+•]|\d+[.、)])\s+/, '')))
+          .filter(Boolean);
+        emitJoinedChunks(containerKey, formattedItems, sectionPath);
+        idx = j;
+        continue;
+      }
+
+      // Check if direct children are flat key:value pairs (e.g. 基本身份: 年龄/性别/生日/职业/居住地)
+      const allDirectKv = !hasSubBlocks && directChildren.every((c) => {
+        const s = c.trimmed.replace(/^(?:[-*+•]|\d+[.、)])\s+/, '');
+        return !isTimeOrUrlText(s) && /^([^\s:#【\[{][^:\n：]{0,36})[:：]\s*\S+/.test(s);
+      });
+      if (allDirectKv) {
+        const scalarIdentityItems = [];
+        const separateItems = [];
+        for (const c of directChildren) {
+          const s = c.trimmed.replace(/^(?:[-*+•]|\d+[.、)])\s+/, '');
+          const kv = !isTimeOrUrlText(s) ? s.match(/^([^\s:#【\[{][^:\n：]{0,36})[:：]\s*(.+)$/) : null;
+          if (!kv) continue;
+          const k = unwrapOuterQuotes(kv[1].trim());
+          const v = formatYamlItemWithComment(kv[2]);
+          if (!v) continue;
+          if (isPureIdentityScalarKey(k)) {
+            scalarIdentityItems.push(`${k} ${v}`);
+          } else {
+            separateItems.push({ k, v });
+          }
+        }
+        if (scalarIdentityItems.length > 0) {
+          emitJoinedChunks(containerKey, scalarIdentityItems, sectionPath);
+        }
+        for (const item of separateItems) {
+          pushPoint(`${item.k}：${item.v}`, sectionPath);
+        }
+        idx = j;
+        continue;
+      }
+
+      // Multi-level nested YAML (e.g. 外貌: -> 面容: -> 类型: ...): push container onto indentStack
+      indentStack.push({ indent, key: containerKey });
+      idx += 1;
+      continue;
     }
+
+    // 4. Inline key: value line (e.g. `姓名: "宁雨眠"`, `别人对他的称呼: 楚霁寒/...`)
+    const kvMatch = !isBulletLine && !isTimeOrUrlText(bulletStripped)
+      ? bulletStripped.match(/^([^\s:#【\[{][^:\n：]{0,36})[:：]\s*(.+)$/)
+      : null;
+    if (kvMatch) {
+      const k = unwrapOuterQuotes(kvMatch[1].trim());
+      let v = formatYamlItemWithComment(kvMatch[2]);
+      // Absorb unindented short slash/alias continuation lines immediately following (e.g. `楚小子/...`)
+      while (idx + 1 < lines.length) {
+        const nextRaw = lines[idx + 1];
+        const nextTrimmed = nextRaw.trim();
+        if (
+          nextTrimmed &&
+          measureLineIndent(nextRaw) === indent &&
+          !/^(?:[-*+•]|\d+[.、)]|【|#)/.test(nextTrimmed) &&
+          !/^[^\s:#【\[{][^:\n：]{0,36}[:：]/.test(nextTrimmed) &&
+          nextTrimmed.length < 48 &&
+          nextTrimmed.includes('/') &&
+          !/[。！？]$/.test(nextTrimmed)
+        ) {
+          v = `${v} / ${formatYamlItemWithComment(nextTrimmed)}`;
+          idx += 1;
+        } else {
+          break;
+        }
+      }
+      const sectionPath = getActiveSectionPath();
+      const topContainer = indentStack.length > 0 ? indentStack[indentStack.length - 1].key : '';
+      const displayKey = topContainer && isPureIdentityScalarKey(k) ? `${topContainer}·${k}` : k;
+      if (v) {
+        pushPoint(`${displayKey}：${v}`, sectionPath);
+      }
+      idx += 1;
+      continue;
+    }
+
+    // 5. Standard bullet or prose line (including Markdown bullets & long prose sentences)
+    const cleanText = isBulletLine ? formatYamlItemWithComment(bulletStripped) : trimmed;
+    const sectionPath = getActiveSectionPath();
+    if (cleanText.length <= 85 || /^[^\s:：]{1,12}[:：]/.test(cleanText)) {
+      pushPoint(cleanText, sectionPath);
+    } else {
+      const sentences = cleanText
+        .split(/(?<=[。！？；!?])\s*/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const sentence of sentences) {
+        pushPoint(sentence, sectionPath);
+      }
+    }
+    idx += 1;
   }
 
   return points;

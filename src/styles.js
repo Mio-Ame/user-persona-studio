@@ -1,5 +1,5 @@
 export const PALETTE_OPTIONS = Object.freeze([
-  { id: 'paper', label: '纸墨浅白' },
+  { id: 'paper', label: '素白绯印' },
   { id: 'ink', label: '青岚素雅' },
   { id: 'warm', label: '暖砂微光' },
   { id: 'sakura', label: '淡樱初晴' },
@@ -201,29 +201,29 @@ export function resolveThemeTokens({ palette = 'paper', colorMode = 'auto', host
   const vars = { '--modal-blur': '0px' };
   if (safePalette === 'host') {
     const isLight = effectiveMode === 'light';
-    const fallbackBg = isLight ? '#e8e5dc' : '#191a1d';
-    const fallbackFg = isLight ? '#212429' : '#ecece8';
+    const fallbackBg = isLight ? '#f5f4f0' : '#191a1d';
+    const fallbackFg = isLight ? '#1f2124' : '#ecece8';
     const baseBg = toOpaqueColor(hostVars?.blurBg || hostVars?.mainBg || fallbackBg, fallbackBg);
     const fg = toOpaqueColor(hostVars?.bodyColor || fallbackFg, fallbackFg);
     const borderBase = hostVars?.borderColor
       ? toOpaqueColor(hostVars.borderColor, baseBg)
-      : mixOpaqueColors(fg, baseBg, isLight ? 0.22 : 0.25);
+      : mixOpaqueColors(fg, baseBg, isLight ? 0.18 : 0.25);
     const accentBase = hostVars?.accentColor
-      ? toOpaqueColor(hostVars.accentColor, isLight ? '#3d526b' : '#8fa2be')
+      ? toOpaqueColor(hostVars.accentColor, isLight ? '#9a1e2a' : '#8fa2be')
       : isLight
-        ? '#3d526b'
+        ? '#9a1e2a'
         : '#8fa2be';
-    const accentRgb = parseColorRgb(accentBase) || { r: 61, g: 82, b: 107, a: 1 };
+    const accentRgb = parseColorRgb(accentBase) || { r: 154, g: 30, b: 42, a: 1 };
     const accentFg = luminanceOf(accentRgb) >= 155 ? '#181a1e' : '#ffffff';
 
     vars['--ups-bg'] = baseBg;
-    vars['--ups-bg-elevated'] = mixOpaqueColors(isLight ? '#dcd8ce' : '#24272e', baseBg, 0.55);
-    vars['--ups-surface'] = mixOpaqueColors(isLight ? '#ffffff' : '#2d3139', baseBg, isLight ? 0.85 : 0.56);
-    vars['--ups-surface-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.1 : 0.16);
-    vars['--ups-surface-hover'] = mixOpaqueColors(fg, baseBg, isLight ? 0.14 : 0.2);
-    vars['--ups-input-bg'] = mixOpaqueColors(isLight ? '#f4f2ec' : '#1e2026', baseBg, 0.7);
+    vars['--ups-bg-elevated'] = mixOpaqueColors(isLight ? '#e5e2da' : '#24272e', baseBg, 0.62);
+    vars['--ups-surface'] = mixOpaqueColors(isLight ? '#ffffff' : '#2d3139', baseBg, isLight ? 0.9 : 0.56);
+    vars['--ups-surface-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.08 : 0.16);
+    vars['--ups-surface-hover'] = mixOpaqueColors(fg, baseBg, isLight ? 0.1 : 0.2);
+    vars['--ups-input-bg'] = mixOpaqueColors(isLight ? '#f2f1ec' : '#1e2026', baseBg, 0.75);
     vars['--ups-border'] = mixOpaqueColors(borderBase, baseBg, 0.78);
-    vars['--ups-border-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.32 : 0.36);
+    vars['--ups-border-strong'] = mixOpaqueColors(fg, baseBg, isLight ? 0.26 : 0.36);
     vars['--ups-fg'] = fg;
     vars['--ups-fg-muted'] = mixOpaqueColors(fg, baseBg, 0.66);
     vars['--ups-accent'] = accentBase;
@@ -297,31 +297,31 @@ export const SHADOW_CSS = String.raw`
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="paper"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #e7e3d8;
-  --ups-bg-elevated: #dcd7c9;
+  --ups-bg: #f6f5f2;
+  --ups-bg-elevated: #e8e5de;
   --ups-surface: #ffffff;
-  --ups-surface-strong: #e2ddd0;
-  --ups-surface-hover: #f2efe7;
-  --ups-input-bg: #f6f4ee;
-  --ups-border: #c5beb0;
-  --ups-border-strong: #9f9786;
-  --ups-fg: #1e2126;
-  --ups-fg-muted: #565b64;
-  --ups-accent: #3b5068;
-  --ups-accent-hover: #2d3f53;
+  --ups-surface-strong: #eae7e0;
+  --ups-surface-hover: #f3f1ec;
+  --ups-input-bg: #f2f1ec;
+  --ups-border: #dfddd6;
+  --ups-border-strong: #c4c1b8;
+  --ups-fg: #1f2124;
+  --ups-fg-muted: #5c6066;
+  --ups-accent: #9a1e2a;
+  --ups-accent-hover: #7f1722;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #dfe6ef;
+  --ups-accent-soft: #fbeded;
   --ups-ok: #266b48;
   --ups-ok-soft: #e1f0e8;
   --ups-warn: #8c5816;
   --ups-warn-soft: #faeedb;
   --ups-danger: #9e3634;
   --ups-danger-soft: #fae3e3;
-  --ups-track-off: #b5ae9f;
-  --ups-track-on: #3b5068;
+  --ups-track-off: #c2bfb7;
+  --ups-track-on: #9a1e2a;
   --ups-thumb: #ffffff;
-  --ups-card-shadow: 0 2px 6px rgba(26, 23, 18, 0.07);
-  --ups-shadow: 0 16px 42px rgba(18, 22, 28, 0.24);
+  --ups-card-shadow: 0 2px 6px rgba(24, 24, 26, 0.05);
+  --ups-shadow: 0 16px 42px rgba(18, 22, 28, 0.22);
 }
 
 .ups-theme-root.ups-theme-dark[data-ups-theme-palette="paper"] {
@@ -568,30 +568,30 @@ export const SHADOW_CSS = String.raw`
 .ups-theme-root.ups-theme-light[data-ups-theme-palette="host"] {
   color-scheme: light;
   --modal-blur: 0px;
-  --ups-bg: #e8e6df;
-  --ups-bg-elevated: #dddad1;
+  --ups-bg: #f5f4f0;
+  --ups-bg-elevated: #e7e4dd;
   --ups-surface: #ffffff;
-  --ups-surface-strong: #e2e0d8;
-  --ups-surface-hover: #f2f1ec;
-  --ups-input-bg: #f6f5f1;
-  --ups-border: #c6c3b9;
-  --ups-border-strong: #a29f95;
-  --ups-fg: #222428;
-  --ups-fg-muted: #5b6069;
-  --ups-accent: #3f536a;
-  --ups-accent-hover: #314256;
+  --ups-surface-strong: #e9e7e0;
+  --ups-surface-hover: #f3f1ec;
+  --ups-input-bg: #f2f1ec;
+  --ups-border: #dfddd6;
+  --ups-border-strong: #c4c1b8;
+  --ups-fg: #1f2124;
+  --ups-fg-muted: #5c6066;
+  --ups-accent: #9a1e2a;
+  --ups-accent-hover: #7f1722;
   --ups-accent-fg: #ffffff;
-  --ups-accent-soft: #e0e6ee;
+  --ups-accent-soft: #fbeded;
   --ups-ok: #2c6d4c;
   --ups-ok-soft: #e2efe8;
   --ups-warn: #8a5b1e;
   --ups-warn-soft: #f6ecdc;
   --ups-danger: #9e3a38;
   --ups-danger-soft: #f8e3e3;
-  --ups-track-off: #bab7ad;
-  --ups-track-on: #3f536a;
+  --ups-track-off: #c2bfb7;
+  --ups-track-on: #9a1e2a;
   --ups-thumb: #ffffff;
-  --ups-card-shadow: 0 2px 6px rgba(18, 22, 28, 0.07);
+  --ups-card-shadow: 0 2px 6px rgba(18, 22, 28, 0.05);
   --ups-shadow: 0 16px 40px rgba(18, 22, 28, 0.22);
 }
 
@@ -625,7 +625,7 @@ export const SHADOW_CSS = String.raw`
   --ups-shadow: 0 18px 44px rgba(0, 0, 0, 0.52);
 }
 
-/* Outer transparent non-blocking container */
+/* Outer transparent non-blocking container (margin:auto on modal prevents negative-top overflow on zoom/shrink!) */
 .ups-backdrop {
   position: fixed;
   inset: 0;
@@ -633,9 +633,8 @@ export const SHADOW_CSS = String.raw`
   background: transparent;
   pointer-events: none;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
+  overflow: hidden;
+  padding: 8px;
 }
 
 .ups-backdrop.is-minimized {
@@ -648,17 +647,19 @@ export const SHADOW_CSS = String.raw`
   pointer-events: none !important;
 }
 
-/* Main studio modal window (supports full 100dvh manual resize, zero visible corner icon) */
+/* Main studio modal window (supports full 100dvh manual resize, strictly bounded inside viewport) */
 .ups-modal {
   position: relative;
+  margin: auto;
   pointer-events: auto;
   container-type: inline-size;
   container-name: plugin-win;
-  width: min(1080px, calc(100vw - 24px));
-  height: min(700px, 90dvh);
-  min-width: 320px;
-  min-height: 280px;
-  max-height: 100dvh;
+  width: min(1080px, calc(100vw - 16px));
+  height: min(700px, calc(100vh - 16px), calc(100dvh - 16px));
+  min-width: min(320px, calc(100vw - 16px));
+  min-height: min(260px, calc(100vh - 16px), calc(100dvh - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: min(calc(100vh - 16px), calc(100dvh - 16px));
   background-color: var(--ups-bg);
   background-image: linear-gradient(var(--ups-bg), var(--ups-bg));
   color: var(--ups-fg);
@@ -673,8 +674,10 @@ export const SHADOW_CSS = String.raw`
 .ups-modal.is-floating {
   position: fixed;
   margin: 0;
+  min-width: min(320px, 100vw);
+  min-height: min(240px, 100vh);
   max-width: 100vw;
-  max-height: 100dvh;
+  max-height: min(100vh, 100dvh);
 }
 
 .ups-modal.is-mini {
@@ -900,7 +903,8 @@ export const SHADOW_CSS = String.raw`
   min-height: 28px;
   max-height: 28px;
   min-width: 28px;
-  padding: 0 8px;
+  padding: 0 7px;
+  gap: 4px;
   border-radius: 6px;
   border: 1px solid var(--ups-border);
   background-color: var(--ups-surface);
@@ -913,6 +917,15 @@ export const SHADOW_CSS = String.raw`
   cursor: pointer;
   white-space: nowrap;
   text-decoration: none;
+}
+
+.ups-icon-btn svg,
+.ups-btn svg,
+.ups-btn-ghost svg,
+.ups-btn-sm svg,
+.ups-more-btn svg,
+.ups-drag-handle svg {
+  flex-shrink: 0;
 }
 
 .ups-icon-btn:hover {
@@ -1158,7 +1171,7 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-points-list {
-  max-height: 168px;
+  max-height: 288px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -1171,7 +1184,7 @@ export const SHADOW_CSS = String.raw`
 
 .ups-point-item {
   display: grid;
-  grid-template-columns: auto 74px minmax(0, 1fr);
+  grid-template-columns: auto 84px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
@@ -1179,6 +1192,112 @@ export const SHADOW_CSS = String.raw`
   font-size: 12px;
   line-height: 1.4;
   cursor: pointer;
+}
+
+/* Character Card Adaptation & Non-Destructive Worldbook Entry Checklist */
+.ups-char-box {
+  border: 1px solid var(--ups-border);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ups-wb-panel {
+  border-top: 1px dashed var(--ups-border);
+  padding-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-wb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-wb-list {
+  max-height: 210px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-surface);
+}
+
+.ups-wb-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ups-border);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ups-wb-item:last-child {
+  border-bottom: 0;
+}
+
+.ups-wb-item:hover {
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-wb-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ups-wb-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ups-wb-item-title {
+  font-weight: 600;
+  color: var(--ups-fg);
+  overflow-wrap: anywhere;
+}
+
+.ups-wb-item-preview {
+  font-size: 11.5px;
+  color: var(--ups-fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Draft Editor Action Toolbar (Undo / Redo / Copy adjacent to draft editor) */
+.ups-draft-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 8px;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-input-bg);
+}
+
+.ups-draft-toolbar-hint {
+  font-size: 11.5px;
+  color: var(--ups-fg-muted);
 }
 
 .ups-point-item:last-child {
@@ -1210,6 +1329,7 @@ export const SHADOW_CSS = String.raw`
 .ups-pane-left::-webkit-scrollbar,
 .ups-pane-right::-webkit-scrollbar,
 .ups-points-list::-webkit-scrollbar,
+.ups-wb-list::-webkit-scrollbar,
 .ups-taste-scroll::-webkit-scrollbar,
 .ups-diff-box::-webkit-scrollbar {
   width: 6px;
@@ -1220,6 +1340,7 @@ export const SHADOW_CSS = String.raw`
 .ups-pane-left::-webkit-scrollbar-thumb,
 .ups-pane-right::-webkit-scrollbar-thumb,
 .ups-points-list::-webkit-scrollbar-thumb,
+.ups-wb-list::-webkit-scrollbar-thumb,
 .ups-taste-scroll::-webkit-scrollbar-thumb,
 .ups-diff-box::-webkit-scrollbar-thumb {
   background-color: var(--ups-border-strong);
@@ -1354,7 +1475,17 @@ export const SHADOW_CSS = String.raw`
   animation: upsFlashHighlight 1.8s ease-out forwards;
 }
 
-/* Constant Unified Bottom Footer */
+/* Constant Unified Bottom Footer + Framed Status Capsule */
+@keyframes upsStatusPulse {
+  0% {
+    box-shadow: 0 0 0 3px var(--ups-accent-soft);
+    border-color: var(--ups-accent);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+
 .ups-footer {
   flex-shrink: 0;
   min-height: 50px;
@@ -1376,28 +1507,144 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  max-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--ups-border-strong);
+  background-color: var(--ups-surface);
   font-size: 12px;
-  color: var(--ups-fg-muted);
+  color: var(--ups-fg);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ups-footer-status.is-flashing {
+  animation: upsStatusPulse 0.85s ease-out;
+}
+
+.ups-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--ups-accent);
+  flex-shrink: 0;
+}
+
+.ups-status-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  flex: 1 1 auto;
 }
 
 .ups-footer-status[data-tone="ok"] {
+  border-color: var(--ups-ok);
+  background-color: var(--ups-ok-soft);
   color: var(--ups-ok);
   font-weight: 500;
 }
 
+.ups-footer-status[data-tone="ok"] .ups-status-dot {
+  background-color: var(--ups-ok);
+}
+
 .ups-footer-status[data-tone="warn"] {
+  border-color: var(--ups-warn);
+  background-color: var(--ups-warn-soft);
   color: var(--ups-warn);
   font-weight: 600;
 }
 
+.ups-footer-status[data-tone="warn"] .ups-status-dot {
+  background-color: var(--ups-warn);
+}
+
 .ups-footer-status[data-tone="error"] {
+  border-color: var(--ups-danger);
+  background-color: var(--ups-danger-soft);
   color: var(--ups-danger);
   font-weight: 600;
+}
+
+.ups-footer-status[data-tone="error"] .ups-status-dot {
+  background-color: var(--ups-danger);
+}
+
+/* Compact Collapsible Chip Trays & Split Template Pills */
+.ups-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ups-tray {
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px dashed var(--ups-border-strong);
+  background-color: var(--ups-input-bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.ups-tpl-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  overflow: hidden;
+}
+
+.ups-tpl-pill:hover {
+  border-color: var(--ups-accent);
+}
+
+.ups-tpl-apply {
+  height: 100%;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  color: var(--ups-fg);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ups-tpl-apply:hover {
+  background-color: var(--ups-surface-hover);
+  color: var(--ups-accent);
+}
+
+.ups-tpl-del {
+  height: 100%;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--ups-border);
+  background: transparent;
+  color: var(--ups-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ups-tpl-del:hover {
+  background-color: var(--ups-danger-soft);
+  color: var(--ups-danger);
 }
 
 .ups-footer-actions {
@@ -2532,6 +2779,7 @@ export const SHADOW_CSS = String.raw`
   }
 
   .ups-modal:not(.is-floating):not(.is-mini) {
+    margin: 0;
     width: 100vw;
     max-width: 100vw;
     min-width: 0;
@@ -2558,6 +2806,31 @@ export const SHADOW_CSS = String.raw`
 
   .ups-submodal-footer {
     padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Mandatory Gate 10: Mobile & Coarse-Pointer Inputs >= 16px to prevent iOS WKWebView zoom/jitter */
+@media (max-width: 680px), (pointer: coarse) {
+  .ups-input,
+  .ups-textarea,
+  .ups-input.ups-input-sm,
+  .ups-footer-name-input {
+    font-size: 16px;
+  }
+
+  .ups-input,
+  .ups-footer-name-input {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    line-height: 34px;
+  }
+
+  .ups-input.ups-input-sm {
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    line-height: 30px;
   }
 }
 `;

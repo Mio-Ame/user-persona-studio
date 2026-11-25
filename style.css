@@ -68,3 +68,32 @@
   width: 100%;
   justify-content: center;
 }
+
+#rm_print_characters_block .character_select .ups-char-adapt-btn.menu_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px 7px;
+  min-height: 0;
+  height: 22px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 5px;
+  color: var(--SmartThemeBodyColor);
+  background-color: var(--SmartThemeBlurTintColor);
+  border: 1px solid var(--SmartThemeBorderColor);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+#rm_print_characters_block .character_select .ups-char-adapt-btn.menu_button[hidden] {
+  display: none !important;
+}
+
+body.charListGrid #rm_print_characters_block .character_select .ups-char-adapt-btn.menu_button {
+  position: relative;
+  margin-top: 3px;
+  width: 100%;
+}

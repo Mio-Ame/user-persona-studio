@@ -13,60 +13,83 @@ export const VISIBILITY_MARKERS = Object.freeze([
 ]);
 
 export const VIBE_ANCHOR_EXAMPLES = Object.freeze([
-  '清冷感',
-  '娇气包',
-  '高冷寡言',
-  '冷脸萌',
+  '沉稳可靠',
   '外冷内热',
-  '外冷内软',
-  '反差萌',
-  '嘴硬心软',
   '松弛感',
-  '慢热猫系',
-  '犬系直球',
+  '痞帅散漫',
+  '清冷克制',
+  '嘴硬心软',
+  '温和腹黑',
+  '理智果断',
+  '慢热寡言',
+  '冷面护短',
+  '阳光直球',
+  '风趣犀利',
+  '少年意气',
+  '矜贵疏离',
+  '反差感',
   '钝感力',
-  '天然呆',
+  '冷脸萌',
   '钓系',
-  '直球甜妹',
-  '温柔克制',
-  '小太阳',
-  '理智派',
-  '少年感',
-  '姐感',
+  '傲娇',
+  '直白率性',
+]);
+
+export const DEFAULT_MUST_HAVE_TEMPLATES = Object.freeze([
+  Object.freeze({
+    id: 'tpl_work_off',
+    label: '私下不聊工作',
+    content: '职业习惯仅在工作场合体现，私下休闲相处时不主动提本行话题',
+  }),
+  Object.freeze({
+    id: 'tpl_secret_calm',
+    label: '隐藏身份不露馅',
+    content: '未公开的过往或特殊身份在日常中有合理表象，平时待人坦然无异样',
+  }),
+  Object.freeze({
+    id: 'tpl_calm_action',
+    label: '少说空话重行动',
+    content: '平时不爱说场面话，遇到事情习惯直接动手解决或提前安排妥当',
+  }),
+  Object.freeze({
+    id: 'tpl_clean_taste',
+    label: '口味喜好简笔带过',
+    content: '饮食与起居偏好仅一笔带过，不列长串清单',
+  }),
 ]);
 
 export const SPOTLIGHT_MODES = Object.freeze([
   {
     id: 'balanced',
-    label: '日常自然融入（推荐·防打卡防乱露馅）',
+    label: '自然融入（推荐）',
     description: '职业、特色属性与生活小喜好自然收放不刷屏打卡；暗线伏笔日常表象自洽，不被无端强行看穿。',
   },
   {
     id: 'featured',
-    label: '围绕设定展开（高存在感·多演相关剧情）',
-    description: '适合专门想玩职场日常、特殊体质拉扯或身世掉马试探的局，提高职业习惯、特殊设定与伏笔线索的比重。',
+    label: '突出设定暗线',
+    description: '适合专门想玩职场日常、特殊体质拉扯或身份试探的局，提高职业习惯、特殊设定与伏笔线索的比重。',
   },
   {
     id: 'light_daily',
-    label: '轻盈纯日常（无复杂包袱）',
-    description: '适合轻松纯粹的日常或恋爱小故事，不额外铺设复杂身世或沉重暗线，专注当下相处。',
+    label: '轻松纯日常',
+    description: '适合轻松纯粹的日常或感情故事，不额外铺设复杂身世或沉重暗线，专注当下相处。',
   },
 ]);
 
 export const BACKSTORY_MODES = Object.freeze([
   {
     id: 'light_vibe',
-    label: '轻底色不编身世（推荐·兼顾血肉与代入）',
-    description: '你写了经历就顺着展开；没提过往时只用宽泛生活氛围托底，不擅自编造具体父母亲属、童年创伤或求学旧事，防套皮出戏。',
+    label: '轻底色（推荐）',
+    description: '写了经历就顺着展开；没提过往时只用宽泛生活氛围托底，不擅自编造具体父母亲属或童年创伤，防代入出戏。',
   },
   {
     id: 'blank_self',
-    label: '纯留白零编造（适合代入党·防套皮）',
+    label: '纯留白（代入）',
     description: '严禁编造任何未提及的家庭出身、童年或过往事件，全靠当下的外貌气质、处事分寸与开场处境立住人物。',
   },
   {
     id: 'rich_arc',
-    label: '补全成长经历（适合独立OC·长出血肉）',
+    label: '补全经历（OC）',
     description: '结合人物性格与世界观，自然补全合理的成长环境、习惯成因与过往片段，让人物来处清晰、骨血丰满。',
   },
 ]);
@@ -75,11 +98,11 @@ export const ANTI_PARROT_CLAUSE =
   '（注：档案中的具体生活片段与“例如/比如”示例仅用于辅助理解人物的思维回路与性格倾向，并非固定必演桥段；日常互动随当下情境自然反应，不复刻原例中的对话与情节。）';
 
 export const WORD_COUNT_PRESETS = Object.freeze([
-  { id: '600', chars: 600, label: '精炼 · 约 600 字（约 800 tokens）' },
-  { id: '1000', chars: 1000, label: '适中 · 约 1000 字（约 1350 tokens）' },
-  { id: '1500', chars: 1500, label: '标准 · 约 1500 字（约 2000 tokens）' },
-  { id: '2000', chars: 2000, label: '详实 · 约 2000 字（约 2700 tokens）' },
-  { id: 'custom', chars: 0, label: '自定义字数…' },
+  { id: '600', chars: 600, label: '约 600 字' },
+  { id: '1000', chars: 1000, label: '约 1000 字' },
+  { id: '1500', chars: 1500, label: '约 1500 字' },
+  { id: '2000', chars: 2000, label: '约 2000 字' },
+  { id: 'custom', chars: 0, label: '自定义字数' },
 ]);
 
 export const LIKE_REASON_PRESETS = Object.freeze([
@@ -334,7 +357,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     prefillText: `${CORE_SECTION_HEADER}\n`,
     triggerText: '请按上述规则与目标字数直接输出完整的 User 人设正文，不要附加寒暄或说明。',
     temperature: 0.78,
-    maxTokens: 3300,
+    maxTokens: 5200,
     entries: [
       {
         id: 'lf_role',
@@ -371,7 +394,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         content: [
           '1. 忠于本色落细节：删去干瘪形容词排比，保留传神的气质锚点词，顺着人物自身走向落到具体言行与取舍（内外如一或分场合不同表现皆可自然成立，玩家指明方向就顺着写，不预设固定性格套路）。',
           '2. 职业与特色元素去打卡化：职业习惯（如博主、医生）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必刷屏的打卡项。',
-          '3. 暗线伏笔常态潜伏：未公开身世（如抱错千金）、隐情或心事须具备自洽合理的日常表象，本人待人如常，不写成刻意的“神色慌乱怕露馅”，把揭晓契机留给剧情推进与玩家选择。',
+          '3. 暗线伏笔常态潜伏：未公开身世（如隐藏出身或过往秘密）、隐情或心事须具备自洽合理的日常表象，本人待人如常，不写成刻意的“神色慌乱怕露馅”，把揭晓契机留给剧情推进与玩家选择。',
           '4. 写底层思维防照抄：反应与习惯优先提炼通用思维规律；若保留具体“例如/比如”片段辅助理解，简短注明仅作思维参考、日常随情境自然反应不复刻原桥段。',
         ].join('\n'),
       },
@@ -437,7 +460,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     prefillText: `${CORE_SECTION_HEADER}\n`,
     triggerText: '请按上述客观规范与目标字数直接输出 User 人设正文，严禁写入代演台词或心理描写的句子。',
     temperature: 0.55,
-    maxTokens: 1400,
+    maxTokens: 2800,
     entries: [
       {
         id: 'pc_role',
@@ -526,7 +549,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
 
   persona_refactor: {
     id: 'persona_refactor',
-    name: '旧人设改写与跨卡重构',
+    name: '旧人设改写',
     style: 'refactor',
     builtin: true,
     favorite: false,
@@ -537,7 +560,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     prefillText: `${CORE_SECTION_HEADER}\n`,
     triggerText: '请完整守住原人设核心设定，按本次改写方式与目标字数直接输出重构后的人设正文。',
     temperature: 0.65,
-    maxTokens: 3300,
+    maxTokens: 5200,
     entries: [
       {
         id: 'pr_role',

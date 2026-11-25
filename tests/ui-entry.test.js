@@ -103,7 +103,7 @@ function parseSimpleSelectorParts(sel) {
   return sel.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-function matchSingleSelector(el, sel) {
+function matchSingleCompoundSelector(el, sel) {
   if (!el || el.nodeType !== 1) return false;
   if (sel === '*') return true;
   let rest = sel.trim();
@@ -133,6 +133,65 @@ function matchSingleSelector(el, sel) {
       rest = rest.slice(m[0].length);
     } else {
       return false;
+    }
+  }
+  return true;
+}
+
+function tokenizeComplexSelector(sel) {
+  const tokens = [];
+  const raw = sel.trim().replace(/\s*>\s*/g, ' > ');
+  let cur = '';
+  let inBracket = false;
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (ch === '[') inBracket = true;
+    else if (ch === ']') inBracket = false;
+    if (!inBracket && /\s/.test(ch)) {
+      if (cur) {
+        tokens.push(cur);
+        cur = '';
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) tokens.push(cur);
+  return tokens;
+}
+
+function matchSingleSelector(el, sel) {
+  if (!el || el.nodeType !== 1) return false;
+  const tokens = tokenizeComplexSelector(sel);
+  if (tokens.length === 0) return false;
+  if (tokens.length === 1) return matchSingleCompoundSelector(el, tokens[0]);
+
+  const last = tokens[tokens.length - 1];
+  if (last === '>' || !matchSingleCompoundSelector(el, last)) return false;
+
+  let curEl = el;
+  let i = tokens.length - 2;
+  while (i >= 0) {
+    if (tokens[i] === '>') {
+      const targetSel = tokens[i - 1];
+      if (!targetSel || !curEl.parentNode || curEl.parentNode.nodeType !== 1) return false;
+      if (!matchSingleCompoundSelector(curEl.parentNode, targetSel)) return false;
+      curEl = curEl.parentNode;
+      i -= 2;
+    } else {
+      const targetSel = tokens[i];
+      let anc = curEl.parentNode;
+      let matched = null;
+      while (anc && anc.nodeType === 1) {
+        if (matchSingleCompoundSelector(anc, targetSel)) {
+          matched = anc;
+          break;
+        }
+        anc = anc.parentNode;
+      }
+      if (!matched) return false;
+      curEl = matched;
+      i -= 1;
     }
   }
   return true;
@@ -836,7 +895,7 @@ test('index.js: mounts host anchors, stops drawer collapse, refreshes on CHAT_CH
   assert.equal(env.doc.querySelector('[data-ups-persona-btn]'), null);
   assert.equal(env.doc.getElementById('user-persona-studio-host'), null);
   assert.equal(slashCommands.ups, undefined);
-  assert.deepEqual(removedListeners.sort(), ['app_ready', 'chat_changed']);
+  assert.deepEqual(removedListeners.sort(), ['app_ready', 'character_deleted', 'character_edited', 'chat_changed']);
 });
 
 test('index.js: refreshExtensionStylesheet updates versioned link without duplicating', () => {
@@ -912,6 +971,135 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   assert.ok(delBtn && !delBtn.disabled);
   delBtn.click();
   assert.deepEqual(getEntryIds(), initialIds);
+
+  ui.destroy();
+});
+
+test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/close, collapsible vibe & must-have templates, custom char maxTokens linkage, SVG icons & top-edge viewport safety', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800, coarse: false });
+  const personasList = [
+    { avatarId: 'p1.png', name: '顾临', description: '【基础人设】\n- 短发利落，常穿深灰夹克。\n- 做事干脆，不爱寒暄。', isActive: true },
+    { avatarId: 'p2.png', name: '沈澈', description: '【基础人设】\n- 戴无框眼镜，说话温和有条理。', isActive: false },
+  ];
+
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => personasList[0],
+      listPersonas: async () => personasList,
+      getActiveCharacterContext: async () => null,
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 15));
+  const sr = ui.shadow;
+
+  // 1. Default palette is 素白绯印 (non-yellow #f6f5f2 + #9a1e2a) & Tab 2 is 生成预设 with collapsed advanced params
+  assert.equal(PALETTE_OPTIONS[0].label, '素白绯印');
+  assert.ok(SHADOW_CSS.includes('--ups-bg: #f6f5f2;'));
+  assert.ok(SHADOW_CSS.includes('--ups-accent: #9a1e2a;'));
+  assert.equal(sr.querySelector('[data-ups-tab="presets"]').textContent, '生成预设');
+  const advDetails = sr.querySelector('[data-ups-preset-advanced]');
+  assert.ok(advDetails);
+  assert.equal(Boolean(advDetails.open), false);
+
+  // 2. Concise select options (zero "（内置）" suffix)
+  const schemeOpts = sr.querySelector('[data-ups-scheme]').options.map((o) => o.textContent);
+  assert.deepEqual(schemeOpts, ['适合抢话党', '适合不抢话党', '旧人设改写']);
+
+  // 3. Collapsible vibe tray & must-have template CRUD
+  const vibeTray = sr.querySelector('[data-ups-vibe-tray]');
+  const mustTray = sr.querySelector('[data-ups-must-tray]');
+  assert.equal(vibeTray.hidden, true);
+  assert.equal(mustTray.hidden, true);
+
+  sr.querySelector('[data-ups-toggle-vibe-tray]').click();
+  assert.equal(vibeTray.hidden, false);
+  sr.querySelector('[data-ups-vibe-chip="沉稳可靠"]').click();
+  assert.equal(sr.querySelector('[data-ups-inspiration]').value, '沉稳可靠');
+
+  const mustIn = sr.querySelector('[data-ups-must-haves]');
+  mustIn.value = '左耳戴一枚银色耳钉，平时话少但护短';
+  sr.querySelector('[data-ups-save-must-tpl]').click();
+  assert.equal(sr.querySelector('[data-ups-submodal]').hidden, false);
+  sr.querySelector('[data-ups-must-tpl-label]').value = '银耳钉护短';
+  sr.querySelector('[data-ups-confirm-must-tpl]').click();
+  assert.equal(mustTray.hidden, false);
+  assert.equal(ui.getState().settings.ui.mustHaveTemplates.at(-1).label, '银耳钉护短');
+
+  const savedTplId = ui.getState().settings.ui.mustHaveTemplates.at(-1).id;
+  mustIn.value = '';
+  sr.querySelector(`[data-ups-must-tpl="${savedTplId}"]`).click();
+  assert.equal(mustIn.value, '左耳戴一枚银色耳钉，平时话少但护短');
+  sr.querySelector(`[data-ups-del-must-tpl="${savedTplId}"]`).click();
+  assert.equal(ui.getState().settings.ui.mustHaveTemplates.some((t) => t.id === savedTplId), false);
+
+  // 4. Selectable persona points box: switch between p1 & p2 AND close/exit cleanly
+  sr.querySelector('[data-ups-pick-points-a]').click();
+  await new Promise((r) => setTimeout(r, 15));
+  const pointsBox = sr.querySelector('[data-ups-points-box]');
+  assert.equal(pointsBox.hidden, false);
+  assert.ok(pointsBox.textContent.includes('短发利落'));
+
+  const ptsPersonaSel = sr.querySelector('[data-ups-points-persona]');
+  ptsPersonaSel.value = 'p2.png';
+  ptsPersonaSel.dispatchEvent({ type: 'change', bubbles: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(pointsBox.textContent.includes('戴无框眼镜'));
+
+  sr.querySelector('[data-ups-points-close]').click();
+  assert.equal(pointsBox.hidden, true);
+
+  // 5. Custom char count live-links to scheme.maxTokens & framed status box flashes
+  const wcSel = sr.querySelector('[data-ups-word-count]');
+  wcSel.value = 'custom';
+  wcSel.dispatchEvent({ type: 'change', bubbles: true });
+  const customCharsIn = sr.querySelector('[data-ups-custom-chars]');
+  customCharsIn.value = '2400';
+  customCharsIn.dispatchEvent({ type: 'input', bubbles: true });
+  const activeScheme = ui.getState().settings.schemes.find((s) => s.id === ui.getState().settings.activeSchemeId);
+  assert.equal(activeScheme.targetChars, 2400);
+  assert.ok(activeScheme.maxTokens >= 7000);
+  const statusBox = sr.querySelector('[data-ups-status]');
+  assert.ok(statusBox.querySelector('.ups-status-dot'));
+  assert.equal(statusBox.classList.contains('is-flashing'), true);
+
+  // 6. No inline ↑/↓ buttons in preset entries; SVG icons mounted
+  ui.switchTab('presets');
+  const inlineBtns = sr.querySelector('.ups-row-inline-actions').querySelectorAll('button');
+  assert.deepEqual(inlineBtns.map((b) => b.textContent), ['展开', '删除']);
+  assert.ok(sr.querySelector('.ups-drag-handle svg'));
+  assert.ok(sr.querySelector('[data-ups-close] svg'));
+
+  // 7. Top-edge viewport clamping: north handle drag & window shrink NEVER allow top < 8px
+  const northClamped = computeResizedModalRect({
+    origLeft: 100,
+    origTop: 50,
+    origWidth: 900,
+    origHeight: 600,
+    dx: 0,
+    dy: -800,
+    handle: 'n',
+    viewportWidth: 1280,
+    viewportHeight: 800,
+  });
+  assert.equal(northClamped.top, 8);
+  assert.equal(northClamped.height, 642);
+
+  const modalEl = sr.querySelector('[data-ups-window]');
+  modalEl.classList.add('is-floating');
+  modalEl.style.left = '80px';
+  modalEl.style.top = '-40px';
+  modalEl.style.width = '1000px';
+  modalEl.style.height = '700px';
+  env.win.innerWidth = 900;
+  env.win.innerHeight = 420;
+  env.win.dispatchEvent({ type: 'resize' });
+  assert.ok(parseFloat(modalEl.style.top) >= 8, `Expected top >= 8, got ${modalEl.style.top}`);
+  assert.ok(parseFloat(modalEl.style.top) + parseFloat(modalEl.style.height) <= 420);
 
   ui.destroy();
 });
@@ -1977,17 +2165,16 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   assert.equal(activeScheme.targetChars, 1000);
   assert.match(sr.querySelector('[data-ups-status]').textContent, /约 1000 字/);
 
-  // 4. Mode B loadPersona populates selectable points checklist without manual copy-paste
+  // 4. Mode B loadPersona in refine flow (de_label_reformat) defaults to all entries selected (R2)
   sr.querySelector('[data-ups-mode="B"]').click();
   sr.querySelector('[data-ups-load-persona]').click();
   const pointsBox = sr.querySelector('[data-ups-points-box]');
   assert.equal(pointsBox.hidden, false);
   const pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
   assert.equal(pointCbs.length, 3);
-  // First two (appearance/habit) checked by default, 3rd (current role) unchecked by default
   assert.equal(pointCbs[0].checked, true);
   assert.equal(pointCbs[1].checked, true);
-  assert.equal(pointCbs[2].checked, false);
+  assert.equal(pointCbs[2].checked, true);
 
   sr.querySelector('[data-ups-generate-b]').click();
   await new Promise((r) => setTimeout(r, 20));
@@ -2095,6 +2282,522 @@ test('UX v1.3: backstory & spotlight modes, anti-parrot & dash cleanup buttons, 
   sendModeSel.value = 'personal_only';
   sendModeSel.dispatchEvent({ type: 'change', bubbles: true });
   assert.equal(ui.getState().settings.tasteProfile.bannedSendMode, 'personal_only');
+
+  ui.destroy();
+});
+
+test('R1: in-plugin character picker & non-destructive worldbook entry toggles work without switching active chat', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800, coarse: false });
+  let saveWorldInfoCalls = 0;
+  let activeChatSwitchCalls = 0;
+  const capturedPrompts = [];
+
+  const mockWorldData = {
+    entries: {
+      10: { uid: 10, comment: '雾港条例', key: ['雾港'], content: '入夜后码头封锁。', disable: false, constant: true, order: 1 },
+      11: { uid: 11, comment: '暗巷档案', key: ['暗巷'], content: '暗巷有地下交易点。', disable: true, constant: false, order: 2 },
+    },
+  };
+  const worldSnapshot = structuredClone(mockWorldData);
+
+  const chars = [
+    { chid: '0', avatar: 'c0.png', name: '当前角色甲', worldName: '', isActive: true, shallow: false },
+    { chid: '1', avatar: 'c1.png', name: '非当前角色乙', worldName: '雾港世界书', isActive: false, shallow: false },
+  ];
+
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'p1.png', name: '林清', description: '旧描述' }),
+      listPersonas: async () => [],
+      listCharacters: async () => chars,
+      getCharacterContext: async (target) => {
+        const isSecond = target && String(target.chid) === '1';
+        if (isSecond) {
+          return {
+            characterId: '1',
+            avatar: 'c1.png',
+            name: '非当前角色乙',
+            isActive: false,
+            worldName: '雾港世界书',
+            worldNames: ['雾港世界书'],
+            worldSummary: '雾港条例：入夜后码头封锁。',
+            description: '港务调度长',
+            personality: '沉稳',
+            scenario: '雾港夜班',
+            firstMessage: '登记表拿来。',
+            worldEntries: [
+              {
+                entryKey: 'world::雾港世界书::10',
+                sourceType: 'world',
+                bookName: '雾港世界书',
+                uid: '10',
+                comment: '雾港条例',
+                keys: ['雾港'],
+                content: '入夜后码头封锁。',
+                constant: true,
+                defaultEnabled: !mockWorldData.entries[10].disable,
+              },
+              {
+                entryKey: 'world::雾港世界书::11',
+                sourceType: 'world',
+                bookName: '雾港世界书',
+                uid: '11',
+                comment: '暗巷档案',
+                keys: ['暗巷'],
+                content: '暗巷有地下交易点。',
+                constant: false,
+                defaultEnabled: !mockWorldData.entries[11].disable,
+              },
+            ],
+          };
+        }
+        return {
+          characterId: '0',
+          avatar: 'c0.png',
+          name: '当前角色甲',
+          isActive: true,
+          worldName: '',
+          worldNames: [],
+          worldSummary: '',
+          description: '当前角色甲简介',
+          worldEntries: [],
+        };
+      },
+      getActiveCharacterContext: async () => ({ characterId: '0', name: '当前角色甲', isActive: true, worldEntries: [] }),
+      runStudioGeneration: async ({ messages }) => {
+        capturedPrompts.push(messages.map((m) => m.content).join('\n'));
+        return { text: '适配人设成稿', source: 'mock' };
+      },
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 20));
+  const sr = ui.shadow;
+
+  // Select non-active character '1' inside plugin without switching chat
+  const charSel = sr.querySelector('[data-ups-char-select]');
+  charSel.value = '1';
+  charSel.dispatchEvent({ type: 'change', bubbles: true });
+  await new Promise((r) => setTimeout(r, 25));
+
+  assert.equal(activeChatSwitchCalls, 0);
+  assert.equal(ui.getState().selectedCharTarget, '1');
+  const wbBox = sr.querySelector('[data-ups-worldbook-box]');
+  const wbBody = sr.querySelector('[data-ups-wb-body]');
+  assert.equal(wbBox.hidden, false);
+  assert.equal(wbBody.hidden, false);
+
+  // Initially only defaultEnabled (uid 10) is checked
+  let wbCbs = sr.querySelectorAll('[data-ups-wb-entry]');
+  assert.equal(wbCbs.length, 2);
+  assert.equal(wbCbs[0].checked, true);
+  assert.equal(wbCbs[1].checked, false);
+
+  // Toggle uid 10 off and uid 11 on purely in memory
+  wbCbs[0].click();
+  wbCbs[1].click();
+  assert.equal(saveWorldInfoCalls, 0);
+  assert.deepEqual(mockWorldData, worldSnapshot);
+
+  // Verify window.resize does NOT close or clear worldbook filter / checklist
+  const wbFilter = sr.querySelector('[data-ups-wb-filter]');
+  wbFilter.value = '暗巷';
+  wbFilter.dispatchEvent({ type: 'input', bubbles: true });
+  env.win.innerHeight = 460;
+  env.win.dispatchEvent({ type: 'resize' });
+  assert.equal(wbBody.hidden, false);
+  assert.equal(wbFilter.value, '暗巷');
+  wbFilter.value = '';
+  wbFilter.dispatchEvent({ type: 'input', bubbles: true });
+
+  // Generate and confirm prompt includes uid 11 ('暗巷有地下交易点') and omits uid 10 ('入夜后码头封锁')
+  sr.querySelector('[data-ups-inspiration]').value = '夜班文员';
+  sr.querySelector('[data-ups-generate]').click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(capturedPrompts.length, 1);
+  assert.ok(capturedPrompts[0].includes('暗巷有地下交易点'));
+  assert.equal(capturedPrompts[0].includes('入夜后码头封锁'), false);
+  assert.deepEqual(mockWorldData, worldSnapshot);
+
+  // Quick buttons: 全不选 -> 全选 -> 仅原书启用
+  sr.querySelector('[data-ups-wb-none]').click();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
+  sr.querySelector('[data-ups-wb-all]').click();
+  assert.equal(ui.getState().selectedWorldEntryKeys.length, 2);
+  sr.querySelector('[data-ups-wb-default]').click();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, ['world::雾港世界书::10']);
+
+  ui.destroy();
+});
+
+test('R1 (Native Character List): injects .ups-char-adapt-btn on #rm_print_characters_block cards, isolates click from chat switch, opens target character, and cleans up on destroy', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800 });
+
+  // Build mock SillyTavern #rm_print_characters_block with 2 character cards + 1 folder + 1 group
+  const charListBlock = env.doc.createElement('div');
+  charListBlock.id = 'rm_print_characters_block';
+
+  let nativeSwitchCount = 0;
+  const makeNativeCard = ({ chid, name, isFolder = false, isGroup = false }) => {
+    const card = env.doc.createElement('div');
+    card.className = isFolder
+      ? 'character_select bogus_folder_select'
+      : isGroup
+        ? 'character_select group_select'
+        : 'character_select';
+    if (chid !== undefined) card.setAttribute('data-chid', String(chid));
+    const nameBlock = env.doc.createElement('div');
+    nameBlock.className = 'character_name_block';
+    const titleSpan = env.doc.createElement('span');
+    titleSpan.className = 'ch_name';
+    titleSpan.textContent = name;
+    nameBlock.appendChild(titleSpan);
+    card.appendChild(nameBlock);
+    card.addEventListener('click', () => {
+      nativeSwitchCount += 1;
+    });
+    charListBlock.appendChild(card);
+    return card;
+  };
+
+  const card0 = makeNativeCard({ chid: 0, name: '对话中角色' });
+  const card1 = makeNativeCard({ chid: 1, name: '未打开角色' });
+  const folderCard = makeNativeCard({ chid: 2, name: '文件夹', isFolder: true });
+  const groupCard = makeNativeCard({ chid: 3, name: '群组', isGroup: true });
+  env.doc.body.appendChild(charListBlock);
+
+  const mockCharacters = [
+    { avatar: 'a0.png', name: '对话中角色', shallow: false, data: { description: '甲简介', extensions: { world: '' } } },
+    { avatar: 'a1.png', name: '未打开角色', shallow: false, data: { description: '乙简介', extensions: { world: '' } } },
+  ];
+  const mockCtx = {
+    characterId: 0,
+    characters: mockCharacters,
+    extensionSettings: {},
+    powerUser: { personas: {}, persona_descriptions: {} },
+    SlashCommandParser: { commands: {}, addCommandObject() {} },
+    SlashCommand: { fromProps: (p) => p },
+  };
+
+  const ctrl = await mountStudioForTest({
+    doc: env.doc,
+    win: env.win,
+    skipCssRefresh: true,
+    hostDeps: { context: mockCtx, skipDynamicImport: true },
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'p1.png', name: '林清', description: '原人设' }),
+      listPersonas: async () => [],
+      listCharacters: async () => [
+        { chid: '0', avatar: 'a0.png', name: '对话中角色', worldName: '', isActive: true, shallow: false },
+        { chid: '1', avatar: 'a1.png', name: '未打开角色', worldName: '', isActive: false, shallow: false },
+      ],
+      getCharacterContext: async (target) => {
+        const id = target?.chid !== undefined ? String(target.chid) : '0';
+        const ch = mockCharacters[Number(id)];
+        return {
+          characterId: id,
+          avatar: ch.avatar,
+          name: ch.name,
+          isActive: id === '0',
+          worldName: '',
+          worldNames: [],
+          worldSummary: '',
+          description: ch.data.description,
+          worldEntries: [],
+        };
+      },
+    },
+  });
+
+  // Button injected on character cards, skipped on folder and group
+  const btn0 = card0.querySelector('[data-ups-char-adapt="true"]');
+  const btn1 = card1.querySelector('[data-ups-char-adapt="true"]');
+  assert.ok(btn0);
+  assert.ok(btn1);
+  assert.equal(folderCard.querySelector('[data-ups-char-adapt="true"]'), null);
+  assert.equal(groupCard.querySelector('[data-ups-char-adapt="true"]'), null);
+
+  // Clicking btn1 opens Studio adapted to card1 WITHOUT triggering card1's native click / chat switch
+  btn1.dispatchEvent({ type: 'mousedown', bubbles: true });
+  btn1.dispatchEvent({ type: 'touchstart', bubbles: true });
+  btn1.click();
+  await new Promise((r) => setTimeout(r, 25));
+
+  assert.equal(nativeSwitchCount, 0);
+  assert.equal(mockCtx.characterId, 0);
+  assert.equal(ctrl.getState().isOpen, true);
+  assert.equal(ctrl.getState().selectedCharTarget, '1');
+  assert.equal(ctrl.getState().isCharAdaptFlow, true);
+
+  ctrl.destroy();
+  assert.equal(env.doc.querySelectorAll('[data-ups-char-adapt="true"]').length, 0);
+});
+
+test('R2: preserved persona entries default to 0 selected in Mode A & adaptation flows, and all selected only in refine flow; points list height increased', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800 });
+  const sampleDesc = [
+    '【基础人设】',
+    '姓名: "宁雨眠"',
+    '## 外貌与印象',
+    '- 黑发微卷，浅杏眼眸。',
+    '【当前背景与关系】',
+    '- 现居港城，担任气象台夜班记录员。',
+  ].join('\n');
+
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc }),
+      listPersonas: async () => [{ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc, isActive: true }],
+      listCharacters: async () => [{ chid: '0', avatar: 'c0.png', name: '角色甲', isActive: true, shallow: false }],
+      getCharacterContext: async () => ({ characterId: '0', name: '角色甲', isActive: true, worldEntries: [] }),
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 15));
+  const sr = ui.shadow;
+  const pointsBox = sr.querySelector('[data-ups-points-box]');
+
+  // 1. Normal generation (Mode A) -> 0 selected
+  sr.querySelector('[data-ups-pick-points-a]').click();
+  await new Promise((r) => setTimeout(r, 15));
+  let cbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.ok(cbs.length >= 3);
+  assert.equal(cbs.filter((c) => c.checked).length, 0);
+
+  // 2. Mode B cross_card_adapt (character adaptation) -> 0 selected
+  sr.querySelector('[data-ups-mode="B"]').click();
+  const subSel = sr.querySelector('[data-ups-submode]');
+  subSel.value = 'cross_card_adapt';
+  subSel.dispatchEvent({ type: 'change', bubbles: true });
+  sr.querySelector('[data-ups-load-persona]').click();
+  await new Promise((r) => setTimeout(r, 15));
+  cbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(cbs.filter((c) => c.checked).length, 0);
+
+  // 3. Mode B explicit "对原人设的改良" (de_label_reformat / core_expand) -> ALL selected
+  subSel.value = 'de_label_reformat';
+  subSel.dispatchEvent({ type: 'change', bubbles: true });
+  sr.querySelector('[data-ups-load-persona]').click();
+  await new Promise((r) => setTimeout(r, 15));
+  cbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(cbs.every((c) => c.checked), true);
+
+  subSel.value = 'core_expand';
+  subSel.dispatchEvent({ type: 'change', bubbles: true });
+  sr.querySelector('[data-ups-extract-points]').click();
+  cbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(cbs.every((c) => c.checked), true);
+
+  // 4. Container height increased > 168px while outer .ups-modal keeps locked dimensions
+  const pointsListMatch = SHADOW_CSS.match(/\.ups-points-list\s*\{[^}]*max-height:\s*(\d+)px/);
+  assert.ok(pointsListMatch && Number(pointsListMatch[1]) >= 260);
+  assert.ok(SHADOW_CSS.includes('height: min(700px, calc(100vh - 16px), calc(100dvh - 16px));'));
+
+  ui.destroy();
+});
+
+test('R4 & R5: undo/redo/copy sit beside draft editor with clear labels; footer save controls are contextual to studio tab; AGENTS compliance gate', () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800 });
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+  });
+
+  ui.open();
+  const sr = ui.shadow;
+
+  // R4: Undo, redo, copy live in .ups-draft-card toolbar, NOT in footer
+  const draftCard = sr.querySelector('.ups-draft-card');
+  const footer = sr.querySelector('[data-ups-footer]');
+  const undoBtn = draftCard.querySelector('[data-ups-undo]');
+  const redoBtn = draftCard.querySelector('[data-ups-redo]');
+  const copyBtn = draftCard.querySelector('[data-ups-copy]');
+
+  assert.ok(undoBtn && undoBtn.textContent.includes('撤销修改') && undoBtn.getAttribute('title'));
+  assert.ok(redoBtn && redoBtn.textContent.includes('重做修改') && redoBtn.getAttribute('title'));
+  assert.ok(copyBtn && copyBtn.textContent.includes('复制正文') && copyBtn.getAttribute('title'));
+  assert.equal(footer.querySelector('[data-ups-undo]'), null);
+  assert.equal(footer.querySelector('[data-ups-redo]'), null);
+  assert.equal(footer.querySelector('[data-ups-copy]'), null);
+
+  // R4: Footer save controls shown on studio tab, hidden on presets/taste/settings tabs
+  const saveName = footer.querySelector('[data-ups-save-name]');
+  const saveOverwrite = footer.querySelector('[data-ups-save-overwrite]');
+  const saveNew = footer.querySelector('[data-ups-save-new]');
+  const statusEl = footer.querySelector('[data-ups-status]');
+
+  assert.equal(saveName.hidden, false);
+  assert.equal(saveOverwrite.hidden, false);
+  assert.equal(saveNew.hidden, false);
+
+  for (const tabId of ['presets', 'taste', 'settings']) {
+    ui.switchTab(tabId);
+    assert.equal(saveName.hidden, true, `saveName must be hidden on ${tabId}`);
+    assert.equal(saveOverwrite.hidden, true, `saveOverwrite must be hidden on ${tabId}`);
+    assert.equal(saveNew.hidden, true, `saveNew must be hidden on ${tabId}`);
+    assert.equal(statusEl.hidden, false, `statusEl remains visible on ${tabId}`);
+  }
+
+  ui.switchTab('studio');
+  assert.equal(saveName.hidden, false);
+  assert.equal(saveOverwrite.hidden, false);
+  assert.equal(saveNew.hidden, false);
+
+  // R5: Compliance gate (no backdrop-filter/blur, mobile >= 16px inputs, spellcheck="false")
+  const stylesCode = fs.readFileSync(path.join(ROOT_DIR, 'src', 'styles.js'), 'utf8');
+  const hostCss = fs.readFileSync(path.join(ROOT_DIR, 'style.css'), 'utf8');
+  assert.equal(/backdrop-filter|\bblur\s*\(/i.test(stylesCode), false);
+  assert.equal(/backdrop-filter|\bblur\s*\(/i.test(hostCss), false);
+  assert.match(stylesCode, /@media\s*\(max-width:\s*680px\),\s*\(pointer:\s*coarse\)[\s\S]*font-size:\s*16px;/);
+
+  for (const inp of sr.querySelectorAll('input, textarea')) {
+    assert.equal(inp.getAttribute('spellcheck'), 'false');
+  }
+
+  ui.destroy();
+});
+
+test('R1 & R2 regression: empty worldbook selection persists across refreshContext, isCharAdaptFlow/selectedPointIds are order-independent, and initial injectChar=false syncs selectedCharTarget', async () => {
+  const env = createMockEnvironment({ innerWidth: 1280, innerHeight: 800 });
+  const sampleDesc = [
+    '【基础人设】',
+    '姓名: "宁雨眠"',
+    '## 外貌与印象',
+    '- 黑发微卷，浅杏眼眸。',
+    '【当前背景与关系】',
+    '- 现居港城，担任气象台夜班记录员。',
+  ].join('\n');
+
+  const charMap = {
+    '0': {
+      characterId: '0',
+      avatar: 'c0.png',
+      name: '当前角色甲',
+      isActive: true,
+      worldName: '甲世界书',
+      worldNames: ['甲世界书'],
+      description: '甲简介',
+      worldEntries: [
+        { entryKey: 'world::甲世界书::1', sourceType: 'world', bookName: '甲世界书', uid: '1', comment: '甲条目', keys: ['甲'], content: '甲内容', constant: true, defaultEnabled: true },
+      ],
+    },
+    '1': {
+      characterId: '1',
+      avatar: 'c1.png',
+      name: '非当前角色乙',
+      isActive: false,
+      worldName: '乙世界书',
+      worldNames: ['乙世界书'],
+      description: '乙简介',
+      worldEntries: [
+        { entryKey: 'world::乙世界书::10', sourceType: 'world', bookName: '乙世界书', uid: '10', comment: '乙条目一', keys: ['乙1'], content: '乙内容一', constant: true, defaultEnabled: true },
+        { entryKey: 'world::乙世界书::11', sourceType: 'world', bookName: '乙世界书', uid: '11', comment: '乙条目二', keys: ['乙2'], content: '乙内容二', constant: false, defaultEnabled: false },
+      ],
+    },
+  };
+
+  // 1. Persisted injectChar === false initializes selectedCharTarget to '__none__' consistently
+  const uiDisabledInit = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false } },
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc }),
+      listPersonas: async () => [{ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc, isActive: true }],
+      listCharacters: async () => [
+        { chid: '0', avatar: 'c0.png', name: '当前角色甲', isActive: true, shallow: false },
+        { chid: '1', avatar: 'c1.png', name: '非当前角色乙', isActive: false, shallow: false },
+      ],
+      getCharacterContext: async (target) => charMap[target?.chid ? String(target.chid) : '0'],
+    },
+  });
+  uiDisabledInit.open();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(uiDisabledInit.getState().selectedCharTarget, '__none__');
+  assert.equal(uiDisabledInit.shadow.querySelector('[data-ups-char-select]').value, '__none__');
+  assert.equal(uiDisabledInit.shadow.querySelector('.ups-ctx-chip').hidden, true);
+  assert.equal(uiDisabledInit.shadow.querySelector('[data-ups-worldbook-box]').hidden, true);
+  uiDisabledInit.destroy();
+
+  // 2. Worldbook 全不选 & manual uncheck preserved across refreshContext(), and Order A/B for isCharAdaptFlow & selectedPointIds
+  const ui = createStudioUI({
+    doc: env.doc,
+    win: env.win,
+    mountTarget: env.doc.body,
+    hostApi: {
+      getActivePersona: async () => ({ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc }),
+      listPersonas: async () => [{ avatarId: 'p1.png', name: '宁雨眠', description: sampleDesc, isActive: true }],
+      listCharacters: async () => [
+        { chid: '0', avatar: 'c0.png', name: '当前角色甲', isActive: true, shallow: false },
+        { chid: '1', avatar: 'c1.png', name: '非当前角色乙', isActive: false, shallow: false },
+      ],
+      getCharacterContext: async (target) => charMap[target?.chid ? String(target.chid) : '0'],
+    },
+  });
+
+  ui.open();
+  await new Promise((r) => setTimeout(r, 20));
+  const sr = ui.shadow;
+  const charSel = sr.querySelector('[data-ups-char-select]');
+  const pointsBox = sr.querySelector('[data-ups-points-box]');
+  const subSel = sr.querySelector('[data-ups-submode]');
+
+  // Order A: Load persona in Mode B de_label_reformat (all checked) -> then pick character '1' -> resets to 0 checked
+  sr.querySelector('[data-ups-mode="B"]').click();
+  subSel.value = 'de_label_reformat';
+  subSel.dispatchEvent({ type: 'change', bubbles: true });
+  sr.querySelector('[data-ups-load-persona]').click();
+  await new Promise((r) => setTimeout(r, 15));
+  let pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(pointCbs.length, 3);
+  assert.equal(pointCbs.filter((c) => c.checked).length, 3);
+
+  charSel.value = '1';
+  charSel.dispatchEvent({ type: 'change', bubbles: true });
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(ui.getState().isCharAdaptFlow, true);
+  pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(pointCbs.filter((c) => c.checked).length, 0);
+
+  // Order B: While non-active character '1' is selected, switching subModeSelect to core_expand keeps isCharAdaptFlow=true and 0 checked
+  subSel.value = 'core_expand';
+  subSel.dispatchEvent({ type: 'change', bubbles: true });
+  assert.equal(ui.getState().isCharAdaptFlow, true);
+  pointCbs = pointsBox.querySelectorAll('input[type="checkbox"]');
+  assert.equal(pointCbs.filter((c) => c.checked).length, 0);
+
+  // Clicking 全不选 on character '1' worldbook stays empty across refreshContext()
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, ['world::乙世界书::10']);
+  sr.querySelector('[data-ups-wb-none]').click();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
+  await ui.refreshContext();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
+
+  // Re-enabling default then manually unchecking the sole checked entry also stays empty across refreshContext()
+  sr.querySelector('[data-ups-wb-default]').click();
+  const wbCbs = sr.querySelectorAll('[data-ups-wb-entry]');
+  assert.equal(wbCbs[0].checked, true);
+  wbCbs[0].click();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
+  await ui.refreshContext();
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
+
+  // Switching back to active character initializes its defaultEnabled worldbook and restores refine flow
+  sr.querySelector('[data-ups-char-follow-active]').click();
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(ui.getState().isCharAdaptFlow, false);
+  assert.deepEqual(ui.getState().selectedWorldEntryKeys, ['world::甲世界书::1']);
+  assert.equal(pointsBox.querySelectorAll('input[type="checkbox"]').filter((c) => c.checked).length, 3);
 
   ui.destroy();
 });
