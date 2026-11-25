@@ -1734,7 +1734,112 @@ export const SHADOW_CSS = String.raw`
   color: var(--ups-fg);
 }
 
-/* Categorized Lexicon, Sections/Ratios, Companion Slots & History Popover */
+/* Categorized Capsule Lexicon, Prominent Sections Bar, Split Worldbook Box & Searchable Combobox */
+.ups-char-combobox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ups-char-combo-btn {
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--ups-border-strong);
+  background-color: var(--ups-surface);
+  color: var(--ups-fg);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ups-char-combo-btn:hover {
+  background-color: var(--ups-surface-hover);
+  border-color: var(--ups-accent);
+}
+
+.ups-char-combo-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ups-char-combo-menu {
+  border: 1px solid var(--ups-border-strong);
+  border-radius: 8px;
+  background-color: var(--ups-surface);
+  box-shadow: var(--ups-card-shadow);
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-char-combo-list {
+  max-height: 176px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ups-char-combo-opt {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ups-fg);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ups-char-combo-opt:hover:not(:disabled) {
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-char-combo-opt.is-selected {
+  background-color: var(--ups-accent-soft);
+  color: var(--ups-accent);
+  font-weight: 600;
+}
+
+.ups-link-btn {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ups-accent);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ups-link-btn:hover {
+  color: var(--ups-accent-hover);
+}
+
 .ups-lexicon-panel,
 .ups-sections-panel {
   border: 1px solid var(--ups-border);
@@ -1744,10 +1849,56 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 280px;
+  max-height: 300px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.ups-lexicon-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--ups-border);
+}
+
+.ups-lexicon-tab {
+  height: 25px;
+  min-height: 25px;
+  max-height: 25px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  color: var(--ups-fg-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ups-lexicon-tab:hover {
+  background-color: var(--ups-surface-hover);
+  color: var(--ups-fg);
+}
+
+.ups-lexicon-tab.is-active {
+  background-color: var(--ups-accent);
+  border-color: var(--ups-accent);
+  color: var(--ups-accent-fg);
+  font-weight: 600;
+}
+
+.ups-lexicon-chip.is-picked {
+  background-color: var(--ups-accent-soft);
+  border-color: var(--ups-accent);
+  color: var(--ups-accent);
 }
 
 .ups-lexicon-cat {
@@ -1768,6 +1919,48 @@ export const SHADOW_CSS = String.raw`
   gap: 5px;
 }
 
+.ups-sections-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ups-border-strong);
+  background-color: var(--ups-input-bg);
+}
+
+.ups-sections-bar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+.ups-section-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-section-group-box {
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-surface);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ups-section-items-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
 .ups-sec-group {
   border: 1px solid var(--ups-border);
   border-radius: 7px;
@@ -1786,36 +1979,103 @@ export const SHADOW_CSS = String.raw`
 
 .ups-ratio-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
+@container plugin-win (max-width: 560px) {
+  .ups-ratio-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.ups-ratio-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
 .ups-companion-section {
-  border: 1px solid var(--ups-border);
-  border-radius: 8px;
-  background-color: var(--ups-input-bg);
-  padding: 8px 10px;
+  border: 1px dashed var(--ups-border-strong);
+  border-radius: 9px;
+  background-color: var(--ups-surface);
+  padding: 8px 11px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.ups-companion-section.has-companions {
+  border-style: solid;
+  border-color: var(--ups-border-strong);
+}
+
+.ups-companion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ups-border);
+}
+
+.ups-companion-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .ups-companion-slot {
   border: 1px solid var(--ups-border);
   border-left: 3px solid var(--ups-accent);
   border-radius: 7px;
-  background-color: var(--ups-surface);
+  background-color: var(--ups-input-bg);
   padding: 8px 9px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.ups-split-box {
+  border: 1px solid var(--ups-border);
+  border-left: 3px solid var(--ups-accent);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .ups-split-hint {
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ups-border-strong);
+  background-color: var(--ups-surface);
+  color: var(--ups-fg);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ups-split-hint:hover {
+  border-color: var(--ups-accent);
+  background-color: var(--ups-surface-hover);
+}
+
+.ups-split-hint.is-active {
   border-color: var(--ups-accent);
   background-color: var(--ups-accent-soft);
   color: var(--ups-accent);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .ups-history-popover {
@@ -2500,6 +2760,60 @@ export const SHADOW_CSS = String.raw`
   font-weight: 500;
   color: var(--ups-ok);
   margin-left: auto;
+}
+
+.ups-synced-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ups-synced-row {
+  border: 1px solid var(--ups-border);
+  border-left: 3px solid var(--ups-accent);
+  border-radius: 8px;
+  background-color: var(--ups-input-bg);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ups-synced-row.is-disabled {
+  opacity: 0.66;
+  border-left-color: var(--ups-border-strong);
+}
+
+.ups-synced-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ups-synced-body {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--ups-border);
+  background-color: var(--ups-surface);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ups-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ups-api-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--ups-border);
 }
 
 /* Slim Selection-Driven Preference Bar (1 slim row when idle; expands smoothly on selection!) */

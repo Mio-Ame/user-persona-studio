@@ -506,12 +506,12 @@ test('T1-F04-05: reading non-active companion cards never switches active chat o
   assert.equal(stHost.getActiveChatMessages()[0].mes, '开场聊天记录不可被改动');
 });
 
-test('T1-F05-01: version parity equals 1.5.0 across manifest.json, package.json, and index.js', () => {
+test('T1-F05-01: version parity equals 1.6.0 across manifest.json, package.json, and index.js', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'manifest.json'), 'utf8'));
-  assert.equal(pkg.version, '1.5.0');
-  assert.equal(manifest.version, '1.5.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.5.0');
+  assert.equal(pkg.version, '1.6.0');
+  assert.equal(manifest.version, '1.6.0');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
 });
 
 test('T1-F05-02: mountStudioForTest opens .ups-modal at stable locked dimensions inside viewport', async () => {
@@ -549,19 +549,19 @@ test('T1-F05-04: switching across all 4 top tabs preserves identical .ups-modal 
   }
 });
 
-test('T1-F05-05: refreshExtensionStylesheet appends ?v=1.5.0 once and skips duplicates', () => {
+test('T1-F05-05: refreshExtensionStylesheet appends ?v=1.6.0 once and skips duplicates', () => {
   const env = createE2EEnvironment();
   const oldLink = env.doc.createElement('link');
   oldLink.setAttribute('rel', 'stylesheet');
   oldLink.setAttribute('href', '/scripts/extensions/third-party/user-persona-studio/style.css');
   env.doc.head.appendChild(oldLink);
 
-  const updated = mods.entry.refreshExtensionStylesheet(env.doc, '1.5.0');
+  const updated = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0');
   assert.equal(updated, true);
   const links = env.doc.querySelectorAll('link[rel="stylesheet"]');
-  assert.equal(links.some((l) => String(l.getAttribute('href')).includes('v=1.5.0')), true);
+  assert.equal(links.some((l) => String(l.getAttribute('href')).includes('v=1.6.0')), true);
 
-  const second = mods.entry.refreshExtensionStylesheet(env.doc, '1.5.0');
+  const second = mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0');
   assert.equal(second, false);
 });
 
@@ -1679,16 +1679,16 @@ test('T2-F05-02: active runtime version constants contain zero stale 1.4.0/1.3.0
   assert.notEqual(pkg.version, '1.4.0');
   assert.notEqual(manifest.version, '1.4.0');
   assert.notEqual(mods.entry.EXTENSION_VERSION, '1.4.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.5.0');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
 });
 
-test('T2-F05-03: refreshExtensionStylesheet returns false when ?v=1.5.0 is already present', () => {
+test('T2-F05-03: refreshExtensionStylesheet returns false when ?v=1.6.0 is already present', () => {
   const env = createE2EEnvironment();
   const link = env.doc.createElement('link');
   link.setAttribute('rel', 'stylesheet');
-  link.setAttribute('href', '/user-persona-studio/style.css?v=1.5.0');
+  link.setAttribute('href', '/user-persona-studio/style.css?v=1.6.0');
   env.doc.head.appendChild(link);
-  assert.equal(mods.entry.refreshExtensionStylesheet(env.doc, '1.5.0'), false);
+  assert.equal(mods.entry.refreshExtensionStylesheet(env.doc, '1.6.0'), false);
 });
 
 test('T2-F05-04: mountStudioForTest degrades gracefully when host lacks worldbook list APIs', async () => {
@@ -3362,16 +3362,89 @@ test('T4-10: Scenario 10 - Token headroom recovery (over -> tight -> ok) & verba
   assert.equal(verbatim.text.includes('顾寒在巷口开了家修表铺。'), true);
 });
 
+test('T4-11: Scenario 11 (v1.6.0) - Searchable char combobox, live 卡中角色名 update, capsule lexicon, preset synced entries (draftAudit + blue/green light) & API save button', async () => {
+  const { env, stHost, ctrl, shadow } = await mountFreshStudio();
+  await ctrl.open();
+
+  // 1. Topbar has no confusing refresh button; contextual 重读列表 exists in left pane
+  const topbar = shadow.querySelector('[data-ups-topbar]');
+  assert.equal(topbar.querySelector('[data-ups-sync-host]'), null);
+  assert.ok(shadow.querySelector('[data-ups-sync-host]'));
+
+  // 2. Searchable character combobox & switching characters updates 卡中角色名 immediately
+  const comboBtn = shadow.querySelector('[data-ups-char-combo-btn]');
+  assert.ok(comboBtn);
+  comboBtn.click();
+  assert.equal(shadow.querySelector('[data-ups-char-combo-menu]').hidden, false);
+  const optGuhan = shadow.querySelector('[data-ups-char-opt="1"]');
+  assert.ok(optGuhan);
+  optGuhan.click();
+  await env.waitTicks(20);
+  assert.equal(shadow.querySelector('[data-ups-char-real-name]').value, '顾寒');
+
+  env.selectOption(shadow.querySelector('[data-ups-char-select]'), '2');
+  await env.waitTicks(20);
+  assert.equal(shadow.querySelector('[data-ups-char-real-name]').value, '苏晚');
+
+  // 3. Capsule lexicon tabs switch categories cleanly with zero status spam
+  shadow.querySelector('[data-ups-lexicon-toggle]').click();
+  await env.waitTicks();
+  const statusBeforeTab = getStatusText(shadow);
+  const vibeTab = shadow.querySelector('[data-ups-lexicon-tab="vibe_aura"]');
+  assert.ok(vibeTab);
+  vibeTab.click();
+  assert.equal(shadow.querySelector('[data-ups-lexicon-category="vibe_aura"]').hidden, false);
+  assert.equal(shadow.querySelector('[data-ups-lexicon-category="animal_archetype"]').hidden, true);
+  assert.equal(getStatusText(shadow), statusBeforeTab);
+
+  // 4. Companion body starts collapsed by default until expanded or added
+  assert.equal(shadow.querySelector('[data-ups-companion-body]').hidden, true);
+
+  // 5. Word count 2000 -> tight 1840~2160 preview in Tab 2 + worldbook blue/green light sync + draftAudit synced entry
+  env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '2000');
+  await env.waitTicks();
+  if (!ctrl.getState().settings.ui.dualLayer) {
+    shadow.querySelector('[data-ups-split-hint]').click();
+  }
+  const wbLightSel = shadow.querySelector('[data-ups-wb-light-mode]');
+  assert.ok(wbLightSel);
+  env.selectOption(wbLightSel, 'blue_constant');
+  await env.waitTicks();
+
+  shadow.querySelector('[data-ups-tab="presets"]').click();
+  await env.waitTicks();
+  const presetsPanel = shadow.querySelector('[data-ups-tab-panel="presets"]');
+  assert.ok(presetsPanel.textContent.includes('1840～2160'));
+  const syncedBox = presetsPanel.querySelector('[data-ups-synced-entries]');
+  assert.ok(syncedBox);
+  assert.ok(syncedBox.textContent.includes('成稿前草稿自检'));
+  assert.ok(syncedBox.textContent.includes('蓝灯常驻'));
+
+  // 6. Custom API explicit 保存方案 button & collapsed connection diagnostics
+  shadow.querySelector('[data-ups-tab="settings"]').click();
+  env.selectOption(shadow.querySelector('[data-ups-provider]'), 'custom');
+  await env.waitTicks();
+  const saveProfileBtn = shadow.querySelector('[data-ups-profile-save]');
+  assert.ok(saveProfileBtn);
+  env.setInputValue(shadow.querySelector('[data-ups-profile-name]'), '主力接口');
+  env.setInputValue(shadow.querySelector('[data-ups-api-url]'), 'https://api.example.com/v1');
+  saveProfileBtn.click();
+  await env.waitTicks();
+  assert.ok(getStatusText(shadow).includes('已保存自定义 API 方案'));
+  const connDetails = shadow.querySelector('[data-ups-conn-details]');
+  assert.ok(connDetails && !connDetails.open);
+});
+
 // ============================================================================
 // STATIC & COMPLIANCE GATE (16 Checks: S-01 .. S-16)
 // ============================================================================
 
-test('S-01: manifest.json, package.json, and index.js EXTENSION_VERSION equal 1.5.0', () => {
+test('S-01: manifest.json, package.json, and index.js EXTENSION_VERSION equal 1.6.0', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'manifest.json'), 'utf8'));
-  assert.equal(pkg.version, '1.5.0');
-  assert.equal(manifest.version, '1.5.0');
-  assert.equal(mods.entry.EXTENSION_VERSION, '1.5.0');
+  assert.equal(pkg.version, '1.6.0');
+  assert.equal(manifest.version, '1.6.0');
+  assert.equal(mods.entry.EXTENSION_VERSION, '1.6.0');
 });
 
 test('S-02: src/ui.js has zero controlHintEl or deleted boilerplate hint string', () => {

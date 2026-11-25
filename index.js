@@ -7,7 +7,7 @@ import {
 } from './src/host.js';
 import { createStudioUI } from './src/ui.js';
 
-export const EXTENSION_VERSION = '1.5.0';
+export const EXTENSION_VERSION = '1.6.0';
 
 function createDomEl(doc, tag, props = {}, children = []) {
   const node = doc.createElement(tag);
@@ -98,7 +98,22 @@ export async function createStudioController(options = {}) {
     refreshExtensionStylesheet(doc, EXTENSION_VERSION);
   }
 
-  let settings = createDefaultSettings(await loadSettings(hostDeps).catch(() => ({})));
+  const rawLoadedSettings = await loadSettings(hostDeps).catch(() => ({}));
+  const hadLegacySchemes = Boolean(
+    Array.isArray(rawLoadedSettings?.schemes) &&
+      rawLoadedSettings.schemes.some(
+        (s) =>
+          s &&
+          ['longform_coact', 'player_controlled', 'persona_refactor'].includes(String(s.id || '')) &&
+          (Number(s.presetVersion) || 0) < 2
+      )
+  );
+  let settings = createDefaultSettings(rawLoadedSettings);
+  if (hadLegacySchemes) {
+    Promise.resolve(
+      options.onSaveSettings ? options.onSaveSettings(settings) : saveSettings(settings, hostDeps)
+    ).catch(() => {});
+  }
   const ctx = await resolveHostContext(hostDeps).catch(() => null);
 
   let wandEntryEl = null;

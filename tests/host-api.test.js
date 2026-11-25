@@ -71,7 +71,7 @@ test('M1: manifest.json matches SillyTavern extension contract', () => {
   assert.equal(manifest.js, 'index.js');
   assert.equal(manifest.css, 'style.css');
   assert.equal(manifest.author, 'Mio-Ame');
-  assert.equal(manifest.version, '1.5.0');
+  assert.equal(manifest.version, '1.6.0');
   assert.equal(manifest.homePage, 'https://github.com/Mio-Ame/user-persona-studio');
   assert.equal(manifest.auto_update, true);
   assert.equal(manifest.minimum_client_version, '1.12.0');

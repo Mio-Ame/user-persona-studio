@@ -122,9 +122,30 @@ export const COMPANION_FREQUENCY_TIERS = Object.freeze([
 ]);
 
 export const COMPANION_CARRY_MODES = Object.freeze([
-  Object.freeze({ id: 'inline', label: '写入人设正文' }),
-  Object.freeze({ id: 'persona_book', label: '绑定人设专属世界书' }),
-  Object.freeze({ id: 'target_book', label: '写入指定已有世界书' }),
+  Object.freeze({ id: 'inline', label: '直接写进人设简介（简短够用）' }),
+  Object.freeze({ id: 'persona_book', label: '存进该人设专属世界书（推荐·换人设自动切）' }),
+  Object.freeze({ id: 'target_book', label: '并入已有的世界书' }),
+]);
+
+export const WORLDBOOK_LIGHT_MODES = Object.freeze([
+  Object.freeze({
+    id: 'green_selective',
+    label: '绿灯：提到关键词时触发（推荐）',
+    shortLabel: '绿灯触发',
+    description: '条目平时不占空间，对话中提到相关关键词时自动触发注入',
+  }),
+  Object.freeze({
+    id: 'blue_constant',
+    label: '蓝灯：全程常驻生效',
+    shortLabel: '蓝灯常驻',
+    description: '条目全程常驻在上下文中，适合必须时刻记住的核心背景或重要关系',
+  }),
+  Object.freeze({
+    id: 'smart_mix',
+    label: '蓝绿灯自动分流（按重要度分配）',
+    shortLabel: '自动蓝绿灯',
+    description: '由 AI 自动将核心关系标为蓝灯常驻、次要往事与细节标为绿灯关键词触发',
+  }),
 ]);
 
 export const COMPANION_RELATION_PRESETS = Object.freeze([
@@ -200,7 +221,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
         label: '成长经历与现状',
         group: 'core',
         defaultEnabled: true,
-        guidance: '严格遵循所选经历尺度：开启经历时梳理与主角色及客串角色时间线自洽的成长脉络与现状；纯留白时省略过往阶段，仅保留当下生活状态。',
+        guidance: '严格遵循所选经历尺度：开启经历时，让家庭氛围、过往履历或与主角色及客串亲友的交集顺着当前世界观与时间线自然生长，长出真实血肉；纯留白时省略过往阶段，仅保留当下生活状态。',
       }),
       Object.freeze({
         id: 'career_finance',
@@ -417,17 +438,17 @@ export const BACKSTORY_MODES = Object.freeze([
   {
     id: 'light_vibe',
     label: '轻底色（推荐）',
-    description: '写了经历就顺着展开；没提过往时只用宽泛生活氛围托底，不额外添设具体家庭出身或童年经历。',
+    description: '写了经历就顺着当前世界观与角色关系自然展开；没提过往时只用宽泛生活氛围托底，不凭空硬编狗血变故。',
   },
   {
     id: 'blank_self',
-    label: '纯留白（代入）',
+    label: '纯留白（不写过往）',
     description: '严禁编造任何未提及的家庭出身、童年或过往事件，全靠当下的外貌气质、处事分寸与开场处境立住人物。',
   },
   {
     id: 'rich_arc',
-    label: '补全经历（OC）',
-    description: '结合人物性格与世界观，自然补全合理的成长环境、习惯成因与过往片段，让人物来处清晰、骨血丰满。',
+    label: '完整经历（融入世界与角色）',
+    description: '结合人物性格、当前世界观及与角色的交集脉络，自然补全合理的成长环境、习惯成因与过往片段，让人物长出真实血肉。',
   },
 ]);
 
@@ -449,13 +470,22 @@ export const LIKE_REASON_PRESETS = Object.freeze([
 ]);
 
 export const DISLIKE_REASON_PRESETS = Object.freeze([
-  { id: 'dislike_general', label: '不喜欢', reason: '个人不喜欢这类表达方式' },
-  { id: 'too_ai', label: '表述太 AI', reason: '表述太像 AI 套话，缺乏真人自然感' },
+  {
+    id: 'sentence_pattern',
+    label: '句式问题（禁同类句式）',
+    reason: '反感这类句式结构（如转折对仗、排比造句），请连同背后这一类句式模板一并规避，而非仅避开原词句',
+  },
+  {
+    id: 'explanatory_prose',
+    label: '解释性语言过多',
+    reason: '反感在行为或事实后附加解释原因、总结心理动机的说明性旁白，只写具体表现即可',
+  },
+  { id: 'too_ai', label: '表述太 AI', reason: '表述太像 AI 惯用修辞套话，缺乏真人平实自然感，请连同类腔调一并避开' },
   { id: 'too_oily', label: '太油腻 / 端着', reason: '腔调油腻做作，不够平实自然' },
-  { id: 'too_label', label: '贴标签 / 太笼统', reason: '直接贴性格标签或空泛概括，缺少具体成因与表现' },
+  { id: 'too_label', label: '贴标签 / 太笼统', reason: '直接贴性格标签或空泛概括，缺少具体成因与日常表现' },
   { id: 'overstep_user', label: '替我抢话 / 写心理', reason: '越界预设了玩家的台词、心理活动或固定动作' },
   { id: 'easy_checkin', label: '易导致剧情机械重复', reason: '写成了过于琐碎固定的小剧本或口头禅，容易导致正文每轮机械重复' },
-  { id: 'out_of_vibe', label: '不贴合人设', reason: '与当前想塑造的人物气质不符' },
+  { id: 'dislike_general', label: '不喜欢这类写法', reason: '个人不喜欢这类表达倾向，请避开同类写法' },
 ]);
 
 export const BUILTIN_USAGE_GUIDE = [
@@ -680,9 +710,12 @@ export const QUALITATIVE_LABEL_PATTERNS = Object.freeze([
   },
 ]);
 
+export const BUILTIN_PRESET_SCHEMA_VERSION = 2;
+
 export const BUILTIN_PRESET_SCHEMES = Object.freeze({
   longform_coact: {
     id: 'longform_coact',
+    presetVersion: BUILTIN_PRESET_SCHEMA_VERSION,
     name: '适合抢话党',
     style: 'longform',
     builtin: true,
@@ -692,7 +725,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     targetTokens: { min: 1780, max: 2270 },
     tailMode: 'auto',
     prefillText: `${CORE_SECTION_HEADER}\n`,
-    triggerText: '请按上述规则与目标字数直接输出完整的 User 人设正文，不要附加寒暄或说明。',
+    triggerText: '请严格按上述规则与目标字数直接输出完整的 User 人设正文，不要附加寒暄或说明。',
     temperature: 0.78,
     maxTokens: 5200,
     entries: [
@@ -708,17 +741,17 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
       },
       {
         id: 'lf_context',
-        name: '新建与改写路由',
+        name: '新建与改写路由（血肉融合）',
         slotType: 'context',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
           '按本次任务类型处理输入材料：',
-          '1. 新建人设：顺着玩家的题材基调立住鲜活人物；若 {{char}} 或客串亲友与 {{user}} 存在青梅竹马、家人养亲、师徒养成或多年共生关系，允许将塑造性格底色与习惯的共同成长印记自然融入' + CORE_SECTION_HEADER + '，同时将当下时间点、现居状态与开场矛盾写入' + SHELL_SECTION_HEADER + '。',
-          '2. 整理排版去噪：完整保留原稿全部设定事实、萌点与伏笔，仅清理混乱格式与空泛套话。',
+          `1. 新建人设：顺着玩家的题材基调立住鲜活人物。关联角色卡时，不要把人设机械割裂成互不相干的两截：人物的成长经历、习惯成因与处事逻辑应顺着当前世界观、时代土壤以及与 {{char}}（或客串亲友）的交集脉络自然生长，长出贴合故事的真实血肉，归入${CORE_SECTION_HEADER}；当下时间点的身份处境与开场关系归入${SHELL_SECTION_HEADER}。`,
+          '2. 整理排版去套话：完整保留原稿全部设定事实、萌点与伏笔，仅清理混乱格式与空泛套话。',
           '3. 扩写细节：沿原稿性格走向补足说话口吻、处事习惯与日常相处质感，核对年龄与关系时间线前后自洽，不篡改核心设定。',
-          `4. 换卡改背景：守住${CORE_SECTION_HEADER}核心底色，结合新角色卡重写${SHELL_SECTION_HEADER}的身份与开场落点；若原人与新角色或客串人物共享过往成长背景，可保留共同成长底色，仅当明确选择纯通用跨卡复用时才剥离特定角色绑定。`,
+          `4. 换卡融合重塑：守住原人物的性格神韵、外貌本色与勾选保留项，同时允许成长经历、身份来处与${SHELL_SECTION_HEADER}顺着新角色卡的世界观及与 {{char}} 的关系重新融合生长；仅当玩家明确开启通用跨卡模式时，才在${CORE_SECTION_HEADER}中剥离特定角色绑定。`,
         ].join('\n'),
       },
       {
@@ -729,7 +762,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语（严禁每行开头重复堆砌 {{user}} 浪费 Token），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧。',
+          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语（严禁每行开头重复堆砌 {{user}} 浪费上下文），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧。',
           '2. 职业与特色元素自然收放：职业习惯（如医生、画师）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必提的固定习惯。',
           '3. 暗线心事按需自然安放：默认不硬塞未公开秘密或暗线；仅当玩家设定了隐瞒、暗自打算或感情暗流时，清晰区分日常表象与未说出口的真实想法，本人待人如常，不写成刻意的“神色慌乱怕露馅”，把揭晓契机留给剧情推进与玩家选择。',
           '4. 写底层思维防照抄：反应与习惯优先提炼通用思维规律；若保留具体“例如/比如”片段辅助理解，简短注明仅作思维参考、日常随情境自然反应不复刻原桥段。',
@@ -763,14 +796,14 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），篇幅重心放在玩家启用的板块上：',
-          `- ${CORE_SECTION_HEADER}：涵盖基本身份、外貌穿搭、性格行为逻辑、生活做事习惯及按需保留的成长经历与共同成长底色；`,
-          `- ${SHELL_SECTION_HEADER}：涵盖当前职业与处境、与 {{char}}（及客串人物）的现阶段关系与开场相处氛围；不按固定百分比硬塞未启用的秘密暗线。`,
+          '全文严格控制在约 {{targetChars}} 字（合理浮动范围 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），切勿大幅缩水或超写，篇幅重心放在玩家启用的板块上：',
+          `- ${CORE_SECTION_HEADER}：涵盖基本身份、外貌穿搭、性格行为逻辑、生活做事习惯，以及与当前世界观或角色自然交织的成长经历；`,
+          `- ${SHELL_SECTION_HEADER}：涵盖当前职业处境、与 {{char}}（及客串人物）的现阶段关系与开场相处氛围；不按固定百分比硬塞未启用的秘密暗线。`,
         ].join('\n'),
       },
       {
         id: 'lf_format',
-        name: '扁平版式与标点规范',
+        name: '清爽版式与标点规范',
         slotType: 'format',
         role: 'system',
         enabled: true,
@@ -786,6 +819,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
 
   player_controlled: {
     id: 'player_controlled',
+    presetVersion: BUILTIN_PRESET_SCHEMA_VERSION,
     name: '适合不抢话党',
     style: 'objective',
     builtin: true,
@@ -795,7 +829,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     targetTokens: { min: 720, max: 900 },
     tailMode: 'auto',
     prefillText: `${CORE_SECTION_HEADER}\n`,
-    triggerText: '请按上述客观规范与目标字数直接输出 User 人设正文，严禁写入代演台词或心理描写的句子。',
+    triggerText: '请严格按上述客观规范与目标字数直接输出 User 人设正文，严禁写入代演台词或心理描写的句子。',
     temperature: 0.55,
     maxTokens: 2800,
     entries: [
@@ -811,15 +845,15 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
       },
       {
         id: 'pc_context',
-        name: '新建与改写路由',
+        name: '新建与改写路由（血肉融合）',
         slotType: 'context',
         role: 'system',
         enabled: true,
         locked: false,
         content: [
           '按本次任务整理客观事实：',
-          `- 新建或扩写：提炼外貌穿着、身份履历、能力边界与开场关系；气质词仅作外在印象记录，不转化为自动触发的情绪或口癖；若与 {{char}} 或客串亲友有青梅竹马、养亲或师徒等共同成长经历，允许客观写进${CORE_SECTION_HEADER}，当下处境写入${SHELL_SECTION_HEADER}。`,
-          `- 排版去噪或换卡：去噪时保留全部客观设定洗净套话；换卡时守住${CORE_SECTION_HEADER}，结合新卡背景重写${SHELL_SECTION_HEADER}，仅当明确选择纯通用跨卡复用时才剥离特定角色绑定。`,
+          `- 新建或扩写：提炼外貌穿着、身份履历、能力边界与开场关系；气质词仅作外在印象记录，不转化为自动触发的情绪或口癖；开启经历时，让人物客观履历与当前世界观及 {{char}} 所在时间线自然衔接归入${CORE_SECTION_HEADER}，当下处境与开场关系归入${SHELL_SECTION_HEADER}。`,
+          `- 去套话或换卡融合：去套话时保留全部客观设定清理空话；换卡时守住外貌与核心特质，结合新卡世界观与角色关系重塑履历来处及${SHELL_SECTION_HEADER}，仅当明确开启通用跨卡模式时才剥离特定角色绑定。`,
         ].join('\n'),
       },
       {
@@ -863,14 +897,14 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens）：',
-          `- ${CORE_SECTION_HEADER}：客观记录基本身份、外貌体态、穿搭特征、能力边界与按需保留的过往或共同成长事实；`,
+          '全文严格控制在约 {{targetChars}} 字（合理浮动范围 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），切勿大幅缩水或超写：',
+          `- ${CORE_SECTION_HEADER}：客观记录基本身份、外貌体态、穿搭特征、能力边界，以及与世界观或角色自然衔接的过往事实；`,
           `- ${SHELL_SECTION_HEADER}：简明写清当前身份、日常节奏与开场既有关系共识。`,
         ].join('\n'),
       },
       {
         id: 'pc_format',
-        name: '扁平版式与标点规范',
+        name: '清爽版式与标点规范',
         slotType: 'format',
         role: 'system',
         enabled: true,
@@ -886,16 +920,17 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
 
   persona_refactor: {
     id: 'persona_refactor',
+    presetVersion: BUILTIN_PRESET_SCHEMA_VERSION,
     name: '旧人设改写',
     style: 'refactor',
     builtin: true,
     favorite: false,
-    description: '适合为旧人设整理排版、去掉套话、柔化易重复元素，或结合新角色卡调整当前身份与关系。',
+    description: '适合为旧人设整理排版、去掉套话，或结合新角色卡重塑经历与当前关系。',
     targetChars: 1500,
     targetTokens: { min: 1780, max: 2270 },
     tailMode: 'auto',
     prefillText: `${CORE_SECTION_HEADER}\n`,
-    triggerText: '请完整守住原人设核心设定，按本次改写方式与目标字数直接输出重构后的人设正文。',
+    triggerText: '请完整守住原人设核心神韵，严格按本次改写方式与目标字数直接输出重构后的人设正文。',
     temperature: 0.65,
     maxTokens: 5200,
     entries: [
@@ -920,7 +955,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
           '严格按本次指定的改写方向执行：',
           '1. 整理排版去套话：100% 保留原稿事实与关系，洗净乱缩进、赋魅套话与系统口号，柔化高频触发词。',
           '2. 扩写细节：忠于原稿人物基调补足言行细节、情绪表现与时间线一致性，绝不擅自捏造原稿没有的家世变故。',
-          `3. 换卡改背景：守住${CORE_SECTION_HEADER}核心性格与外貌，结合新卡世界观重写${SHELL_SECTION_HEADER}；若原人与新主角色或客串人物具有青梅竹马、养亲或师徒等共同成长设定，可自然保留其成长底色，仅在明确选择纯通用跨卡复用时彻底剥离旧卡人际绑定。`,
+          `3. 换卡融合重塑：守住原稿核心性格神韵、外貌声音与玩家勾选保留项，同时结合新角色卡的世界观、时代背景与 {{char}} 关系，自然重塑与之契合的成长经历来处及${SHELL_SECTION_HEADER}，让人物在新故事里长出真实血肉；仅在明确选择通用跨卡模式时彻底剥离特定角色绑定。`,
         ].join('\n'),
       },
       {
@@ -965,14 +1000,14 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '重构全文控制在约 {{targetChars}} 字（区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens）：',
-          `- ${CORE_SECTION_HEADER}：保留外貌声音、性格神韵与思维规律、适度收束的生活习惯及既有过往或共同成长底色；`,
+          '重构全文严格控制在约 {{targetChars}} 字（合理浮动范围 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），切勿大幅缩水或超写：',
+          `- ${CORE_SECTION_HEADER}：保留外貌声音、性格神韵与思维规律、适度收束的生活习惯，以及与当前故事自然衔接的成长经历；`,
           `- ${SHELL_SECTION_HEADER}：聚焦当前故事下的身份日常、与 {{char}}（及客串人物）的现阶段关系与开场氛围。`,
         ].join('\n'),
       },
       {
         id: 'pr_format',
-        name: '扁平版式与标点规范',
+        name: '清爽版式与标点规范',
         slotType: 'format',
         role: 'system',
         enabled: true,

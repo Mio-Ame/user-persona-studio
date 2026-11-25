@@ -1470,8 +1470,8 @@ test('Group 10.1: computeLengthBudget, applyTargetCharsToScheme & countReadableC
   assert.equal(countReadableChars('  你好 世界\n123  '), 7);
   const b1000 = computeLengthBudget(1000);
   assert.equal(b1000.chars, 1000);
-  assert.equal(b1000.charsMin, 880);
-  assert.equal(b1000.charsMax, 1120);
+  assert.equal(b1000.charsMin, 920);
+  assert.equal(b1000.charsMax, 1080);
   assert.ok(b1000.tokensMin >= 1150 && b1000.tokensMax <= 1550);
 
   const updatedScheme = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.longform_coact, 1000);
@@ -1485,7 +1485,7 @@ test('Group 10.1: computeLengthBudget, applyTargetCharsToScheme & countReadableC
     inspiration: '钟表铺学徒',
   });
   assert.ok(built.assembledPromptText.includes('约 1000 字'));
-  assert.ok(built.assembledPromptText.includes('880～1120 汉字'));
+  assert.ok(built.assembledPromptText.includes('920～1080 汉字'));
 });
 
 test('Group 10.2: inferOptimalTailMode & applyTailRoleStrategy auto-adapt to Claude, Gemini, GPT & thinking models', () => {
@@ -2374,4 +2374,124 @@ test('Group 16 (R6 & Follow-up 2): groupPersonaPoints groups cleanly and pushGen
   const hugeRes = pushGenerationHistory([], { text: '甲'.repeat(15000) });
   assert.equal(hugeRes.added, true);
   assert.equal(hugeRes.list[0].text.length, MAX_HISTORY_ENTRY_CHARS);
+});
+
+test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldbook blue/green light modes, synced preset entries & pattern-level dislike summarization', async () => {
+  const coreMod = await import('../src/core.js');
+
+  // 1. Legacy v1.2/v1.5 persisted builtin schemes auto-upgrade to presetVersion=2
+  const migrated = createDefaultSettings({
+    schemes: [
+      {
+        id: 'player_controlled',
+        name: '手控客观非抢话',
+        builtin: true,
+        favorite: true,
+        targetChars: 2000,
+        entries: [
+          {
+            id: 'pc_context',
+            name: '旧规则',
+            role: 'system',
+            enabled: true,
+            content: '完全锁死【人物本体核（跨卡可锁）】，仅重新设计【当前剧场壳（随卡可换）】',
+          },
+          {
+            id: 'pc_pacing',
+            name: '旧字数',
+            role: 'system',
+            enabled: false,
+            content: '约合 1300 至 2400 汉字',
+          },
+          {
+            id: 'user_extra_rule',
+            name: '用户自建规则',
+            role: 'system',
+            enabled: true,
+            content: '保留用户额外添加的自定义条目',
+          },
+        ],
+      },
+    ],
+  });
+  const pc = migrated.schemes.find((s) => s.id === 'player_controlled');
+  assert.equal(pc.name, '适合不抢话党');
+  assert.equal(pc.favorite, true);
+  assert.equal(pc.presetVersion, coreMod.BUILTIN_PRESET_SCHEMA_VERSION);
+  assert.equal(JSON.stringify(pc.entries).includes('人物本体核'), false);
+  assert.equal(JSON.stringify(pc.entries).includes('1300 至 2400'), false);
+  assert.equal(pc.entries.find((e) => e.id === 'pc_pacing').enabled, false);
+  assert.ok(pc.entries.some((e) => e.id === 'user_extra_rule'));
+
+  // 2. Tight ±8% budget for 2000 chars -> 1840~2160 & live preview resolution
+  const b2000 = computeLengthBudget(2000);
+  assert.equal(b2000.charsMin, 1840);
+  assert.equal(b2000.charsMax, 2160);
+  const resolvedPacing = coreMod.resolvePresetEntryPreview(
+    pc.entries.find((e) => e.id === 'pc_pacing'),
+    pc,
+    {}
+  );
+  assert.ok(resolvedPacing.includes('1840～2160 汉字'));
+
+  // 3. Worldbook blue/green light modes in directive, parser & synced preset entries
+  assert.deepEqual(coreMod.WORLDBOOK_LIGHT_MODES.map((m) => m.id), [
+    'green_selective',
+    'blue_constant',
+    'smart_mix',
+  ]);
+  const blueDualText = [
+    CORE_SECTION_HEADER,
+    '主档案正文',
+    WORLDBOOK_DIVIDER,
+    '[条目：核心誓约]',
+    '触发方式：蓝灯常驻',
+    '关键词：誓约',
+    '内容：全程常驻的关键背景。',
+    '[条目：旧城支线]',
+    '触发方式：绿灯触发',
+    '关键词：旧城',
+    '内容：提到旧城才触发。',
+  ].join('\n');
+  const mixSplit = splitDualLayerOutput(blueDualText, { worldbookLightMode: 'smart_mix' });
+  assert.equal(mixSplit.worldbookEntries.length, 2);
+  assert.equal(mixSplit.worldbookEntries[0].constant, true);
+  assert.equal(mixSplit.worldbookEntries[0].selective, false);
+  assert.equal(mixSplit.worldbookEntries[1].constant, false);
+  assert.equal(mixSplit.worldbookEntries[1].selective, true);
+
+  const synced = coreMod.buildSyncedPreferenceEntries({
+    scheme: pc,
+    ui: { dualLayer: true, worldbookLightMode: 'blue_constant', draftAudit: true },
+  });
+  assert.equal(synced.length, 3);
+  assert.ok(synced.some((e) => e.id === 'ups_draft_audit' && e.enabled === true));
+  const wbSync = synced.find((e) => e.id === 'ups_synced_worldbook');
+  assert.equal(wbSync.enabled, true);
+  assert.ok(wbSync.content.includes('蓝灯常驻'));
+
+  const exportedPreset = exportSillyTavernPreset({
+    scheme: pc,
+    includeDraftAudit: true,
+    uiPreferences: { dualLayer: true, worldbookLightMode: 'blue_constant', draftAudit: true },
+  });
+  assert.ok(exportedPreset.prompts.some((p) => p.identifier === 'ups_synced_worldbook' && p.content.includes('蓝灯常驻')));
+  assert.ok(exportedPreset.prompts.some((p) => p.identifier === 'ups_draft_audit'));
+
+  // 4. Flesh-and-blood character world integration & pattern-level dislike presets
+  const charWoven = buildGenerationMessages({
+    mode: 'create',
+    inspiration: '新来的青年画师',
+    charContext: { name: '云舒霖', description: '江南画院名家' },
+  });
+  assert.ok(charWoven.assembledPromptText.includes('【人物经历与角色世界血肉融合】'));
+
+  const presetIds = coreMod.DISLIKE_REASON_PRESETS.map((p) => p.id);
+  assert.ok(presetIds.includes('sentence_pattern'));
+  assert.ok(presetIds.includes('explanatory_prose'));
+  const distillMsgs = coreMod.buildTasteSummaryMessages({
+    banned: [{ text: '表面波澜不惊，实则内心早已翻江倒海', note: '句式问题' }],
+  });
+  const distillJoined = distillMsgs.map((m) => m.content).join('\n');
+  assert.ok(distillJoined.includes('句式') && distillJoined.includes('解释性语言'));
 });
