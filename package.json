@@ -1,0 +1,14 @@
+{
+  "name": "user-persona-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Customizable, taste-learning User Persona Studio extension for SillyTavern and TauriTavern.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,1170 @@
+// Browser/Node-testable SillyTavern & TauriTavern host adapter for user-persona-studio.
+// Supports clean DI via `deps` and `globalThis.__UPS_HOST_BRIDGE__` plus multi-depth lazy imports.
+
+import { createDefaultSettings, deepClone, estimateTokens } from './core.js';
+
+export const EXTENSION_SETTINGS_KEY = 'user_persona_studio';
+
+export const HOST_CUSTOM_EVENTS = Object.freeze({
+  PERSONA_SAVED: 'ups:persona-saved',
+});
+
+// Valid 1x1 transparent PNG fallback (ensures valid PNG magic bytes on ST & TauriTavern)
+const FALLBACK_PNG_BYTES = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+  0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+]);
+
+const moduleCache = new Map();
+
+export function _resetHostCacheForTests() {
+  moduleCache.clear();
+}
+
+function getBridge() {
+  return globalThis.__UPS_HOST_BRIDGE__ && typeof globalThis.__UPS_HOST_BRIDGE__ === 'object'
+    ? globalThis.__UPS_HOST_BRIDGE__
+    : null;
+}
+
+function buildImportCandidates(relToScripts, isRootScript = false) {
+  const candidates = isRootScript
+    ? [`../../../../../${relToScripts}`, `../../../../${relToScripts}`]
+    : [`../../../../${relToScripts}`, `../../../${relToScripts}`];
+
+  try {
+    const href = globalThis.location?.href;
+    if (href && /^https?:/i.test(href)) {
+      const absPath = isRootScript ? `/${relToScripts}` : `/scripts/${relToScripts}`;
+      candidates.push(new URL(absPath, href).href);
+    }
+  } catch {
+    // Ignore invalid location in non-browser runtimes
+  }
+  return candidates;
+}
+
+async function importFirstAvailable(cacheKey, candidates, deps = {}) {
+  if (deps?.skipDynamicImport === true) {
+    return null;
+  }
+  if (moduleCache.has(cacheKey)) {
+    return moduleCache.get(cacheKey);
+  }
+  const loaderPromise = (async () => {
+    for (const specifier of candidates) {
+      try {
+        const mod = await import(specifier);
+        if (mod) return mod;
+      } catch {
+        // Try next candidate path depth
+      }
+    }
+    return null;
+  })();
+  moduleCache.set(cacheKey, loaderPromise);
+  return loaderPromise;
+}
+
+async function loadHostModules(needed = {}, deps = {}) {
+  const bridge = getBridge();
+  const skip = deps?.skipDynamicImport === true;
+
+  const mods = {
+    stContext: null,
+    extensions: null,
+    powerUser: null,
+    personas: null,
+    worldInfo: null,
+    script: null,
+  };
+
+  if (skip) return mods;
+
+  const tasks = [];
+  if (needed.stContext && !deps?.context && !bridge?.context && !globalThis.SillyTavern?.getContext) {
+    tasks.push(
+      importFirstAvailable('st-context', buildImportCandidates('st-context.js'), deps).then((m) => {
+        mods.stContext = m;
+      })
+    );
+  }
+  if (needed.extensions && !deps?.extensionSettings && !deps?.extension_settings && !bridge?.extensionSettings) {
+    tasks.push(
+      importFirstAvailable('extensions', buildImportCandidates('extensions.js'), deps).then((m) => {
+        mods.extensions = m;
+      })
+    );
+  }
+  if (needed.powerUser && !deps?.powerUser && !deps?.power_user && !bridge?.powerUser) {
+    tasks.push(
+      importFirstAvailable('power-user', buildImportCandidates('power-user.js'), deps).then((m) => {
+        mods.powerUser = m;
+      })
+    );
+  }
+  if (needed.personas) {
+    tasks.push(
+      importFirstAvailable('personas', buildImportCandidates('personas.js'), deps).then((m) => {
+        mods.personas = m;
+      })
+    );
+  }
+  if (needed.worldInfo) {
+    tasks.push(
+      importFirstAvailable('world-info', buildImportCandidates('world-info.js'), deps).then((m) => {
+        mods.worldInfo = m;
+      })
+    );
+  }
+  if (needed.script) {
+    tasks.push(
+      importFirstAvailable('script', buildImportCandidates('script.js', true), deps).then((m) => {
+        mods.script = m;
+      })
+    );
+  }
+
+  if (tasks.length > 0) {
+    await Promise.all(tasks);
+  }
+  return mods;
+}
+
+export function getHostContext(deps = {}) {
+  const bridge = getBridge();
+  if (deps?.context !== undefined) return deps.context;
+  if (deps?.ctx !== undefined) return deps.ctx;
+  if (bridge?.context !== undefined) return bridge.context;
+  if (typeof bridge?.getContext === 'function') return bridge.getContext();
+  if (typeof globalThis.SillyTavern?.getContext === 'function') {
+    return globalThis.SillyTavern.getContext();
+  }
+  return null;
+}
+
+export async function resolveHostContext(deps = {}) {
+  const immediate = getHostContext(deps);
+  if (immediate) return immediate;
+
+  const mods = await loadHostModules({ stContext: true }, deps);
+  if (typeof mods.stContext?.getContext === 'function') {
+    return mods.stContext.getContext();
+  }
+  return getHostContext(deps);
+}
+
+export async function getHostRequestHeaders(options = {}, deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+
+  const directFn =
+    deps?.getRequestHeaders ??
+    bridge?.getRequestHeaders ??
+    ctx?.getRequestHeaders ??
+    null;
+
+  if (typeof directFn === 'function') {
+    return directFn(options);
+  }
+
+  const mods = await loadHostModules({ script: true }, deps);
+  if (typeof mods.script?.getRequestHeaders === 'function') {
+    return mods.script.getRequestHeaders(options);
+  }
+
+  return options?.omitContentType ? {} : { 'Content-Type': 'application/json' };
+}
+
+function resolveExtensionSettingsContainer(deps, bridge, ctx, extensionsMod) {
+  return (
+    deps?.extensionSettings ??
+    deps?.extension_settings ??
+    bridge?.extensionSettings ??
+    bridge?.extension_settings ??
+    ctx?.extensionSettings ??
+    extensionsMod?.extension_settings ??
+    globalThis.extension_settings ??
+    null
+  );
+}
+
+function resolvePowerUser(deps, bridge, ctx, powerUserMod) {
+  return (
+    deps?.powerUser ??
+    deps?.power_user ??
+    bridge?.powerUser ??
+    bridge?.power_user ??
+    ctx?.powerUser ??
+    powerUserMod?.power_user ??
+    globalThis.power_user ??
+    null
+  );
+}
+
+function resolveActiveAvatarId(deps, bridge, ctx, personasMod) {
+  if (typeof deps?.getUserAvatar === 'function') {
+    return String(deps.getUserAvatar() ?? '').trim();
+  }
+  if (deps?.userAvatar !== undefined) {
+    return String(deps.userAvatar ?? '').trim();
+  }
+  if (typeof bridge?.getUserAvatar === 'function') {
+    return String(bridge.getUserAvatar() ?? '').trim();
+  }
+  if (bridge?.userAvatar !== undefined) {
+    return String(bridge.userAvatar ?? '').trim();
+  }
+  if (ctx?.userAvatar !== undefined) {
+    return String(ctx.userAvatar ?? '').trim();
+  }
+  if (personasMod?.user_avatar !== undefined) {
+    return String(personasMod.user_avatar ?? '').trim();
+  }
+  return '';
+}
+
+function buildPersonaRecord(avatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx) {
+  const desc =
+    descriptionsMap &&
+    typeof descriptionsMap === 'object' &&
+    Object.hasOwn(descriptionsMap, avatarId) &&
+    descriptionsMap[avatarId] &&
+    typeof descriptionsMap[avatarId] === 'object'
+      ? descriptionsMap[avatarId]
+      : {};
+  const isActive = Boolean(activeAvatarId && avatarId === activeAvatarId);
+  const defaultPersona = String(powerUser?.default_persona ?? '').trim();
+
+  const rawName =
+    personasMap && typeof personasMap === 'object' && Object.hasOwn(personasMap, avatarId)
+      ? personasMap[avatarId]
+      : undefined;
+  const name =
+    rawName !== undefined && rawName !== null
+      ? String(rawName)
+      : (isActive && ctx?.name1 ? String(ctx.name1) : '');
+
+  const description =
+    desc.description !== undefined && desc.description !== null
+      ? String(desc.description)
+      : (isActive ? String(powerUser?.persona_description ?? '') : '');
+
+  const lorebook =
+    desc.lorebook !== undefined && desc.lorebook !== null
+      ? String(desc.lorebook)
+      : (isActive ? String(powerUser?.persona_description_lorebook ?? '') : '');
+
+  const position = Number.isFinite(Number(desc.position))
+    ? Number(desc.position)
+    : (isActive && Number.isFinite(Number(powerUser?.persona_description_position))
+        ? Number(powerUser.persona_description_position)
+        : 0);
+
+  const depth = Number.isFinite(Number(desc.depth))
+    ? Number(desc.depth)
+    : (isActive && Number.isFinite(Number(powerUser?.persona_description_depth))
+        ? Number(powerUser.persona_description_depth)
+        : 2);
+
+  const role = Number.isFinite(Number(desc.role))
+    ? Number(desc.role)
+    : (isActive && Number.isFinite(Number(powerUser?.persona_description_role))
+        ? Number(powerUser.persona_description_role)
+        : 0);
+
+  return {
+    avatarId,
+    name,
+    description,
+    title: String(desc.title ?? ''),
+    lorebook,
+    position,
+    depth,
+    role,
+    connections: Array.isArray(desc.connections) ? deepClone(desc.connections) : [],
+    isDefault: Boolean(defaultPersona && avatarId === defaultPersona),
+    isActive,
+  };
+}
+
+function dispatchPersonaSavedEvent(detail, deps = {}) {
+  const win = deps?.window ?? (typeof window !== 'undefined' ? window : null);
+  const EventCtor = deps?.CustomEvent ?? (typeof CustomEvent === 'function' ? CustomEvent : null);
+  if (!win || typeof win.dispatchEvent !== 'function' || typeof EventCtor !== 'function') {
+    return;
+  }
+  try {
+    const evt = new EventCtor(HOST_CUSTOM_EVENTS.PERSONA_SAVED, {
+      detail: deepClone(detail),
+    });
+    win.dispatchEvent(evt);
+  } catch {
+    // Guarded against hostile listeners or non-standard Event environments
+  }
+}
+
+async function resolveDefaultAvatarBlob(deps, bridge, scriptMod, fetchImpl) {
+  const defaultUrl =
+    deps?.defaultUserAvatar ??
+    bridge?.defaultUserAvatar ??
+    scriptMod?.default_user_avatar ??
+    'img/user-default.png';
+
+  if (typeof fetchImpl === 'function' && defaultUrl) {
+    try {
+      const res = await fetchImpl(defaultUrl, { cache: 'no-cache' });
+      if (res && res.ok && typeof res.blob === 'function') {
+        const blob = await res.blob();
+        if (blob && (blob.size === undefined || blob.size > 0)) {
+          return blob;
+        }
+      }
+    } catch {
+      // Fall back to deterministic valid 1x1 PNG bytes
+    }
+  }
+
+  if (typeof Blob === 'function') {
+    return new Blob([FALLBACK_PNG_BYTES], { type: 'image/png' });
+  }
+  return FALLBACK_PNG_BYTES;
+}
+
+// ============================================================================
+// Primary Exported API
+// ============================================================================
+
+export async function waitForHostReady(options = {}, deps = {}) {
+  const timeoutMs =
+    Number.isFinite(Number(options?.timeoutMs)) && Number(options.timeoutMs) > 0
+      ? Number(options.timeoutMs)
+      : 5000;
+
+  const bridge = getBridge();
+  const readyPromise =
+    deps?.ready ??
+    bridge?.ready ??
+    globalThis.__TAURITAVERN__?.ready ??
+    globalThis.__TAURITAVERN_MAIN_READY__ ??
+    null;
+
+  if (!readyPromise || typeof readyPromise.then !== 'function') {
+    return true;
+  }
+
+  let timer = null;
+  try {
+    const result = await Promise.race([
+      Promise.resolve(readyPromise).then(
+        () => true,
+        () => false
+      ),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+    return Boolean(result);
+  } catch {
+    return false;
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+export async function loadSettings(deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  const mods = await loadHostModules({ extensions: !ctx?.extensionSettings }, deps);
+  const container = resolveExtensionSettingsContainer(deps, bridge, ctx, mods.extensions);
+  const raw = container && typeof container === 'object' ? container[EXTENSION_SETTINGS_KEY] : undefined;
+  const normalized = createDefaultSettings(raw);
+
+  if (container && typeof container === 'object') {
+    container[EXTENSION_SETTINGS_KEY] = normalized;
+  }
+  return normalized;
+}
+
+export async function saveSettings(settings, deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  const needScript =
+    typeof deps?.saveSettingsDebounced !== 'function' &&
+    typeof bridge?.saveSettingsDebounced !== 'function' &&
+    typeof ctx?.saveSettingsDebounced !== 'function';
+  const mods = await loadHostModules(
+    {
+      extensions: !ctx?.extensionSettings,
+      script: needScript,
+    },
+    deps
+  );
+
+  const container = resolveExtensionSettingsContainer(deps, bridge, ctx, mods.extensions);
+  const normalized = createDefaultSettings(settings);
+
+  if (container && typeof container === 'object') {
+    container[EXTENSION_SETTINGS_KEY] = normalized;
+  }
+
+  const saveDebounced =
+    deps?.saveSettingsDebounced ??
+    bridge?.saveSettingsDebounced ??
+    ctx?.saveSettingsDebounced ??
+    mods.script?.saveSettingsDebounced ??
+    null;
+
+  if (typeof saveDebounced === 'function') {
+    await saveDebounced();
+  }
+  return normalized;
+}
+
+export async function getActivePersona(deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  const needPersonas =
+    deps?.userAvatar === undefined &&
+    typeof deps?.getUserAvatar !== 'function' &&
+    bridge?.userAvatar === undefined &&
+    typeof bridge?.getUserAvatar !== 'function' &&
+    ctx?.userAvatar === undefined;
+  const mods = await loadHostModules({ powerUser: true, personas: needPersonas }, deps);
+
+  const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+
+  if (!activeAvatarId || !powerUser || typeof powerUser !== 'object') {
+    return null;
+  }
+
+  const personasMap = powerUser.personas && typeof powerUser.personas === 'object' ? powerUser.personas : {};
+  const descriptionsMap =
+    powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
+      ? powerUser.persona_descriptions
+      : {};
+
+  return buildPersonaRecord(activeAvatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx);
+}
+
+export async function listPersonas(deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  const needPersonas =
+    deps?.userAvatar === undefined &&
+    typeof deps?.getUserAvatar !== 'function' &&
+    bridge?.userAvatar === undefined &&
+    typeof bridge?.getUserAvatar !== 'function' &&
+    ctx?.userAvatar === undefined;
+  const mods = await loadHostModules({ powerUser: true, personas: needPersonas }, deps);
+
+  const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+  if (!powerUser || typeof powerUser !== 'object') {
+    return [];
+  }
+
+  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+  const personasMap = powerUser.personas && typeof powerUser.personas === 'object' ? powerUser.personas : {};
+  const descriptionsMap =
+    powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object'
+      ? powerUser.persona_descriptions
+      : {};
+
+  const idSet = new Set();
+  for (const key of Object.keys(personasMap)) {
+    const trimmed = String(key ?? '').trim();
+    if (trimmed) idSet.add(trimmed);
+  }
+  for (const key of Object.keys(descriptionsMap)) {
+    const trimmed = String(key ?? '').trim();
+    if (trimmed) idSet.add(trimmed);
+  }
+
+  const list = [];
+  for (const avatarId of idSet) {
+    list.push(buildPersonaRecord(avatarId, personasMap, descriptionsMap, powerUser, activeAvatarId, ctx));
+  }
+
+  list.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    return a.name.localeCompare(b.name, 'zh-CN');
+  });
+
+  return list;
+}
+
+export async function getActiveCharacterContext(options = {}, deps = {}) {
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  if (!ctx) return null;
+
+  const characterId = ctx.characterId;
+  if (characterId === undefined || characterId === null || characterId === '') {
+    return null;
+  }
+
+  const characters = ctx.characters;
+  if (!characters || (typeof characters !== 'object' && !Array.isArray(characters))) {
+    return null;
+  }
+
+  const pickOwnCharacter = (map, id) => {
+    if (!map || (typeof map !== 'object' && !Array.isArray(map))) return null;
+    if (Object.hasOwn(map, id)) return map[id];
+    const numId = Number(id);
+    if (Number.isFinite(numId) && Object.hasOwn(map, numId)) return map[numId];
+    return null;
+  };
+
+  let character = pickOwnCharacter(characters, characterId);
+  if (!character || typeof character !== 'object') {
+    return null;
+  }
+
+  if (character.shallow && options?.unshallow !== false) {
+    try {
+      if (typeof ctx.unshallowCharacter === 'function') {
+        await ctx.unshallowCharacter(characterId);
+      } else if (typeof ctx.getOneCharacter === 'function' && character.avatar) {
+        await ctx.getOneCharacter(character.avatar);
+      }
+    } catch {
+      // Non-fatal: continue with currently available fields
+    }
+    const refreshed = pickOwnCharacter(ctx.characters, characterId);
+    if (refreshed && typeof refreshed === 'object') {
+      character = refreshed;
+    }
+  }
+
+  let fields = {};
+  if (typeof ctx.getCharacterCardFields === 'function') {
+    try {
+      fields = ctx.getCharacterCardFields({ chid: characterId }) || {};
+    } catch {
+      fields = {};
+    }
+  }
+
+  const worldName = String(character?.data?.extensions?.world ?? '').trim();
+  let worldSummary = worldName ? `关联世界书：${worldName}` : '';
+
+  if (worldName && options?.includeWorldSummary) {
+    let wbData = null;
+    const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl === 'function') {
+      try {
+        const headers = await getHostRequestHeaders({}, deps);
+        const res = await fetchImpl('/api/worldinfo/get', {
+          method: 'POST',
+          headers,
+          cache: 'no-cache',
+          body: JSON.stringify({ name: worldName }),
+        });
+        if (res && res.ok && typeof res.json === 'function') {
+          wbData = await res.json();
+        }
+      } catch {
+        wbData = null;
+      }
+    }
+
+    if (!wbData) {
+      const loadWorldInfoFn = deps?.loadWorldInfo ?? bridge?.loadWorldInfo ?? null;
+      if (typeof loadWorldInfoFn === 'function') {
+        try {
+          wbData = await loadWorldInfoFn(worldName);
+        } catch {
+          wbData = null;
+        }
+      } else {
+        const mods = await loadHostModules({ worldInfo: true }, deps);
+        if (typeof mods.worldInfo?.loadWorldInfo === 'function') {
+          try {
+            wbData = await mods.worldInfo.loadWorldInfo(worldName);
+          } catch {
+            wbData = null;
+          }
+        }
+      }
+    }
+
+    if (wbData && wbData.entries && typeof wbData.entries === 'object') {
+      const snippets = [];
+      for (const entry of Object.values(wbData.entries)) {
+        if (!entry || entry.disable) continue;
+        const body = String(entry.content ?? '').trim();
+        if (!body) continue;
+        const label = String(entry.comment ?? '').trim() || (Array.isArray(entry.key) ? entry.key[0] : '') || '设定';
+        snippets.push(`${label}：${body}`);
+        if (snippets.length >= 3) break;
+      }
+      if (snippets.length > 0) {
+        const joined = snippets.join('\n');
+        worldSummary = joined.length > 600 ? `${joined.slice(0, 597)}...` : joined;
+      }
+    }
+    // Clear reference immediately so large worldbook JSON can be GC'd
+    wbData = null;
+  }
+
+  const rawChatId =
+    typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId;
+
+  // Strictly public-only fields (omits system, jailbreak, creatorNotes, charDepthPrompt, mesExamples, persona)
+  return {
+    characterId: String(characterId),
+    avatar: String(character.avatar ?? ''),
+    name: String(character.name ?? ctx.name2 ?? '').trim(),
+    chatId: rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null,
+    worldName,
+    worldSummary,
+    description: String(fields.description ?? character.description ?? character.data?.description ?? ''),
+    personality: String(fields.personality ?? character.personality ?? character.data?.personality ?? ''),
+    scenario: String(fields.scenario ?? character.scenario ?? character.data?.scenario ?? ''),
+    firstMessage: String(fields.firstMessage ?? character.first_mes ?? character.data?.first_mes ?? ''),
+    shallow: Boolean(character.shallow),
+  };
+}
+
+export async function savePersonaToHost(payload = {}, deps = {}) {
+  const mode = payload?.mode ?? 'overwrite';
+  if (mode !== 'overwrite' && mode !== 'create') {
+    throw new Error(`不支持的人设保存模式：${String(mode)}`);
+  }
+
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+
+  const needPersonas =
+    typeof deps?.initPersona !== 'function' ||
+    typeof deps?.setPersonaDescription !== 'function' ||
+    typeof deps?.setUserAvatar !== 'function' ||
+    typeof deps?.getUserAvatars !== 'function' ||
+    (deps?.userAvatar === undefined && typeof deps?.getUserAvatar !== 'function');
+
+  const needScript =
+    typeof deps?.saveSettingsDebounced !== 'function' ||
+    typeof deps?.setUserName !== 'function';
+
+  const mods = await loadHostModules(
+    {
+      powerUser: !deps?.powerUser && !deps?.power_user && !bridge?.powerUser,
+      personas: needPersonas,
+      script: needScript,
+    },
+    deps
+  );
+
+  const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+  if (!powerUser || typeof powerUser !== 'object') {
+    throw new Error('未检测到酒馆用户人设存储（power_user），无法写入人设');
+  }
+  if (!powerUser.personas || typeof powerUser.personas !== 'object') {
+    powerUser.personas = {};
+  }
+  if (!powerUser.persona_descriptions || typeof powerUser.persona_descriptions !== 'object') {
+    powerUser.persona_descriptions = {};
+  }
+
+  const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+  const saveDebounced =
+    deps?.saveSettingsDebounced ??
+    bridge?.saveSettingsDebounced ??
+    ctx?.saveSettingsDebounced ??
+    mods.script?.saveSettingsDebounced ??
+    null;
+
+  const eventSource = deps?.eventSource ?? bridge?.eventSource ?? ctx?.eventSource ?? null;
+  const eventTypes = deps?.eventTypes ?? bridge?.eventTypes ?? ctx?.eventTypes ?? {};
+  const setPersonaDescriptionFn =
+    deps?.setPersonaDescription ?? bridge?.setPersonaDescription ?? mods.personas?.setPersonaDescription ?? null;
+  const setUserAvatarFn =
+    deps?.setUserAvatar ?? bridge?.setUserAvatar ?? mods.personas?.setUserAvatar ?? null;
+  const getUserAvatarsFn =
+    deps?.getUserAvatars ?? bridge?.getUserAvatars ?? mods.personas?.getUserAvatars ?? null;
+  const setUserNameFn =
+    deps?.setUserName ?? bridge?.setUserName ?? mods.script?.setUserName ?? null;
+  const initPersonaFn =
+    deps?.initPersona ?? bridge?.initPersona ?? mods.personas?.initPersona ?? null;
+  const fetchImpl = deps?.fetch ?? bridge?.fetch ?? globalThis.fetch;
+
+  const rawChatId =
+    ctx && typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx?.chatId;
+  const characterId =
+    ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== ''
+      ? String(ctx.characterId)
+      : null;
+  const chatId = rawChatId !== undefined && rawChatId !== null && rawChatId !== '' ? String(rawChatId) : null;
+
+  if (mode === 'overwrite') {
+    const targetId = String(payload.avatarId || activeAvatarId || '').trim();
+    if (!targetId) {
+      throw new Error('当前没有可覆盖的目标 User 人设，请先选择一个人设或改用「另存为新人设」');
+    }
+    const exists =
+      Object.hasOwn(powerUser.personas, targetId) ||
+      Object.hasOwn(powerUser.persona_descriptions, targetId);
+    if (!exists) {
+      throw new Error(`未找到目标人设（${targetId}），无法覆盖保存`);
+    }
+
+    const prevDesc =
+      Object.hasOwn(powerUser.persona_descriptions, targetId) &&
+      powerUser.persona_descriptions[targetId] &&
+      typeof powerUser.persona_descriptions[targetId] === 'object'
+        ? powerUser.persona_descriptions[targetId]
+        : {};
+
+    let currentName = Object.hasOwn(powerUser.personas, targetId) ? String(powerUser.personas[targetId] ?? '') : '';
+    const becomingActive = Boolean(payload.setAsActive) && targetId !== activeAvatarId;
+    const isTargetActive = targetId === activeAvatarId || Boolean(payload.setAsActive);
+
+    if (payload.name !== undefined) {
+      const nextName = String(payload.name).trim();
+      if (nextName && nextName !== currentName) {
+        const oldName = currentName;
+        powerUser.personas[targetId] = nextName;
+        currentName = nextName;
+        if (isTargetActive && typeof setUserNameFn === 'function') {
+          setUserNameFn(nextName);
+        }
+        await eventSource?.emit?.(eventTypes.PERSONA_RENAMED ?? 'persona_renamed', {
+          avatarId: targetId,
+          oldName,
+          newName: nextName,
+        });
+      }
+    }
+
+    const nextDesc = {
+      description:
+        payload.description !== undefined ? String(payload.description) : String(prevDesc.description ?? ''),
+      position:
+        payload.position !== undefined && Number.isFinite(Number(payload.position))
+          ? Number(payload.position)
+          : (Number.isFinite(Number(prevDesc.position)) ? Number(prevDesc.position) : 0),
+      depth:
+        payload.depth !== undefined && Number.isFinite(Number(payload.depth))
+          ? Number(payload.depth)
+          : (Number.isFinite(Number(prevDesc.depth)) ? Number(prevDesc.depth) : 2),
+      role:
+        payload.role !== undefined && Number.isFinite(Number(payload.role))
+          ? Number(payload.role)
+          : (Number.isFinite(Number(prevDesc.role)) ? Number(prevDesc.role) : 0),
+      lorebook:
+        payload.lorebook !== undefined ? String(payload.lorebook) : String(prevDesc.lorebook ?? ''),
+      title: payload.title !== undefined ? String(payload.title) : String(prevDesc.title ?? ''),
+      connections: Array.isArray(prevDesc.connections) ? deepClone(prevDesc.connections) : [],
+    };
+
+    powerUser.persona_descriptions[targetId] = nextDesc;
+
+    if (becomingActive && typeof setUserAvatarFn === 'function') {
+      await setUserAvatarFn(targetId, { toastPersonaNameChange: false });
+    }
+
+    if (isTargetActive) {
+      powerUser.persona_description = nextDesc.description;
+      powerUser.persona_description_position = nextDesc.position;
+      powerUser.persona_description_depth = nextDesc.depth;
+      powerUser.persona_description_role = nextDesc.role;
+      powerUser.persona_description_lorebook = nextDesc.lorebook;
+      if (typeof setPersonaDescriptionFn === 'function') {
+        setPersonaDescriptionFn();
+      }
+    }
+
+    if (typeof saveDebounced === 'function') {
+      await saveDebounced();
+    }
+
+    await eventSource?.emit?.(eventTypes.PERSONA_UPDATED ?? 'persona_updated', targetId);
+
+    if (typeof getUserAvatarsFn === 'function') {
+      await getUserAvatarsFn(true, targetId);
+    }
+
+    const result = {
+      avatarId: targetId,
+      name: currentName,
+      description: nextDesc.description,
+      title: nextDesc.title,
+      lorebook: nextDesc.lorebook,
+      isNew: false,
+      mode: 'overwrite',
+    };
+
+    dispatchPersonaSavedEvent(
+      {
+        avatarId: result.avatarId,
+        name: result.name,
+        description: result.description,
+        lorebook: result.lorebook,
+        isNew: false,
+        characterId,
+        chatId,
+        mode: 'overwrite',
+      },
+      deps
+    );
+
+    return result;
+  }
+
+  // mode === 'create'
+  const trimmedName = String(payload.name ?? '').trim();
+  if (!trimmedName) {
+    throw new Error('新建人设名称不能为空');
+  }
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('当前运行环境缺少 fetch 接口，无法上传新建人设头像');
+  }
+
+  const asciiPart = trimmedName.replace(/[^a-zA-Z0-9]/g, '');
+  const candidateAvatarId = `${Date.now()}-${asciiPart}.png`;
+
+  const avatarBlob = await resolveDefaultAvatarBlob(deps, bridge, mods.script, fetchImpl);
+  const formData = new FormData();
+  const filePart =
+    typeof File === 'function'
+      ? new File([avatarBlob], 'avatar.png', { type: 'image/png' })
+      : avatarBlob;
+  formData.append('avatar', filePart, 'avatar.png');
+  formData.append('overwrite_name', candidateAvatarId);
+
+  const uploadHeaders = await getHostRequestHeaders({ omitContentType: true }, deps);
+  const uploadRes = await fetchImpl('/api/avatars/upload', {
+    method: 'POST',
+    headers: uploadHeaders,
+    cache: 'no-cache',
+    body: formData,
+  });
+
+  if (!uploadRes || !uploadRes.ok) {
+    throw new Error(`上传新人设头像失败（HTTP ${uploadRes?.status ?? 0}）`);
+  }
+
+  let uploadJson = {};
+  if (typeof uploadRes.json === 'function') {
+    try {
+      uploadJson = (await uploadRes.json()) || {};
+    } catch {
+      uploadJson = {};
+    }
+  }
+
+  const rawUploadPath = String(uploadJson?.path || '').trim();
+  const normalizedUploadId = rawUploadPath
+    ? rawUploadPath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/^User Avatars\//i, '').split('/').filter(Boolean).pop() || ''
+    : '';
+  const finalAvatarId = normalizedUploadId || candidateAvatarId;
+  const description = String(payload.description ?? '');
+  const title = payload.title !== undefined ? String(payload.title) : '';
+  const lorebook = payload.lorebook !== undefined ? String(payload.lorebook) : '';
+  const position =
+    payload.position !== undefined && Number.isFinite(Number(payload.position)) ? Number(payload.position) : 0;
+  const depth =
+    payload.depth !== undefined && Number.isFinite(Number(payload.depth)) ? Number(payload.depth) : 2;
+  const role =
+    payload.role !== undefined && Number.isFinite(Number(payload.role)) ? Number(payload.role) : 0;
+
+  if (typeof initPersonaFn === 'function') {
+    await initPersonaFn(finalAvatarId, trimmedName, description, title, {
+      position,
+      depth,
+      role,
+      lorebook,
+    });
+    if (
+      powerUser.persona_descriptions[finalAvatarId] &&
+      !Array.isArray(powerUser.persona_descriptions[finalAvatarId].connections)
+    ) {
+      powerUser.persona_descriptions[finalAvatarId].connections = [];
+    }
+  } else {
+    powerUser.personas[finalAvatarId] = trimmedName;
+    powerUser.persona_descriptions[finalAvatarId] = {
+      description,
+      position,
+      depth,
+      role,
+      lorebook,
+      title,
+      connections: [],
+    };
+    if (typeof saveDebounced === 'function') {
+      await saveDebounced();
+    }
+    await eventSource?.emit?.(eventTypes.PERSONA_CREATED ?? 'persona_created', {
+      avatarId: finalAvatarId,
+      name: trimmedName,
+      description,
+      title,
+    });
+  }
+
+  if (payload.setAsActive) {
+    if (typeof setUserAvatarFn === 'function') {
+      await setUserAvatarFn(finalAvatarId, { toastPersonaNameChange: false });
+    }
+    powerUser.persona_description = description;
+    powerUser.persona_description_position = position;
+    powerUser.persona_description_depth = depth;
+    powerUser.persona_description_role = role;
+    powerUser.persona_description_lorebook = lorebook;
+    if (typeof setUserNameFn === 'function') {
+      setUserNameFn(trimmedName);
+    }
+    if (typeof setPersonaDescriptionFn === 'function') {
+      setPersonaDescriptionFn();
+    }
+    if (typeof saveDebounced === 'function') {
+      await saveDebounced();
+    }
+  }
+
+  if (typeof getUserAvatarsFn === 'function') {
+    await getUserAvatarsFn(true, finalAvatarId);
+  }
+
+  const result = {
+    avatarId: finalAvatarId,
+    name: trimmedName,
+    description,
+    title,
+    lorebook,
+    isNew: true,
+    mode: 'create',
+  };
+
+  dispatchPersonaSavedEvent(
+    {
+      avatarId: result.avatarId,
+      name: result.name,
+      description: result.description,
+      lorebook: result.lorebook,
+      isNew: true,
+      characterId,
+      chatId,
+      mode: 'create',
+    },
+    deps
+  );
+
+  return result;
+}
+
+function allocateFallbackWorldInfoEntry(data) {
+  if (!data.entries || typeof data.entries !== 'object') {
+    data.entries = {};
+  }
+  let uid = 0;
+  while (Object.hasOwn(data.entries, uid) || Object.hasOwn(data.entries, String(uid))) {
+    uid += 1;
+  }
+  const entry = {
+    uid,
+    key: [],
+    keysecondary: [],
+    comment: '',
+    content: '',
+    constant: false,
+    selective: true,
+    selectiveLogic: 0,
+    addMemo: true,
+    order: 100,
+    position: 0,
+    disable: false,
+  };
+  data.entries[uid] = entry;
+  return entry;
+}
+
+export async function saveSupplementaryWorldbook({ worldName, entries, avatarId } = {}, deps = {}) {
+  const cleanWorldName = String(worldName ?? '').trim();
+  if (!cleanWorldName) {
+    throw new Error('补充世界书名称不能为空');
+  }
+  if (!Array.isArray(entries)) {
+    throw new Error('补充世界书条目必须为数组');
+  }
+
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+
+  const needWorldInfo =
+    typeof deps?.loadWorldInfo !== 'function' ||
+    typeof deps?.saveWorldInfo !== 'function' ||
+    typeof deps?.createWorldInfoEntry !== 'function' ||
+    typeof deps?.updateWorldInfoList !== 'function';
+
+  const mods = await loadHostModules(
+    {
+      worldInfo: needWorldInfo,
+      powerUser: Boolean(avatarId) && !deps?.powerUser && !deps?.power_user && !bridge?.powerUser,
+      personas:
+        Boolean(avatarId) &&
+        ((deps?.userAvatar === undefined && bridge?.userAvatar === undefined) ||
+          (typeof deps?.setPersonaDescription !== 'function' &&
+            typeof bridge?.setPersonaDescription !== 'function')),
+      script: Boolean(avatarId) && typeof deps?.saveSettingsDebounced !== 'function',
+    },
+    deps
+  );
+
+  const loadWorldInfoFn = deps?.loadWorldInfo ?? bridge?.loadWorldInfo ?? mods.worldInfo?.loadWorldInfo ?? null;
+  const saveWorldInfoFn = deps?.saveWorldInfo ?? bridge?.saveWorldInfo ?? mods.worldInfo?.saveWorldInfo ?? null;
+  const createWorldInfoEntryFn =
+    deps?.createWorldInfoEntry ?? bridge?.createWorldInfoEntry ?? mods.worldInfo?.createWorldInfoEntry ?? null;
+  const updateWorldInfoListFn =
+    deps?.updateWorldInfoList ?? bridge?.updateWorldInfoList ?? mods.worldInfo?.updateWorldInfoList ?? null;
+
+  if (typeof saveWorldInfoFn !== 'function') {
+    throw new Error('当前环境缺少 saveWorldInfo 接口，无法保存补充世界书');
+  }
+
+  let data = null;
+  if (typeof loadWorldInfoFn === 'function') {
+    data = await loadWorldInfoFn(cleanWorldName);
+  }
+  if (!data || typeof data !== 'object') {
+    data = { entries: {} };
+  }
+  if (!data.entries || typeof data.entries !== 'object') {
+    data.entries = {};
+  }
+
+  const uids = [];
+  for (const rawEntry of entries) {
+    const content = String(rawEntry?.content ?? '').trim();
+    if (!content) continue;
+
+    const created =
+      typeof createWorldInfoEntryFn === 'function'
+        ? createWorldInfoEntryFn(cleanWorldName, data)
+        : allocateFallbackWorldInfoEntry(data);
+
+    const keys = Array.isArray(rawEntry.key)
+      ? rawEntry.key.map((k) => String(k ?? '').trim()).filter(Boolean)
+      : String(rawEntry.key ?? '')
+          .split(/[,，/|、]/)
+          .map((k) => k.trim())
+          .filter(Boolean);
+
+    created.key = keys;
+    created.comment = String(rawEntry.comment ?? rawEntry.title ?? keys[0] ?? '补充背景').trim();
+    created.content = content;
+    created.constant = false;
+    created.selective = true;
+    created.disable = false;
+    created.addMemo = true;
+    created.position = Number.isFinite(Number(rawEntry.position)) ? Number(rawEntry.position) : 0;
+    created.order = Number.isFinite(Number(rawEntry.order)) ? Number(rawEntry.order) : 100;
+
+    if (created.uid !== undefined && created.uid !== null) {
+      uids.push(created.uid);
+    }
+  }
+
+  await saveWorldInfoFn(cleanWorldName, data, true);
+
+  if (typeof updateWorldInfoListFn === 'function') {
+    await updateWorldInfoListFn();
+  }
+
+  const boundAvatarId = String(avatarId ?? '').trim();
+  if (boundAvatarId) {
+    const powerUser = resolvePowerUser(deps, bridge, ctx, mods.powerUser);
+    if (powerUser && typeof powerUser === 'object') {
+      if (!powerUser.persona_descriptions || typeof powerUser.persona_descriptions !== 'object') {
+        powerUser.persona_descriptions = {};
+      }
+      if (
+        !Object.hasOwn(powerUser.persona_descriptions, boundAvatarId) ||
+        !powerUser.persona_descriptions[boundAvatarId] ||
+        typeof powerUser.persona_descriptions[boundAvatarId] !== 'object'
+      ) {
+        powerUser.persona_descriptions[boundAvatarId] = {
+          description: '',
+          position: 0,
+          depth: 2,
+          role: 0,
+          lorebook: cleanWorldName,
+          title: '',
+          connections: [],
+        };
+      } else {
+        powerUser.persona_descriptions[boundAvatarId].lorebook = cleanWorldName;
+      }
+
+      const activeAvatarId = resolveActiveAvatarId(deps, bridge, ctx, mods.personas);
+      if (boundAvatarId === activeAvatarId) {
+        powerUser.persona_description_lorebook = cleanWorldName;
+        const setPersonaDescriptionFn =
+          deps?.setPersonaDescription ?? bridge?.setPersonaDescription ?? mods.personas?.setPersonaDescription ?? null;
+        if (typeof setPersonaDescriptionFn === 'function') {
+          setPersonaDescriptionFn();
+        }
+      }
+
+      const saveDebounced =
+        deps?.saveSettingsDebounced ??
+        bridge?.saveSettingsDebounced ??
+        ctx?.saveSettingsDebounced ??
+        mods.script?.saveSettingsDebounced ??
+        null;
+      if (typeof saveDebounced === 'function') {
+        await saveDebounced();
+      }
+
+      const eventSource = deps?.eventSource ?? bridge?.eventSource ?? ctx?.eventSource ?? null;
+      const eventTypes = deps?.eventTypes ?? bridge?.eventTypes ?? ctx?.eventTypes ?? {};
+      await eventSource?.emit?.(eventTypes.PERSONA_UPDATED ?? 'persona_updated', boundAvatarId);
+    }
+  }
+
+  return {
+    worldName: cleanWorldName,
+    entryCount: uids.length,
+    uids,
+    boundAvatarId,
+  };
+}
+
+export async function estimateHostTokens(text, deps = {}) {
+  const str = String(text ?? '');
+  if (!str.trim()) return 0;
+
+  const bridge = getBridge();
+  const ctx = await resolveHostContext(deps);
+  const tokenCounter =
+    deps?.getTokenCountAsync ??
+    bridge?.getTokenCountAsync ??
+    ctx?.getTokenCountAsync ??
+    null;
+
+  if (typeof tokenCounter === 'function') {
+    try {
+      const count = await tokenCounter(str);
+      if (Number.isFinite(Number(count)) && Number(count) >= 0) {
+        return Math.round(Number(count));
+      }
+    } catch {
+      // Fall back to deterministic pure estimator
+    }
+  }
+
+  return estimateTokens(str);
+}

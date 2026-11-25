@@ -1,0 +1,12 @@
+{
+  "display_name": "客制化成长型 User 人设工坊",
+  "loading_order": 12,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "User Persona Studio Contributors",
+  "version": "1.0.0",
+  "auto_update": false,
+  "minimum_client_version": "1.12.0"
+}
