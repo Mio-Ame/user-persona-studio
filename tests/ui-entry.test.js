@@ -766,6 +766,7 @@ test('ui.js: Shadow DOM structure, bubble stopPropagation, spellcheck, mobile no
   // Mode A generation
   sr.querySelector('[data-ups-inspiration]').value = '夜班气象记录员';
   sr.querySelector('[data-ups-generate]').click();
+  sr.querySelector('[data-ups-host-api-confirm]').click();
   await new Promise((r) => setTimeout(r, 20));
   assert.ok(draftEl.value.includes('人物本体核'));
 
@@ -968,6 +969,23 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   menuEl.querySelectorAll('.ups-menu-item').find((b) => b.textContent === '展开详情').click();
   assert.ok(sr.querySelector('.ups-entry-editor'));
 
+  const firstCard = sr.querySelectorAll('.ups-entry-card')[0];
+  const editor = firstCard.querySelector('textarea');
+  const before = ui.getState().settings.schemes.find((s) => s.id === schemeId).entries[0];
+  editor.value = '尚未保存的正文';
+  editor.dispatchEvent({ type: 'input' });
+  firstCard.querySelector('.ups-more-btn').click();
+  const sender = menuEl.querySelector('[data-ups-entry-menu-sender]');
+  assert.ok(sender);
+  assert.deepEqual(sender.options.map((option) => option.textContent), ['规则', 'AI 助手', '玩家']);
+  sender.value = 'assistant';
+  sender.dispatchEvent({ type: 'change' });
+  const after = ui.getState().settings.schemes.find((s) => s.id === schemeId).entries[0];
+  assert.equal(after.role, 'assistant');
+  assert.equal(after.content, before.content);
+  assert.equal(editor.value, '尚未保存的正文');
+  assert.equal(firstCard.querySelector('[data-ups-entry-editor-sender]').value, 'assistant');
+
   // Add a custom entry and delete it via ··· menu
   const addBtn = sr.querySelector('[data-ups-add-entry]');
   addBtn.click();
@@ -1115,7 +1133,7 @@ test('ui.js regression: Mode A & Mode B local section regeneration sends targetS
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
-    initialSettings: { ui: { injectChar: false } },
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '测试角色', description: '旧原稿' }),
       listPersonas: async () => [],
@@ -1325,7 +1343,7 @@ test('ui.js regression: Mode B preserves original-vs-optimized diff while tasteB
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
-    initialSettings: { ui: { injectChar: false } },
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '林清', description: originalPersona }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '林清', description: originalPersona, isActive: true }],
@@ -2146,7 +2164,7 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
-    initialSettings: { ui: { injectChar: false } },
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona, isActive: true }],
@@ -2167,6 +2185,10 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   assert.ok(sr.querySelector('[data-ups-pane="left"]'));
   assert.ok(sr.querySelector('[data-ups-pane="right"]'));
   assert.equal(sr.querySelector('[data-ups-popover-tail]'), null);
+  const draftPane = sr.querySelector('[data-ups-pane="right"]');
+  const draftToolbar = draftPane.querySelector('[data-ups-draft-toolbar]');
+  assert.ok(draftToolbar.querySelectorAll('button').some((button) => button.textContent === '清理缩进'));
+  assert.equal(draftPane.querySelector('.ups-draft-card > .ups-mod-head').querySelectorAll('button').length, 0);
 
   // 2. Footer uncluttered: exportPresetBtn moved out of footer into Tab 2 (presets)
   const footer = sr.querySelector('[data-ups-footer]');
@@ -2272,7 +2294,7 @@ test('UX v1.3: backstory & spotlight modes, anti-parrot & dash cleanup buttons, 
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
-    initialSettings: { ui: { injectChar: false } },
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '沈清', description: '旧描述' }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '沈清', description: '旧描述', isActive: true }],
@@ -2369,6 +2391,7 @@ test('R1: in-plugin character picker & non-destructive worldbook entry toggles w
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
+    initialSettings: { ui: { hostApiConfirmed: true } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'p1.png', name: '林清', description: '旧描述' }),
       listPersonas: async () => [],
@@ -2884,7 +2907,7 @@ test('M2: checked appearance lines share one heading and format warnings have no
   const ui = createStudioUI({
     doc: env.doc,
     win: env.win,
-    initialSettings: { ui: { mode: 'B', injectChar: false } },
+    initialSettings: { ui: { mode: 'B', injectChar: false, hostApiConfirmed: true } },
     onSaveSettings: () => {},
     hostApi: {
       getActivePersona: async () => null,
@@ -2964,6 +2987,7 @@ test('角色称呼：能清空自动主角称呼，也能编辑已选群像角�
     doc: env.doc,
     win: env.win,
     onSaveSettings: () => {},
+    initialSettings: { ui: { hostApiConfirmed: true } },
     hostApi: {
       getCharacterContext: async () => char,
       getActiveCharacterContext: async () => char,

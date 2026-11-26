@@ -40,7 +40,10 @@ afterEach(() => {
 
 async function mountFreshStudio(envOpts = {}, hostConfig = {}, controllerOpts = {}) {
   const env = createE2EEnvironment(envOpts);
-  const stHost = createMockSTHost(env, hostConfig);
+  const stHost = createMockSTHost(env, {
+    extensionSettings: { user_persona_studio: { ui: { hostApiConfirmed: true } } },
+    ...hostConfig,
+  });
   stHost.install();
   const ctrl = await mods.entry.mountStudioForTest({
     doc: env.doc,
@@ -64,6 +67,64 @@ function getModalRect(shadow) {
 function getStatusText(shadow) {
   return String(shadow.querySelector('[data-ups-status]')?.textContent || '').trim();
 }
+
+test('first host generation asks before sending and remembers confirmation on reload', async () => {
+  const extensionSettings = { user_persona_studio: { ui: { injectChar: false, hostApiConfirmed: false } } };
+  const { env, stHost, ctrl, shadow } = await mountFreshStudio({}, { extensionSettings });
+  await ctrl.open();
+  env.setInputValue(shadow.querySelector('[data-ups-inspiration]'), '住在街角的图书馆职员');
+  const generate = shadow.querySelector('[data-ups-generate]');
+  generate.click();
+  await env.waitTicks(15);
+  assert.equal(stHost.capturedGenerations.length, 0);
+  const panel = shadow.querySelector('[data-ups-submodal]');
+  assert.equal(panel.hidden, false);
+  assert.match(panel.textContent, /酒馆当前连接的 API/);
+  panel.querySelector('[data-ups-host-api-cancel]').click();
+  assert.equal(panel.hidden, true);
+  assert.equal(stHost.capturedGenerations.length, 0);
+  assert.equal(extensionSettings.user_persona_studio.ui.hostApiConfirmed, false);
+
+  generate.click();
+  await env.waitTicks();
+  const confirm = panel.querySelector('[data-ups-host-api-confirm]');
+  confirm.click();
+  confirm.click();
+  await env.waitTicks(25);
+  assert.equal(stHost.capturedGenerations.length, 1);
+  assert.equal(extensionSettings.user_persona_studio.ui.hostApiConfirmed, true);
+
+  const restarted = await mountFreshStudio({}, { extensionSettings });
+  await restarted.ctrl.open();
+  restarted.env.setInputValue(restarted.shadow.querySelector('[data-ups-inspiration]'), '渡口维修员');
+  restarted.shadow.querySelector('[data-ups-generate]').click();
+  await restarted.env.waitTicks(25);
+  assert.equal(restarted.stHost.capturedGenerations.length, 1);
+  assert.equal(restarted.shadow.querySelector('[data-ups-submodal]').hidden, true);
+});
+
+test('custom API generation does not confirm or mark the host API', async () => {
+  let sent = 0;
+  const extensionSettings = {
+    user_persona_studio: { api: { provider: 'custom' }, ui: { injectChar: false, hostApiConfirmed: false } },
+  };
+  const { env, ctrl, shadow } = await mountFreshStudio({}, { extensionSettings }, {
+    hostApi: {
+      runStudioGeneration: async ({ settings }) => {
+        assert.equal(settings.api.provider, 'custom');
+        sent++;
+        return { text: '老街地图绘制员', source: 'mock' };
+      },
+    },
+  });
+  await ctrl.open();
+  env.setInputValue(shadow.querySelector('[data-ups-inspiration]'), '绘制街巷地图');
+  shadow.querySelector('[data-ups-generate]').click();
+  await env.waitTicks(25);
+  assert.equal(sent, 1);
+  assert.equal(shadow.querySelector('[data-ups-submodal]').hidden, true);
+  assert.equal(ctrl.getState().settings.ui.hostApiConfirmed, false);
+});
 
 function makeCompanionSample(overrides = {}) {
   return {
@@ -1441,6 +1502,46 @@ test('T2-F01-03: save failure releases isSaving lock, shows error in status bar,
   assert.equal(saveBtn.disabled, false);
   assert.ok(getStatusText(shadow).includes('失败'));
   assert.equal(env.dispatchedCustomEvents.some((e) => e.type === 'ups:persona-saved'), false);
+});
+
+test('worldbook switch works without choosing a light and saves unsupported supplements in the persona', async () => {
+  const { env, stHost, ctrl, shadow } = await mountFreshStudio();
+  await ctrl.open();
+  env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '1600');
+  shadow.querySelector('[data-ups-split-hint]').click();
+  assert.equal(shadow.querySelector('[data-ups-wb-light-mode]'), null);
+  const draft = shadow.querySelector('[data-ups-draft]');
+  env.setInputValue(draft, [
+    '【基础人设】',
+    '姓名：林栖',
+    '【补充世界书条目】',
+    '[条目：旧修表铺]',
+    '触发方式：蓝灯常驻',
+    '关键词：栖霞修表铺',
+    '内容：她曾住在店里的阁楼。',
+    '[条目：外祖父的遗物]',
+    '关键词：',
+    '内容：家里的工具箱来自外祖父。',
+  ].join('\n'));
+  shadow.querySelector('[data-ups-save-overwrite]').click();
+  await env.waitTicks(25);
+  const persona = stHost.powerUser.persona_descriptions['linqi.png'];
+  const bookName = persona.lorebook;
+  const entries = Object.values(stHost.worldbooks.get(bookName).entries);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].constant, false);
+  assert.deepEqual(entries[0].key, ['栖霞修表铺']);
+  assert.match(persona.description, /家里的工具箱来自外祖父/);
+  assert.equal(persona.description.includes('她曾住在店里的阁楼'), false);
+  stHost.worldbooks.get(bookName).entries[99] = {
+    uid: 99, key: ['原有条目'], comment: '原有条目', content: '玩家自己维护的设定。',
+  };
+
+  env.setInputValue(draft, draft.value.replace('关键词：栖霞修表铺', '关键词：'));
+  shadow.querySelector('[data-ups-save-overwrite]').click();
+  await env.waitTicks(25);
+  assert.deepEqual(Object.keys(stHost.worldbooks.get(bookName).entries), ['99']);
+  assert.match(stHost.powerUser.persona_descriptions['linqi.png'].description, /她曾住在店里的阁楼/);
 });
 
 test('T2-F01-04: upsert matches legacy entry by normalized comment/keys and updates in-place preserving uid', async () => {
@@ -3476,11 +3577,6 @@ test('T4-11: Scenario 11 (v1.6.1) - Searchable char combobox, live 卡中角色�
   if (!ctrl.getState().settings.ui.dualLayer) {
     shadow.querySelector('[data-ups-split-hint]').click();
   }
-  const wbLightSel = shadow.querySelector('[data-ups-wb-light-mode]');
-  assert.ok(wbLightSel);
-  env.selectOption(wbLightSel, 'blue_constant');
-  await env.waitTicks();
-
   shadow.querySelector('[data-ups-tab="presets"]').click();
   await env.waitTicks();
   const presetsPanel = shadow.querySelector('[data-ups-tab-panel="presets"]');
@@ -3489,6 +3585,15 @@ test('T4-11: Scenario 11 (v1.6.1) - Searchable char combobox, live 卡中角色�
   assert.ok(syncedBox);
   assert.equal(presetsPanel.textContent.includes('本次生成条目'), false);
   assert.ok(syncedBox.textContent.includes('成稿前草稿自检'));
+  const wbRule = '[data-ups-synced-body="ups_synced_worldbook"]';
+  assert.equal(syncedBox.querySelector(wbRule).hidden, true);
+  syncedBox.querySelector('[data-ups-synced-expand="ups_synced_worldbook"]').click();
+  const wbLightSel = syncedBox.querySelector(`${wbRule} [data-ups-preset-wb-light]`);
+  assert.ok(wbLightSel);
+  assert.equal(wbLightSel.value, 'green_selective');
+  assert.equal(wbLightSel.textContent.includes('灯'), false);
+  env.selectOption(wbLightSel, 'blue_constant');
+  await env.waitTicks();
   assert.ok(syncedBox.textContent.includes('蓝灯常驻'));
 
   // 6. Custom API explicit 保存方案 button & collapsed connection diagnostics
@@ -3520,9 +3625,12 @@ test('自动生成条目在预设末尾折叠，可保存修改和恢复自动',
   assert.equal(list.children.at(-1) === details, true);
   assert.equal(details.open, false);
   assert.equal(details.querySelectorAll('[data-ups-synced-id]').length, 3);
+  assert.equal(details.querySelector('.ups-badge-ok'), null);
+  assert.equal(list.querySelector('.ups-acc-dot'), null);
   details.querySelector('summary').click();
   const identifier = 'ups_synced_sections';
   const findControl = (control) => details.querySelector(`[data-ups-synced-${control}="${identifier}"]`);
+  assert.ok(findControl('expand').querySelector('.ups-entry-title'));
   findControl('expand').click();
   assert.match(findControl('body').textContent, /不再随工坊设置更新/);
   const editor = findControl('edit');

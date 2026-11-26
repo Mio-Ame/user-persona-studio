@@ -1386,22 +1386,35 @@ export const SHADOW_CSS = String.raw`
   -webkit-box-orient: vertical;
 }
 
-/* Draft Editor Action Toolbar (Undo / Redo / Copy adjacent to draft editor) */
+.ups-draft-card {
+  container: draft-card / inline-size;
+}
+
+.ups-draft-head {
+  justify-content: flex-start;
+}
+
+@container draft-card (max-width: 440px) {
+  .ups-draft-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+  }
+
+  .ups-draft-count {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+}
+
 .ups-draft-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 6px;
   padding: 5px 8px;
   border: 1px solid var(--ups-border);
   border-radius: 7px;
   background-color: var(--ups-input-bg);
-}
-
-.ups-draft-toolbar-hint {
-  font-size: 11.5px;
-  color: var(--ups-fg-muted);
 }
 
 .ups-point-item:last-child {
@@ -2927,22 +2940,9 @@ export const SHADOW_CSS = String.raw`
   transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), color 0.15s ease;
 }
 
-.ups-entry-card.is-expanded .ups-acc-chev {
+.ups-acc-row-main[aria-expanded="true"] .ups-acc-chev {
   transform: rotate(90deg);
   color: var(--ups-accent);
-}
-
-.ups-acc-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background-color: var(--ups-track-off);
-  transition: background-color 0.15s ease;
-}
-
-.ups-acc-dot.is-on {
-  background-color: var(--ups-ok);
 }
 
 .ups-acc-text-col {
@@ -3050,7 +3050,7 @@ export const SHADOW_CSS = String.raw`
   border-color: var(--ups-border-strong);
 }
 
-@container plugin-win (max-width: 620px) {
+@container plugin-win (max-width: 680px) {
   .ups-row-inline-actions {
     display: none;
   }
@@ -3058,7 +3058,9 @@ export const SHADOW_CSS = String.raw`
   .ups-more-btn {
     display: inline-flex;
   }
+}
 
+@container plugin-win (max-width: 620px) {
   .ups-taste-grid {
     grid-template-columns: 1fr;
   }
@@ -3156,9 +3158,7 @@ export const SHADOW_CSS = String.raw`
 .ups-synced-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .ups-synced-body {
@@ -3375,6 +3375,10 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.ups-menu-field {
+  padding: 3px 5px 5px;
 }
 
 .ups-menu-item {
@@ -3692,7 +3696,10 @@ export const SHADOW_CSS = String.raw`
 @media (max-width: 680px), (pointer: coarse) {
   .ups-input,
   .ups-textarea,
-  .ups-input.ups-input-sm {
+  .ups-input.ups-input-sm,
+  [data-ups-entry-menu-sender],
+  [data-ups-entry-editor-sender],
+  [data-ups-preset-wb-light] {
     font-size: 16px;
   }
 

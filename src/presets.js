@@ -130,21 +130,21 @@ export const COMPANION_CARRY_MODES = Object.freeze([
 export const WORLDBOOK_LIGHT_MODES = Object.freeze([
   Object.freeze({
     id: 'green_selective',
-    label: '绿灯：提到关键词时触发（推荐）',
-    shortLabel: '绿灯触发',
-    description: '条目平时不占空间，对话中提到相关关键词时自动触发注入',
+    label: '聊到相关话题时补充',
+    shortLabel: '聊到时补充',
+    description: '提到相关人名、地点或往事时带上补充设定',
   }),
   Object.freeze({
     id: 'blue_constant',
-    label: '蓝灯：全程常驻生效',
-    shortLabel: '蓝灯常驻',
-    description: '条目全程常驻在上下文中，适合必须时刻记住的核心背景或重要关系',
+    label: '每次对话都带上',
+    shortLabel: '每次都带上',
+    description: '每次对话都带上这些补充设定',
   }),
   Object.freeze({
     id: 'smart_mix',
-    label: '蓝绿灯自动分流（按重要度分配）',
-    shortLabel: '自动蓝绿灯',
-    description: '由 AI 自动将核心关系标为蓝灯常驻、次要往事与细节标为绿灯关键词触发',
+    label: '按内容自动分配',
+    shortLabel: '自动分配',
+    description: '核心关系每次都带上，往事和细节聊到时再补充',
   }),
 ]);
 

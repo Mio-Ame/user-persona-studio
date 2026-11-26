@@ -709,6 +709,7 @@ export function createDefaultSettings(overrides = {}) {
       profiles,
     },
     ui: {
+      hostApiConfirmed: rawUi.hostApiConfirmed === true,
       showPersonaBtn: rawUi.showPersonaBtn !== false,
       showWandMenu: rawUi.showWandMenu !== false,
       showCharAdaptBtn: rawUi.showCharAdaptBtn !== false,
@@ -755,6 +756,7 @@ export function sanitizeSettingsForExport(settings) {
   const cloned = deepClone(settings && typeof settings === 'object' ? settings : createDefaultSettings());
   delete cloned.undoStack;
   delete cloned.redoStack;
+  if (cloned.ui) delete cloned.ui.hostApiConfirmed;
 
   if (cloned.api && Array.isArray(cloned.api.profiles)) {
     cloned.api.profiles = cloned.api.profiles.map((profile) => {
@@ -2309,6 +2311,8 @@ export function buildDualLayerDirective(scheme, lightMode = 'green_selective') {
   const safeLight = VALID_WORLDBOOK_LIGHT_MODES.has(lightMode) ? lightMode : 'green_selective';
   const ownershipRule =
     '所有拆分条目均严格归属 {{user}} 个人补充设定（严禁写成 {{char}} 设定），每条内容首行必须写明「【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】」。';
+  const triggerKeywords =
+    '每条绿灯条目须从该条内容中取 1～4 个聊天时自然会用到的专名、简称或具体事件短语，用逗号分隔。避开 {{user}}、{{char}}、家人、过去等会在无关对话中出现的词。示例词仅展示写法。缺少贴切关键词的内容留在主档案。';
 
   if (safeLight === 'blue_constant') {
     return [
@@ -2324,21 +2328,26 @@ export function buildDualLayerDirective(scheme, lightMode = 'green_selective') {
   if (safeLight === 'smart_mix') {
     return [
       '【补充世界书拆分规范（蓝绿灯分流）】',
-      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条补充背景条目，并按重要度分配蓝绿灯（全程不可或缺的重要关系或底线标为「蓝灯常驻」，聊到相关话题才展开的过往或支线细节标为「绿灯触发」）。${ownershipRule}严格使用以下格式：`,
+      `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成最多 4 条补充背景条目，并按重要度分配蓝绿灯（全程不可或缺的重要关系或底线标为「蓝灯常驻」，聊到相关话题才展开的过往或支线细节标为「绿灯触发」）。${ownershipRule}`,
+      triggerKeywords,
+      '每条按下列格式输出，触发方式只写「蓝灯常驻」或「绿灯触发」其中一个。',
       '[条目：条目标题]',
-      '触发方式：蓝灯常驻 或 绿灯触发',
-      '关键词：关键词1, 关键词2',
+      '触发方式：绿灯触发',
+      '关键词：栖霞修表铺, 修表铺旧址',
       '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】补充事实与适用情境。',
     ].join('\n');
   }
 
   return [
     '【补充世界书拆分规范（绿灯关键词触发）】',
-    `请将主档案正文精简至约 ${mainRange} 并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在分隔标题之下生成 2～4 条【绿灯按关键词触发】的补充背景条目（聊到相关人名、地点或往事关键词时触发）。${ownershipRule}严格使用以下格式：`,
+    `请将主档案正文精简至约 ${mainRange} 并放在上半部分。另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，其下放最多 4 条按关键词触发的补充背景。${ownershipRule}`,
+    '身份、核心关系和行动底线保留在主档案。世界书只放谈到相关话题才需要的往事和细节。',
+    triggerKeywords,
+    '每条按下列格式输出。',
     '[条目：条目标题]',
     '触发方式：绿灯触发',
-    '关键词：关键词1, 关键词2',
-    '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】补充事实与触发范围说明。',
+    '关键词：栖霞修表铺, 修表铺旧址',
+    '内容：【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】补充事实。',
   ].join('\n');
 }
 
@@ -3584,7 +3593,7 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
       id: 'ups_synced_worldbook',
       key: 'dualLayer',
       name: `补充世界书拆分规范（${
-        WORLDBOOK_LIGHT_MODES.find((m) => m.id === lightMode)?.shortLabel || '绿灯触发'
+        WORLDBOOK_LIGHT_MODES.find((m) => m.id === lightMode)?.shortLabel || '聊到时补充'
       }）`,
       role: 'system',
       enabled: Boolean(uiCfg.dualLayer),
@@ -5024,6 +5033,8 @@ export function splitDualLayerOutput(text, options = {}) {
 
   const lines = wbRaw.split('\n');
   const entries = [];
+  const keptInPersona = [];
+  const ownershipLine = '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】';
   let current = null;
   let readingContent = false;
 
@@ -5032,31 +5043,26 @@ export function splitDualLayerOutput(text, options = {}) {
     const rawContent = current.contentLines.join('\n').trim();
     const rawComment = current.comment.trim() || current.key[0] || '补充背景';
     if (rawContent) {
-      let isBlueConstant = false;
-      if (defaultLight === 'blue_constant') {
-        isBlueConstant = true;
-      } else if (defaultLight === 'smart_mix') {
-        isBlueConstant = current.parsedLight === 'blue';
-      } else if (current.parsedLight === 'blue') {
-        isBlueConstant = true;
+      const isBlueConstant =
+        defaultLight === 'blue_constant' || (defaultLight === 'smart_mix' && current.parsedLight === 'blue');
+      if (!isBlueConstant && current.key.length === 0) {
+        const body = rawContent.startsWith(ownershipLine) ? rawContent.slice(ownershipLine.length).trim() : rawContent;
+        if (body) keptInPersona.push(`## ${rawComment}\n${body}`);
+      } else {
+        const comment = /\{\{user\}\}/.test(rawComment) ? rawComment : `【{{user}}补充设定】${rawComment}`;
+        entries.push({
+          key: current.key,
+          comment,
+          content: ensureUserWorldbookAttribution(rawContent, ownershipLine),
+          constant: isBlueConstant,
+          selective: !isBlueConstant,
+          position: placement.position,
+          order: clampInt(placement.order + entries.length, 0, 10000, DEFAULT_USER_WORLDBOOK_PLACEMENT.order),
+          ...(placement.position === WORLD_INFO_POSITION.AT_DEPTH
+            ? { depth: placement.depth, role: placement.role }
+            : {}),
+        });
       }
-      const comment = /\{\{user\}\}/.test(rawComment) ? rawComment : `【{{user}}补充设定】${rawComment}`;
-      const content = ensureUserWorldbookAttribution(
-        rawContent,
-        '【以下为 {{user}} 的个人补充设定（非 {{char}} 设定）】'
-      );
-      entries.push({
-        key: current.key,
-        comment,
-        content,
-        constant: isBlueConstant,
-        selective: !isBlueConstant,
-        position: placement.position,
-        order: clampInt(placement.order + entries.length, 0, 10000, DEFAULT_USER_WORLDBOOK_PLACEMENT.order),
-        ...(placement.position === WORLD_INFO_POSITION.AT_DEPTH
-          ? { depth: placement.depth, role: placement.role }
-          : {}),
-      });
     }
     current = null;
     readingContent = false;
@@ -5071,10 +5077,9 @@ export function splitDualLayerOutput(text, options = {}) {
     if (headerBracketMatch || headerHashMatch || headerPrefixMatch) {
       flush();
       const rawTitle = (headerBracketMatch?.[1] || headerHashMatch?.[1] || headerPrefixMatch?.[1] || '').trim();
-      let parsedLight = '';
-      if (/蓝灯|常驻/.test(rawTitle)) parsedLight = 'blue';
-      else if (/绿灯|触发/.test(rawTitle)) parsedLight = 'green';
-      const cleanTitle = rawTitle.replace(/[（(【\[]?\s*(?:蓝灯常驻|绿灯触发|蓝灯|绿灯)\s*[）)】\]]?/g, '').trim();
+      const lightSuffix = /(?:^|[\s（(【\[])\s*(蓝灯常驻|绿灯触发|蓝灯|绿灯)\s*[）)】\]]?$/u.exec(rawTitle);
+      const parsedLight = lightSuffix?.[1].startsWith('蓝灯') ? 'blue' : '';
+      const cleanTitle = lightSuffix ? rawTitle.slice(0, lightSuffix.index).trim() : rawTitle;
       current = { comment: cleanTitle || rawTitle, key: [], contentLines: [], parsedLight };
       continue;
     }
@@ -5087,17 +5092,18 @@ export function splitDualLayerOutput(text, options = {}) {
     const triggerModeMatch = line.match(/^(?:触发方式|灯色|状态)[:：]\s*(.+)$/);
     if (triggerModeMatch && !readingContent) {
       const modeVal = triggerModeMatch[1].trim();
-      if (/蓝灯|常驻|constant/i.test(modeVal)) current.parsedLight = 'blue';
-      else if (/绿灯|关键词|触发|selective/i.test(modeVal)) current.parsedLight = 'green';
+      current.parsedLight = /^(?:蓝灯(?:常驻)?|常驻(?:生效)?|constant)$/i.test(modeVal) ? 'blue' : 'green';
       continue;
     }
 
     const kwMatch = line.match(/^关键词[:：]\s*(.*)$/);
     if (kwMatch && !readingContent) {
-      current.key = kwMatch[1]
-        .split(/[,，/|、]/)
+      const placeholder = /^(?:\{\{\s*(?:user|char)\s*\}\}|(?:关键词|核心标签)\s*\d+|无|无关键词)$/iu;
+      const keywords = kwMatch[1]
+        .split(/[,，/|、；;]/)
         .map((k) => k.trim())
-        .filter(Boolean);
+        .filter((k) => k && !placeholder.test(k));
+      current.key = [...new Set(keywords)];
       continue;
     }
 
@@ -5124,6 +5130,13 @@ export function splitDualLayerOutput(text, options = {}) {
   }
 
   flush();
+  if (keptInPersona.length > 0) {
+    return {
+      coreDescription: [coreDescription, ...keptInPersona].filter(Boolean).join('\n\n'),
+      worldbookEntries: entries,
+      keptInPersonaCount: keptInPersona.length,
+    };
+  }
   return { coreDescription, worldbookEntries: entries };
 }
 

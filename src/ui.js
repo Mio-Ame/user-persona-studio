@@ -102,6 +102,11 @@ const INTERACTIVE_DRAG_IGNORE =
   'button, select, input, textarea, a, label, [role="button"], [role="switch"], option';
 const RESIZE_DIRECTIONS = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
 const HISTORY_STORAGE_KEY = 'ups_generation_history_v1';
+const ENTRY_SENDERS = [
+  ['system', '规则'],
+  ['assistant', 'AI 助手'],
+  ['user', '玩家'],
+];
 
 // ============================================================================
 // Pure Geometry & Draft History Helpers (Node-testable)
@@ -1309,28 +1314,6 @@ export function createStudioUI(options = {}) {
     attrs: { 'data-ups-split-hint': 'true' },
   });
 
-  const worldbookLightSelect = createEl(
-    doc,
-    'select',
-    {
-      className: 'ups-select ups-input-sm',
-      style: { flex: '1 1 180px' },
-      attrs: { 'data-ups-wb-light-mode': 'true', 'aria-label': '世界书蓝绿灯触发方式' },
-    },
-    WORLDBOOK_LIGHT_MODES.map((m) => createEl(doc, 'option', { value: m.id, text: m.label }))
-  );
-  worldbookLightSelect.value = state.worldbookLightMode;
-
-  const worldbookLightRowEl = createEl(
-    doc,
-    'div',
-    { className: 'ups-row', hidden: !state.dualLayer, attrs: { 'data-ups-wb-light-row': 'true' } },
-    [
-      createEl(doc, 'span', { className: 'ups-chip-label', text: '世界书触发灯色：' }),
-      worldbookLightSelect,
-    ]
-  );
-
   const splitBoxEl = createEl(
     doc,
     'div',
@@ -1338,15 +1321,14 @@ export function createStudioUI(options = {}) {
     [
       createEl(doc, 'div', { className: 'ups-row-between' }, [
         createEl(doc, 'div', { style: { flex: '1 1 180px', minWidth: '0' } }, [
-          createEl(doc, 'div', { className: 'ups-label', text: '长设定分流存为世界书' }),
+          createEl(doc, 'div', { className: 'ups-label', text: '补充设定' }),
           createEl(doc, 'div', {
             className: 'ups-muted',
-            text: '字数较长时，人设框只留核心形象，把延展背景自动存成世界书条目',
+            text: '核心设定留在人设正文，往事和细节另存到世界书。',
           }),
         ]),
         splitHintBtn,
       ]),
-      worldbookLightRowEl,
     ]
   );
 
@@ -1819,7 +1801,7 @@ export function createStudioUI(options = {}) {
   );
 
   // Right Pane: Clean Spacious Draft Card
-  const tokenBadgeEl = createEl(doc, 'span', { className: 'ups-badge', text: '0 字 · 0 tokens' });
+  const tokenBadgeEl = createEl(doc, 'span', { className: 'ups-badge ups-draft-count', text: '0 字 · 0 tokens' });
   const lintSummaryBadge = createEl(doc, 'span', { className: 'ups-badge', text: '待检查' });
   const viewDraftLogBtn = createEl(doc, 'button', {
     type: 'button',
@@ -1828,7 +1810,7 @@ export function createStudioUI(options = {}) {
     hidden: true,
     attrs: { 'data-ups-view-draft-log': 'true' },
   });
-  const flattenBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-ghost', text: '清理缩进' });
+  const flattenBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-sm', text: '清理缩进' });
   const sectionSelect = createEl(doc, 'select', {
     className: 'ups-select',
     style: { width: 'auto', maxWidth: '148px' },
@@ -1845,6 +1827,10 @@ export function createStudioUI(options = {}) {
     hidden: true,
     attrs: { 'data-ups-regen-section': 'true' },
   });
+  const draftSectionActions = createEl(doc, 'div', { className: 'ups-btn-row', hidden: true }, [
+    sectionPickerEl,
+    regenSectionBtn,
+  ]);
   const draftTextarea = createEl(doc, 'textarea', {
     className: 'ups-textarea ups-draft-editor',
     rows: 12,
@@ -2033,6 +2019,10 @@ export function createStudioUI(options = {}) {
     placeholder: '补充世界书名称（留空自动命名）',
   });
   const saveWbBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn', text: '保存补充世界书' });
+  const wbSaveRow = createEl(doc, 'div', { className: 'ups-row' }, [
+    createEl(doc, 'div', { style: { flex: '1 1 160px' } }, [wbNameInput]),
+    saveWbBtn,
+  ]);
   const wbPreviewText = createEl(doc, 'div', { className: 'ups-muted', text: '' });
   const wbBox = createEl(
     doc,
@@ -2041,10 +2031,7 @@ export function createStudioUI(options = {}) {
     [
       createEl(doc, 'div', { className: 'ups-mod-title', text: '补充世界书条目' }),
       wbPreviewText,
-      createEl(doc, 'div', { className: 'ups-row' }, [
-        createEl(doc, 'div', { style: { flex: '1 1 160px' } }, [wbNameInput]),
-        saveWbBtn,
-      ]),
+      wbSaveRow,
     ]
   );
 
@@ -2361,22 +2348,16 @@ export function createStudioUI(options = {}) {
     { className: 'ups-pane-right', attrs: { 'data-ups-pane': 'right' } },
     [
       createEl(doc, 'div', { className: 'ups-card ups-draft-card' }, [
-        createEl(doc, 'div', { className: 'ups-mod-head' }, [
-          createEl(doc, 'div', { className: 'ups-row' }, [
-            createEl(doc, 'span', { className: 'ups-mod-title', text: '成稿正文' }),
-            tokenBadgeEl,
-            lintSummaryBadge,
-          ]),
-          createEl(doc, 'div', { className: 'ups-btn-row' }, [
-            viewDraftLogBtn,
-            flattenBtn,
-            sectionPickerEl,
-            regenSectionBtn,
-          ]),
+        createEl(doc, 'div', { className: 'ups-mod-head ups-draft-head' }, [
+          createEl(doc, 'span', { className: 'ups-mod-title', text: '成稿正文' }),
+          tokenBadgeEl,
+          lintSummaryBadge,
         ]),
         createEl(doc, 'div', { className: 'ups-draft-toolbar', attrs: { 'data-ups-draft-toolbar': 'true' } }, [
-          createEl(doc, 'span', { className: 'ups-draft-toolbar-hint', text: '成稿编辑快捷操作' }),
-          createEl(doc, 'div', { className: 'ups-btn-row' }, [historyBtn, undoBtn, redoBtn, copyBtn, clearDraftBtn, openDiffBtn]),
+          draftSectionActions,
+          createEl(doc, 'div', { className: 'ups-btn-row' }, [
+            flattenBtn, historyBtn, undoBtn, redoBtn, copyBtn, clearDraftBtn, openDiffBtn, viewDraftLogBtn,
+          ]),
         ]),
         draftTextarea,
         selectionTasteBar,
@@ -3214,11 +3195,10 @@ export function createStudioUI(options = {}) {
     splitBoxEl.hidden = !shouldShow;
     splitHintBtn.hidden = !shouldShow;
     splitHintBtn.classList.toggle('is-active', Boolean(state.dualLayer));
+    splitHintBtn.setAttribute('aria-pressed', String(state.dualLayer));
     splitHintBtn.textContent = state.dualLayer
       ? '✓ 长设定拆入世界书（已开启）'
       : '长设定拆入世界书';
-    worldbookLightRowEl.hidden = !state.dualLayer;
-    worldbookLightSelect.value = state.worldbookLightMode;
   }
 
   function syncSectionsSummary() {
@@ -4503,6 +4483,7 @@ export function createStudioUI(options = {}) {
     // Sections
     const sections = parsePersonaSections(text).filter((section) => section.rawHeading);
     const prevSec = sectionSelect.value;
+    draftSectionActions.hidden = sections.length === 0;
     sectionPickerEl.hidden = sections.length < 2;
     regenSectionBtn.hidden = sections.length === 0;
     if (sections.length === 0) {
@@ -4611,14 +4592,18 @@ export function createStudioUI(options = {}) {
     // Dual-layer worldbook preview
     if (state.dualLayer && text.trim()) {
       const split = splitDualLayerOutput(text, { worldbookLightMode: state.worldbookLightMode });
-      if (split.worldbookEntries.length > 0) {
-        wbBox.hidden = false;
-        wbPreviewText.textContent = `已解析 ${split.worldbookEntries.length} 条补充设定：${split.worldbookEntries
-          .map((e) => `${e.comment}（${e.constant ? '蓝灯常驻' : '绿灯触发'}）`)
-          .join('、')}`;
-      } else {
-        wbBox.hidden = true;
+      const entries = split.worldbookEntries;
+      wbBox.hidden = entries.length === 0 && !split.keptInPersonaCount;
+      wbSaveRow.hidden = entries.length === 0;
+      const messages = [];
+      if (entries.length > 0) {
+        messages.push(entries.map((entry) => {
+          const title = entry.comment.replace(/^【\{\{user\}\}补充设定】/, '');
+          return `${title}（${entry.constant ? '每次都带上' : '聊到时补充'}）`;
+        }).join('、'));
       }
+      if (split.keptInPersonaCount) messages.push(`${split.keptInPersonaCount} 条补充会留在人设正文。`);
+      wbPreviewText.textContent = messages.join('。');
     } else {
       wbBox.hidden = true;
     }
@@ -4680,7 +4665,7 @@ export function createStudioUI(options = {}) {
     floatingMenuEl.replaceChildren();
   }
 
-  function openFloatingMenu(anchorBtn, items) {
+  function openFloatingMenu(anchorBtn, items, senderField) {
     closeFloatingMenu();
     const btns = items.map((item) => {
       const b = createEl(doc, 'button', {
@@ -4695,14 +4680,13 @@ export function createStudioUI(options = {}) {
       });
       return b;
     });
-    floatingMenuEl.replaceChildren(...btns);
+    floatingMenuEl.replaceChildren(senderField, ...btns);
     floatingMenuEl.hidden = false;
 
     const r = anchorBtn.getBoundingClientRect?.() || { left: 20, top: 20, right: 48, bottom: 48 };
-    const vw = Number(win?.innerWidth || 1280);
-    const vh = Number(win?.innerHeight || 800);
+    const { vw, vh } = getSafeViewport(win, doc);
     const mw = floatingMenuEl.offsetWidth || 160;
-    const mh = floatingMenuEl.offsetHeight || items.length * 32 + 10;
+    const mh = floatingMenuEl.offsetHeight || items.length * 32 + 62;
     const left = Math.max(8, Math.min(vw - mw - 8, r.right - mw));
     const top = r.bottom + mh + 8 > vh ? Math.max(8, r.top - mh - 4) : Math.max(8, r.bottom + 4);
     floatingMenuEl.style.left = `${Math.round(left)}px`;
@@ -4716,6 +4700,14 @@ export function createStudioUI(options = {}) {
     if (!flat) return '0 字 · 点击展开编写规则内容';
     const snippet = flat.length > 52 ? `${flat.slice(0, 52)}…` : flat;
     return `${chars} 字 · ${snippet}`;
+  }
+
+  function createEntrySenderSelect(role, attrs) {
+    const select = createEl(doc, 'select', { className: 'ups-select', attrs }, ENTRY_SENDERS.map(
+      ([value, text]) => createEl(doc, 'option', { value, text })
+    ));
+    select.value = role || 'system';
+    return select;
   }
 
   function renderSyncedEntriesBlock() {
@@ -4764,11 +4756,41 @@ export function createStudioUI(options = {}) {
         if (content !== item.content || item.overridden) saveSyncedContent(content);
       }, { signal });
       resetBtn.addEventListener('click', () => saveSyncedContent(''), { signal });
+      let worldbookUsageRow = null;
+      if (item.key === 'dualLayer') {
+        const usageSelect = createEl(
+          doc,
+          'select',
+          {
+            className: 'ups-select',
+            attrs: { 'data-ups-preset-wb-light': 'true', 'aria-label': '补充设定怎么用' },
+          },
+          WORLDBOOK_LIGHT_MODES.map((mode) => createEl(doc, 'option', { value: mode.id, text: mode.label }))
+        );
+        usageSelect.value = state.worldbookLightMode;
+        usageSelect.addEventListener('change', () => {
+          state.worldbookLightMode = usageSelect.value;
+          settings.ui.worldbookLightMode = state.worldbookLightMode;
+          const unsavedContent = contentInput.value !== item.content ? contentInput.value : null;
+          renderSyncedEntriesBlock();
+          if (unsavedContent !== null) {
+            const reopened = syncedEntriesListEl.querySelector('[data-ups-synced-edit="ups_synced_worldbook"]');
+            if (reopened) reopened.value = unsavedContent;
+          }
+          syncDraftRelatedViews();
+          persistSettings();
+        }, { signal });
+        worldbookUsageRow = createEl(doc, 'label', { className: 'ups-row' }, [
+          createEl(doc, 'span', { className: 'ups-label', text: '补充设定怎么用' }),
+          usageSelect,
+        ]);
+      }
       const bodyElNode = createEl(doc, 'div', {
         className: 'ups-synced-body',
         hidden: !isExpanded,
         attrs: { 'data-ups-synced-body': item.id },
       }, [
+        worldbookUsageRow,
         createEl(doc, 'div', {
           className: 'ups-synced-warning',
           text: `保存后，这条文字不再随工坊设置更新。${formatWarning}`,
@@ -4778,51 +4800,36 @@ export function createStudioUI(options = {}) {
       ]);
       const viewBtn = createEl(doc, 'button', {
         type: 'button',
-        className: 'ups-btn-sm',
-        text: isExpanded ? '收起编辑' : '编辑内容',
-        attrs: { 'data-ups-synced-expand': item.id, 'aria-expanded': String(isExpanded) },
-      });
+        className: 'ups-acc-row-main',
+        attrs: { 'data-ups-synced-expand': item.id, 'aria-expanded': String(isExpanded), 'aria-label': item.name },
+      }, [
+        createEl(doc, 'span', { className: 'ups-acc-text-col' }, [
+          createEl(doc, 'span', { className: 'ups-entry-main' }, [
+            createEl(doc, 'span', { className: 'ups-entry-title', text: item.name }),
+            item.overridden ? createEl(doc, 'span', { className: 'ups-badge', text: '自定义' }) : null,
+          ]),
+          createEl(doc, 'span', {
+            className: 'ups-acc-preview',
+            text: formatEntryPreviewText(item.content),
+          }),
+        ]),
+        createEl(doc, 'span', { className: 'ups-acc-chev', attrs: { 'aria-hidden': 'true' } }, [
+          createSvgIcon(doc, ['M9 6l6 6-6 6'], 14),
+        ]),
+      ]);
       viewBtn.addEventListener('click', () => {
         if (state.expandedSyncedIds.has(item.id)) {
           state.expandedSyncedIds.delete(item.id);
           bodyElNode.hidden = true;
-          viewBtn.textContent = '编辑内容';
           viewBtn.setAttribute('aria-expanded', 'false');
         } else {
           state.expandedSyncedIds.add(item.id);
           bodyElNode.hidden = false;
-          viewBtn.textContent = '收起编辑';
           viewBtn.setAttribute('aria-expanded', 'true');
         }
       });
 
-      const controls = [];
-      if (item.id === 'ups_synced_worldbook') {
-        const presetLightSelect = createEl(
-          doc,
-          'select',
-          {
-            className: 'ups-select ups-input-sm',
-            style: { width: 'auto', maxWidth: '170px' },
-            attrs: { 'data-ups-preset-wb-light': 'true', 'aria-label': '预设世界书蓝绿灯方式' },
-          },
-          WORLDBOOK_LIGHT_MODES.map((m) => createEl(doc, 'option', { value: m.id, text: m.shortLabel }))
-        );
-        presetLightSelect.value = state.worldbookLightMode;
-        presetLightSelect.addEventListener('change', () => {
-          state.worldbookLightMode = presetLightSelect.value;
-          settings.ui.worldbookLightMode = state.worldbookLightMode;
-          worldbookLightSelect.value = state.worldbookLightMode;
-          renderSyncedEntriesBlock();
-          syncDraftRelatedViews();
-          persistSettings();
-          const modeObj = WORLDBOOK_LIGHT_MODES.find((m) => m.id === state.worldbookLightMode);
-          setStatus(`✓ 已切换世界书触发灯色：${modeObj?.label || state.worldbookLightMode}`, 'ok');
-        });
-        controls.push(presetLightSelect);
-      }
-
-      controls.push(viewBtn);
+      const controls = [viewBtn];
 
       if (item.toggleable) {
         const sw = createEl(
@@ -4859,8 +4866,6 @@ export function createStudioUI(options = {}) {
           }
         });
         controls.push(sw);
-      } else {
-        controls.push(createEl(doc, 'span', { className: 'ups-badge ups-badge-ok', text: '已启用' }));
       }
 
       return createEl(
@@ -4871,20 +4876,7 @@ export function createStudioUI(options = {}) {
           attrs: { 'data-ups-synced-id': item.id },
         },
         [
-          createEl(doc, 'div', { className: 'ups-synced-head' }, [
-            createEl(doc, 'div', { style: { minWidth: '0', flex: '1 1 200px' } }, [
-              createEl(doc, 'div', { className: 'ups-entry-main' }, [
-                createEl(doc, 'span', { className: 'ups-badge', text: item.role }),
-                createEl(doc, 'span', { className: 'ups-entry-title', text: item.name }),
-                item.overridden ? createEl(doc, 'span', { className: 'ups-badge', text: '自定义' }) : null,
-              ]),
-              createEl(doc, 'div', {
-                className: 'ups-acc-preview',
-                text: formatEntryPreviewText(item.content),
-              }),
-            ]),
-            createEl(doc, 'div', { className: 'ups-chip-group' }, controls),
-          ]),
+          createEl(doc, 'div', { className: 'ups-synced-head' }, controls),
           bodyElNode,
         ]
       );
@@ -4932,6 +4924,7 @@ export function createStudioUI(options = {}) {
         collapseTimer: null,
         nameInput: null,
       };
+      let syncEditorSender = null;
 
       const dragHandleEl = createEl(
         doc,
@@ -4958,11 +4951,6 @@ export function createStudioUI(options = {}) {
         { className: 'ups-acc-chev', attrs: { 'aria-hidden': 'true' } },
         [createSvgIcon(doc, ['M9 6l6 6-6 6'], 14)]
       );
-      const dotEl = createEl(doc, 'span', {
-        className: `ups-acc-dot${cardState.entry.enabled ? ' is-on' : ''}`,
-        title: cardState.entry.enabled ? '已启用' : '已停用',
-      });
-      const roleBadgeEl = createEl(doc, 'span', { className: 'ups-badge', text: cardState.entry.role });
       const titleEl = createEl(doc, 'span', { className: 'ups-entry-title', text: cardState.entry.name });
       const dirtyBadgeEl = createEl(doc, 'span', {
         className: 'ups-acc-dirty',
@@ -4987,12 +4975,11 @@ export function createStudioUI(options = {}) {
           },
         },
         [
-          chevEl,
-          dotEl,
           createEl(doc, 'div', { className: 'ups-acc-text-col' }, [
-            createEl(doc, 'div', { className: 'ups-entry-main' }, [roleBadgeEl, titleEl, dirtyBadgeEl]),
+            createEl(doc, 'div', { className: 'ups-entry-main' }, [titleEl, dirtyBadgeEl]),
             previewEl,
           ]),
+          chevEl,
         ]
       );
 
@@ -5074,13 +5061,10 @@ export function createStudioUI(options = {}) {
         });
         cardState.nameInput = nameEd;
 
-        const roleEd = createEl(
-          doc,
-          'select',
-          { className: 'ups-select' },
-          ['system', 'user', 'assistant'].map((r) => createEl(doc, 'option', { value: r, text: r }))
-        );
-        roleEd.value = cardState.entry.role || 'system';
+        const roleEd = createEntrySenderSelect(cardState.entry.role, {
+          'data-ups-entry-editor-sender': 'true',
+          'aria-label': '以谁的身份发送',
+        });
 
         const contentEd = createEl(doc, 'textarea', {
           className: 'ups-textarea ups-acc-textarea',
@@ -5148,6 +5132,10 @@ export function createStudioUI(options = {}) {
 
         nameEd.addEventListener('input', syncEditorMeta);
         roleEd.addEventListener('change', syncEditorMeta);
+        syncEditorSender = () => {
+          roleEd.value = cardState.entry.role;
+          syncEditorMeta();
+        };
         contentEd.addEventListener('input', () => {
           entryHist.push(contentEd.value);
           syncEditorMeta();
@@ -5207,7 +5195,6 @@ export function createStudioUI(options = {}) {
           };
           nameEd.value = nextName;
           titleEl.textContent = nextName;
-          roleBadgeEl.textContent = nextRole;
           previewEl.textContent = formatEntryPreviewText(
             resolvePresetEntryPreview(cardState.entry, nextScheme, settings.tasteProfile)
           );
@@ -5238,7 +5225,7 @@ export function createStudioUI(options = {}) {
                 nameEd,
               ]),
               createEl(doc, 'div', { className: 'ups-field' }, [
-                createEl(doc, 'label', { className: 'ups-label', text: '发送角色' }),
+                createEl(doc, 'label', { className: 'ups-label', text: '以谁的身份发送' }),
                 roleEd,
               ]),
             ]),
@@ -5298,11 +5285,13 @@ export function createStudioUI(options = {}) {
               cardState.collapseTimer = null;
               if (!state.expandedEntryIds.has(entryId)) {
                 collapseInnerEl.replaceChildren();
+                syncEditorSender = null;
               }
             }, 220);
             cardState.collapseTimer?.unref?.();
           } else {
             collapseInnerEl.replaceChildren();
+            syncEditorSender = null;
           }
         }
       }
@@ -5403,8 +5392,6 @@ export function createStudioUI(options = {}) {
         cardState.entry.enabled = nowEnabled;
         switchBtn.classList.toggle('is-on', nowEnabled);
         switchBtn.setAttribute('aria-checked', String(nowEnabled));
-        dotEl.classList.toggle('is-on', nowEnabled);
-        dotEl.title = nowEnabled ? '已启用' : '已停用';
         cardEl.classList.toggle('is-disabled', !nowEnabled);
         updateSchemeSelects();
         persistSettings();
@@ -5416,7 +5403,28 @@ export function createStudioUI(options = {}) {
         const curScheme = getActiveScheme(settings);
         const curEntries = curScheme?.entries || [];
         const liveIdx = curEntries.findIndex((e) => e.id === entryId);
+        if (liveIdx < 0) return;
         const liveOpen = state.expandedEntryIds.has(entryId);
+        const senderSelect = createEntrySenderSelect(curEntries[liveIdx].role, {
+          'data-ups-entry-menu-sender': 'true',
+        });
+        senderSelect.addEventListener('change', () => {
+          const scheme = getActiveScheme(settings);
+          if (scheme?.id !== curScheme.id) return;
+          const nextScheme = updateStackEntry(scheme, entryId, { role: senderSelect.value });
+          const saved = nextScheme.entries.find((entry) => entry.id === entryId);
+          if (!saved) return;
+          settings.schemes = settings.schemes.map((item) => item.id === scheme.id ? nextScheme : item);
+          cardState.entry.role = saved.role;
+          syncEditorSender?.();
+          closeFloatingMenu();
+          persistSettings();
+          setStatus('已更新发送身份', 'ok');
+        });
+        const senderField = createEl(doc, 'label', { className: 'ups-field ups-menu-field' }, [
+          createEl(doc, 'span', { className: 'ups-label', text: '以谁的身份发送' }),
+          senderSelect,
+        ]);
         openFloatingMenu(moreBtn, [
           {
             label: '上移一位',
@@ -5425,7 +5433,7 @@ export function createStudioUI(options = {}) {
           },
           {
             label: '下移一位',
-            disabled: liveIdx === -1 || liveIdx >= curEntries.length - 1,
+            disabled: liveIdx >= curEntries.length - 1,
             onSelect: () => doMove('down'),
           },
           {
@@ -5437,7 +5445,7 @@ export function createStudioUI(options = {}) {
             disabled: Boolean(cardState.entry.locked),
             onSelect: () => delInlineBtn.click(),
           },
-        ]);
+        ], senderField);
       });
 
       return cardEl;
@@ -6161,6 +6169,31 @@ export function createStudioUI(options = {}) {
     });
   }, { signal });
 
+  function confirmHostGeneration(targetSection) {
+    const cancel = createEl(doc, 'button', {
+      type: 'button', className: 'ups-btn-ghost', text: '取消',
+      attrs: { 'data-ups-host-api-cancel': 'true' },
+    });
+    const confirm = createEl(doc, 'button', {
+      type: 'button', className: 'ups-btn ups-btn-primary', text: '开始生成',
+      attrs: { 'data-ups-host-api-confirm': 'true' },
+    });
+    cancel.addEventListener('click', closeSubmodal);
+    confirm.addEventListener('click', () => {
+      confirm.disabled = true;
+      closeSubmodal();
+      if (settings.api.provider !== 'host') return;
+      settings.ui.hostApiConfirmed = true;
+      persistSettings();
+      void executeGeneration({ targetSection });
+    });
+    openSubmodal({
+      title: '使用酒馆 API 生成',
+      bodyNodes: [createEl(doc, 'div', { text: '这次会用酒馆当前连接的 API。现在生成吗？' })],
+      footerNodes: [cancel, confirm],
+    });
+  }
+
   async function executeGeneration({ targetSection = '' } = {}) {
     if (state.isGenerating) {
       state.genAbort?.abort();
@@ -6201,6 +6234,11 @@ export function createStudioUI(options = {}) {
         built = buildCurrentPrompt({ targetSection });
       } catch (err) {
         setStatus(`无法生成：${err.message}`, 'warn');
+        return;
+      }
+
+      if (settings.api.provider === 'host' && !settings.ui.hostApiConfirmed) {
+        confirmHostGeneration(targetSection);
         return;
       }
 
@@ -6426,6 +6464,8 @@ export function createStudioUI(options = {}) {
           })
         : [];
 
+      const existingPersonaBook =
+        mode === 'overwrite' ? String(state.cachedActivePersona?.lorebook || '').trim() : '';
       let finalLorebook = mode === 'create' ? '' : state.cachedActivePersona?.lorebook;
 
       if (hasCompBookEntries && state.companionCarryMode === 'target_book') {
@@ -6451,8 +6491,6 @@ export function createStudioUI(options = {}) {
           finalLorebook = dualWbName;
         }
       } else if (hasCompBookEntries || hasDualEntries) {
-        const existingPersonaBook =
-          mode === 'overwrite' ? String(state.cachedActivePersona?.lorebook || '').trim() : '';
         const defaultSuffix = hasCompBookEntries ? '携伴设定' : '补充设定';
         const wbName =
           wbNameInput.value.trim() || existingPersonaBook || `${targetName}_${defaultSuffix}`;
@@ -6463,6 +6501,19 @@ export function createStudioUI(options = {}) {
           pruneManaged: true,
         });
         finalLorebook = wbName;
+      }
+
+      if (
+        split.keptInPersonaCount && !hasDualEntries && existingPersonaBook && finalLorebook === existingPersonaBook
+        && (!hasCompBookEntries || state.companionCarryMode === 'target_book')
+      ) {
+        await hostApi.saveSupplementaryWorldbook({
+          worldName: existingPersonaBook,
+          entries: [],
+          upsert: true,
+          pruneManaged: true,
+          managedPrefix: 'ups:dual:',
+        });
       }
 
       const saved = await hostApi.savePersonaToHost({
@@ -6722,16 +6773,6 @@ export function createStudioUI(options = {}) {
     syncDraftRelatedViews();
     if (state.activeTab === 'presets') renderSyncedEntriesBlock();
     persistSettings();
-  }, { signal });
-
-  worldbookLightSelect.addEventListener('change', () => {
-    state.worldbookLightMode = worldbookLightSelect.value;
-    settings.ui.worldbookLightMode = state.worldbookLightMode;
-    syncDraftRelatedViews();
-    if (state.activeTab === 'presets') renderSyncedEntriesBlock();
-    persistSettings();
-    const picked = WORLDBOOK_LIGHT_MODES.find((m) => m.id === state.worldbookLightMode);
-    setStatus(`✓ 已切换世界书触发灯色：${picked?.label || state.worldbookLightMode}`, 'ok');
   }, { signal });
 
   draftAuditCheckbox.addEventListener('change', () => {
@@ -8893,7 +8934,6 @@ export function createStudioUI(options = {}) {
     paletteSelect.value = settings.palette;
     spotlightSelect.value = settings.ui.spotlightMode || 'balanced';
     backstorySelect.value = settings.ui.backstoryMode || 'light_vibe';
-    worldbookLightSelect.value = state.worldbookLightMode;
     companionCarryModeSelect.value = state.companionCarryMode;
     syncTargetBookSelectOptions();
     syncCompanionVisibility();

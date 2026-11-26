@@ -1027,6 +1027,35 @@ test('Group 5.2: lintPersonaText distinguishes bare labels vs concrete vibe-anch
   assert.equal(cleanReport.score, 100);
 });
 
+test('worldbook splitting respects the selected mode and keeps supplements without usable keywords in the persona', () => {
+  const draft = [
+    '核心人设',
+    WORLDBOOK_DIVIDER,
+    '[条目：旧修表铺]',
+    '触发方式：蓝灯常驻',
+    '关键词：栖霞修表铺，{{user}}，栖霞修表铺',
+    '内容：她小时候在店里学修钟表。',
+    '[条目：家中往事]',
+    '触发方式：绿灯触发',
+    '关键词：关键词1，{{char}}',
+    '内容：家里的工具箱是外祖父留下的。',
+  ].join('\n');
+  const byTopic = splitDualLayerOutput(draft);
+  assert.equal(byTopic.worldbookEntries.length, 1);
+  assert.deepEqual(byTopic.worldbookEntries[0].key, ['栖霞修表铺']);
+  assert.equal(byTopic.worldbookEntries[0].constant, false);
+  assert.equal(byTopic.keptInPersonaCount, 1);
+  assert.match(byTopic.coreDescription, /## 家中往事\n家里的工具箱是外祖父留下的。/);
+  assert.equal(byTopic.coreDescription.includes('旧修表铺'), false);
+  const always = splitDualLayerOutput(draft, { worldbookLightMode: 'blue_constant' });
+  assert.equal(always.worldbookEntries.length, 2);
+  assert.ok(always.worldbookEntries.every((entry) => entry.constant));
+  const mixed = splitDualLayerOutput(draft.replace('蓝灯常驻', '蓝灯常驻 或 绿灯触发'), {
+    worldbookLightMode: 'smart_mix',
+  });
+  assert.equal(mixed.worldbookEntries[0].constant, false);
+});
+
 test('Group 5.3: splitCoreAndShell & splitDualLayerOutput parse all supported delimiters & entry formats', () => {
   const twoTier = `${CORE_SECTION_HEADER}\n核内正文\n\n${SHELL_SECTION_HEADER}\n壳内正文`;
   const split = splitCoreAndShell(twoTier);
