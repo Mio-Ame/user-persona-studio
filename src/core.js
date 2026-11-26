@@ -371,6 +371,14 @@ function sanitizeMustHaveTemplates(rawTemplates) {
 const LEGACY_BUILTIN_CONTENT_RE =
   /(?:人物本体核|当前剧场壳|跨卡可锁|随卡可换|手控客观|纯手控|客观手控|非抢话|未公开私事|旁人无从知晓|外显可感知|既有共识|占\s*20%|1300\s*至\s*2400|尽量用\s*\{\{user\}\}\s*指代|开启【长设定自动拆出世界书】|仅当.*开启通用跨卡模式|仅在明确选择通用跨卡模式|及在场亲友|及客串人物|切勿大幅缩水或超写)/u;
 
+const BUILTIN_WORDING_EDITS = new Map([
+  ['lf_format', [/标点干净利落：(?=全文不使用破折号)|，防止后续对话模仿引发破折号增殖/gu, '']],
+  ['lf_craft', ['（严禁每行开头重复堆砌 {{user}} 浪费上下文）', '，不逐句重复写 {{user}}']],
+  ['lf_banned', ['与正文预设重复的系统命令口号', '系统命令']],
+  ['pc_banned', ['与正文预设重复的系统禁令口号', '系统命令']],
+  ['pr_taste', ['过多吃穿小喜好适度精简收束避免细节每轮重复', '精简琐碎的吃穿喜好，不把细节写成每轮必提']],
+]);
+
 function upgradeLegacyBuiltinEntries(resolvedId, sanitizedEntries, rawPresetVersion) {
   const factory = BUILTIN_PRESET_SCHEMES[resolvedId];
   if (!factory) return sanitizedEntries;
@@ -416,6 +424,8 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
   const seenIds = new Set();
   const initialEntries = rawEntries.map((item, idx) => {
     const clean = sanitizeSchemeEntry(item, idx);
+    const wordingEdit = isBuiltinId && BUILTIN_WORDING_EDITS.get(clean.id);
+    if (wordingEdit) clean.content = clean.content.replace(...wordingEdit);
     while (seenIds.has(clean.id)) {
       clean.id = generateId('entry');
     }
@@ -481,6 +491,11 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     isBuiltinId && (isLegacyBuiltin || !rawTrigger || LEGACY_BUILTIN_CONTENT_RE.test(rawTrigger))
       ? String(factory.triggerText)
       : (raw.triggerText !== undefined ? rawTrigger : DEFAULT_TRIGGER);
+  const syncedOverrides = {};
+  for (const key of ['generationSections', 'dualLayer', 'draftAudit']) {
+    const text = raw.syncedOverrides?.[key];
+    if (typeof text === 'string' && text.trim()) syncedOverrides[key] = text.trim();
+  }
 
   return {
     id: resolvedId,
@@ -501,6 +516,7 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
     temperature: clampNumber(raw.temperature, 0, 2, defaultTemp),
     maxTokens: migratedMaxTokens,
     entries,
+    ...(Object.keys(syncedOverrides).length > 0 ? { syncedOverrides } : {}),
   };
 }
 
@@ -1365,6 +1381,9 @@ function buildSegmentedPacingDirective(scheme = {}, uiContext = null) {
 }
 
 function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true, uiContext = null) {
+  if (entry.slotType === 'worldbook' && scheme.syncedOverrides?.dualLayer) return scheme.syncedOverrides.dualLayer;
+  if (entry.slotType === 'draft_audit' && scheme.syncedOverrides?.draftAudit) return scheme.syncedOverrides.draftAudit;
+  const sectionsOverridden = Boolean(scheme.syncedOverrides?.generationSections);
   const budget = computeLengthBudget(scheme.targetChars || 1500);
   let content = String(entry.content ?? '')
     .replaceAll('{{targetChars}}', String(budget.chars))
@@ -1398,7 +1417,7 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
   const factoryEntry = factoryScheme?.entries?.find((fe) => fe.id === entry.id) || null;
   const isDefaultEntryContent = !factoryEntry || String(entry.content ?? '').trim() === String(factoryEntry.content ?? '').trim();
 
-  if (entry.slotType === 'context' && hasUiCtx) {
+  if (entry.slotType === 'context' && hasUiCtx && !sectionsOverridden) {
     const backstoryMode = VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : '';
     const spotlightMode = VALID_SPOTLIGHT_MODES.has(uiContext.spotlightMode) ? uiContext.spotlightMode : '';
     const { hasCompanions, hasNpcNetwork } = getCompanionNpcFlags(uiContext);
@@ -1456,13 +1475,13 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
         .replace(/及成长经历/g, '与当下生活状态')
         .replace(/与过往事实/g, '与当下客观事实');
     }
-    if (hasUiCtx || isDefaultEntryContent) {
+    if (!sectionsOverridden && (hasUiCtx || isDefaultEntryContent)) {
       const segmentedPacing = buildSegmentedPacingDirective(scheme, uiContext);
       if (segmentedPacing) {
         content += `\n\n${segmentedPacing}`;
       }
     }
-    if (hasUiCtx && uiContext.moduleRatios) {
+    if (!sectionsOverridden && hasUiCtx && uiContext.moduleRatios) {
       const ratios = normalizeModuleRatios(uiContext.moduleRatios);
       if (ratios.mode === 'custom' || ratios.private > 0) {
         const ratioParts = [
@@ -1477,7 +1496,7 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
         content += `\n\n【人设构成占比指导】\n请按以下篇幅比重分配各维度细节（优先满足玩家明确指定的要求）：${ratioParts.join('，')}。`;
       }
     }
-  } else if (entry.slotType === 'format' && hasUiCtx && uiContext.generationSections) {
+  } else if (entry.slotType === 'format' && !sectionsOverridden && hasUiCtx && uiContext.generationSections) {
     const backstoryMode = VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : 'light_vibe';
     const secDirective = buildGenerationSectionDirective(uiContext.generationSections, {
       backstoryMode,
@@ -2385,12 +2404,12 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
     lines.push(
       '【输出版式：清单版（浅层中文分栏 + 平实大白话）】',
       `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块输出二级小标题（## 板块名），其下直接写 1～2 层的浅层中文键值（字段名：内容）或简洁短句；只输出契合当前世界观且有实质内容的字段，不留空壳占位格（例如古风或校园题材不硬套现代商务装，没有实质设定则跳过不硬凑）。`,
-      '全程使用平实直白的大白话写具体事实、习惯、外显情绪表现与个人目标短板，禁堆砌华丽比喻句；各条目短句默认省略主语（严禁每行开头机械重复 {{user}} 浪费 Token），仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧；严禁使用代码块或 XML 标签包裹。'
+      '全程使用平实直白的大白话写具体事实、习惯、外显情绪表现与个人目标短板，禁堆砌华丽比喻句；各条目短句默认省略主语，不逐句重复写 {{user}}，仅在双人互动容易混淆谁对谁时点一次 {{user}} 或角色名消歧；严禁使用代码块或 XML 标签包裹。'
     );
   } else {
     lines.push(
       '【输出版式：分段版（平实分段叙述）】',
-      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语避免通篇重复刷 {{user}}（仅在双人关系消歧处点明），禁比喻堆砌、禁代码块与 XML 标签。`
+      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语，仅在双人关系指代不清时点明，禁比喻堆砌、禁代码块与 XML 标签。`
     );
   }
 
@@ -3015,7 +3034,7 @@ function formatCompanionPromptBlock(companions = [], companionPlans = null) {
 
   const blocks = [
     '【携伴客串与人物关系网（1～3 位低干扰客串）】',
-    '核心要求：客串角色的外貌、性格、习惯与台词风格必须严格忠于原卡原文切片（原样保留原文，不得改写洗稿或编造原卡没有的设定）；已自动剥离冲突的旧开场与格式指令，始终保持当前主角色 {{char}} 为剧情核心主角，绝不喧宾夺主抢戏，按各自出场频率自然呼应。',
+    '核心要求：客串角色的外貌、性格、习惯与台词风格必须忠于原卡。引用须保留原文，不改写或编造设定。以当前角色 {{char}} 为剧情主角，客串人物按设定频率出场。',
   ];
 
   activeCompanions.forEach((c, idx) => {
@@ -3130,6 +3149,7 @@ export function buildGenerationMessages(options = {}) {
     .filter((c) => c && typeof c === 'object')
     .slice(0, 3);
   const applySectionsDirective = !targetSection && Boolean(opts.generationSections || subMode !== 'cross_card_adapt');
+  const sectionsOverride = !targetSection && scheme.syncedOverrides?.generationSections;
   const effectiveDualLayer =
     !targetSection &&
     (opts.dualLayer !== undefined
@@ -3166,8 +3186,10 @@ export function buildGenerationMessages(options = {}) {
   for (const entry of scheme.entries) {
     let isEntryEnabled = Boolean(entry.enabled);
     if (entry.slotType === 'worldbook') {
+      if (scheme.syncedOverrides?.dualLayer && emittedWorldbookSlot) continue;
       isEntryEnabled = effectiveDualLayer;
     } else if (entry.slotType === 'draft_audit') {
+      if (scheme.syncedOverrides?.draftAudit && emittedDraftAuditSlot) continue;
       isEntryEnabled = useDraftAudit;
     }
     if (!isEntryEnabled) continue;
@@ -3288,7 +3310,7 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
-  if (!emittedContextSlot) {
+  if (!emittedContextSlot && !sectionsOverride) {
     if (backstoryMode && !targetSection) {
       const bsText = buildBackstoryDirective(backstoryMode);
       if (bsText) taskParts.push(bsText);
@@ -3299,7 +3321,9 @@ export function buildGenerationMessages(options = {}) {
     }
   }
 
-  if (applySectionsDirective && !emittedFormatSlot) {
+  if (sectionsOverride) {
+    taskParts.push(sectionsOverride);
+  } else if (applySectionsDirective && !emittedFormatSlot) {
     taskParts.push(
       buildGenerationSectionDirective(opts.generationSections, {
         backstoryMode: backstoryMode || 'light_vibe',
@@ -3308,7 +3332,7 @@ export function buildGenerationMessages(options = {}) {
     );
   }
 
-  if (!emittedPacingSlot && !targetSection && (ratios.mode === 'custom' || ratios.private > 0)) {
+  if (!emittedPacingSlot && !targetSection && !sectionsOverride && (ratios.mode === 'custom' || ratios.private > 0)) {
     const ratioParts = [
       `外貌气质约 ${ratios.appearance}%`,
       `性格习惯约 ${ratios.personality}%`,
@@ -3335,7 +3359,7 @@ export function buildGenerationMessages(options = {}) {
     .filter(Boolean)
     .join('\n');
 
-  if (!targetSection) {
+  if (!targetSection && !sectionsOverride) {
     if (opts.pureCrossCardReuse === true && !emittedContextSlot) {
       taskParts.push(
         `【纯通用跨卡复用】\n本次需要跨卡通用复用：请保持${CORE_SECTION_HEADER}独立通用，剥离特定角色或旧卡专属绑定，仅在${SHELL_SECTION_HEADER}衔接当前角色卡。`
@@ -3396,13 +3420,13 @@ export function buildGenerationMessages(options = {}) {
   }
 
   if (effectiveDualLayer && !emittedWorldbookSlot) {
-    taskParts.push(buildDualLayerDirective(scheme, opts.worldbookLightMode));
+    taskParts.push(scheme.syncedOverrides?.dualLayer || buildDualLayerDirective(scheme, opts.worldbookLightMode));
   }
 
   if (useDraftAudit && !emittedDraftAuditSlot) {
     messages.push({
       role: 'system',
-      content: buildDraftAuditInstruction(scheme, {
+      content: scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, {
         backstoryMode: backstoryMode || 'light_vibe',
         spotlightMode: spotlightMode || 'balanced',
       }),
@@ -3579,7 +3603,10 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
         spotlightMode,
       }),
     },
-  ];
+  ].map((entry) => {
+    const override = safeScheme.syncedOverrides?.[entry.key];
+    return override ? { ...entry, content: override, overridden: true } : entry;
+  });
 }
 
 export function exportSillyTavernPreset(options = {}) {
@@ -3741,6 +3768,8 @@ export function exportSillyTavernPreset(options = {}) {
   let exportedFormatSlot = false;
 
   for (const entry of scheme.entries) {
+    if (entry.slotType === 'worldbook' && scheme.syncedOverrides?.dualLayer && exportedWorldbookSlot) continue;
+    if (entry.slotType === 'draft_audit' && scheme.syncedOverrides?.draftAudit && exportedDraftAuditSlot) continue;
     let identifier;
     if (entry.slotType === 'worldbook' && !usedIds.has('ups_synced_worldbook')) {
       identifier = 'ups_synced_worldbook';
@@ -3785,15 +3814,16 @@ export function exportSillyTavernPreset(options = {}) {
     order.push({ identifier, enabled: effectiveEnabled });
   }
 
-  if (includeSyncedOptions) {
+  if (includeSyncedOptions || scheme.syncedOverrides?.generationSections) {
     const syncedEntries = buildSyncedPreferenceEntries({
       scheme,
       ui: opts.uiPreferences,
     });
     for (const sEntry of syncedEntries) {
       if (sEntry.id === 'ups_draft_audit') continue;
+      if (!includeSyncedOptions && sEntry.id !== 'ups_synced_sections') continue;
       if (sEntry.id === 'ups_synced_worldbook' && exportedWorldbookSlot) continue;
-      if (sEntry.id === 'ups_synced_sections' && exportedFormatSlot) continue;
+      if (sEntry.id === 'ups_synced_sections' && exportedFormatSlot && !sEntry.overridden) continue;
       usedIds.add(sEntry.id);
       prompts.push(
         makeCustomPromptEntry({
@@ -3815,7 +3845,7 @@ export function exportSillyTavernPreset(options = {}) {
         identifier: auditId,
         name: '成稿前草稿自检',
         role: 'system',
-        content: buildDraftAuditInstruction(scheme, opts.uiPreferences || {}),
+        content: scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, opts.uiPreferences || {}),
       })
     );
     order.push({ identifier: auditId, enabled: true });
@@ -4317,7 +4347,7 @@ export function lintPersonaText(text, tasteProfile = {}) {
       term: '破折号过多',
       match: '',
       line: 0,
-      message: `检测到 ${dashMatches.length} 处破折号，易诱导正文模型模仿并引发破折号增殖，建议替换为自然逗号或冒号`,
+      message: `发现 ${dashMatches.length} 处破折号，可改用逗号或冒号`,
       suggestion: '可点击旁侧「清理破折号」一键替换为清爽标点。',
     });
   }

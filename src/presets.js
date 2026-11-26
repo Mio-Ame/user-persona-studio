@@ -235,7 +235,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
         label: '与当前角色的关系',
         group: 'core',
         defaultEnabled: true,
-        guidance: '写明与主角色的相识渊源、相识时间线、当前关系阶段与相处张力；仅在双人互动容易产生指代歧义时点一次 {{user}} 或角色真名消歧，避免每句重复主语。',
+        guidance: '写明与主角色的相识渊源、相识时间线、当前关系阶段与相处张力；仅在双人互动容易产生指代歧义时点一次 {{user}} 或角色真名。',
       }),
     ]),
   }),
@@ -493,7 +493,7 @@ export const BUILTIN_USAGE_GUIDE = [
   '1. 本预设用于生成或改写 SillyTavern 的 {{user}} 人设档案，不含任何接口地址或密钥。',
   '2. 新建人设：在聊天框直接发送一两句灵感或想要的设定（需要结合当前角色卡时保持角色描述条目开启），即可生成干净自然的人设；日常恋爱、暗线伏笔或长篇世界观均可自然适配。',
   '3. 改写旧人设：粘贴旧人设文本并附一句要求（如“整理排版并去掉套话”“保留原设定扩写细节”或“保留外貌性格、只改当前卡里的身份关系”）。',
-  '4. 需要隐藏自检块时，可导入配套正则脚本在聊天界面自动过滤【草稿自检】块；把最终人设正文复制保存到酒馆「用户人设（Persona）」面板即可使用。本说明条目默认关闭，不占用上下文。',
+  '4. 需要隐藏自检块时，可导入配套正则脚本在聊天界面过滤【草稿自检】块；将成稿复制到酒馆「用户人设（Persona）」面板保存。本说明条目默认关闭。',
 ].join('\n');
 
 // 100% original, Persona-Profile-Specific anti-cliché packs (strictly for persona sheets, zero prose-narration filler)
@@ -501,7 +501,7 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
   Object.freeze({
     id: 'persona_marysue',
     name: '人设悬浮自夸与赋魅腔',
-    description: '空洞吹捧气场或美貌的套话，写进人设极易导致正文中所有角色无脑倒贴赞美',
+    description: '空洞吹捧气场或美貌的套话',
     scope: 'all',
     rules: Object.freeze([
       '不写“人群中一眼认出”“生人勿近的气场”等主观吹捧，改为客观五官穿搭与平时待人的真实态度',
@@ -524,7 +524,7 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
   Object.freeze({
     id: 'persona_resume_ai',
     name: 'AI 简历式空洞对立与伪哲理',
-    description: '像星座解析或求职简历一样的假大空对仗句，占字数却不提供有效性格信息',
+    description: '用笼统的对仗或模糊修饰代替具体性格',
     scope: 'all',
     rules: Object.freeze([
       '不用“看似A实则B”“并非…而是…”“既理性又感性”做笼统总结，直接写遇到具体事情时的选择与分寸',
@@ -548,8 +548,8 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
   }),
   Object.freeze({
     id: 'persona_tic_lock',
-    name: '易导致每轮机械重复的固定微动作',
-    description: '写死在人设里的单一五官抽动或随身道具习惯，会导致对话每轮机械重复',
+    name: '固定重复的小动作',
+    description: '每逢特定情绪都做同一个小动作，或每轮都提同一件道具',
     scope: 'all',
     rules: Object.freeze([
       '不规定“每次紧张必摸某物/每次说话必推眼镜”式固定小动作，改写为通用的情绪反应倾向',
@@ -570,10 +570,10 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
   Object.freeze({
     id: 'persona_meta_overstep',
     name: '混入人设的系统口号与死板誓言',
-    description: '与酒馆正文预设重复或冲突的系统禁令口号，以及不留剧情余地的绝对化誓言',
+    description: '写进人设里的系统命令或绝对化誓言',
     scope: 'all',
     rules: Object.freeze([
-      '人设只写人物事实与常态表现，不写“禁止NPC读心/严禁OOC”等系统命令（避免与正文预设重复冲突）',
+      '人设只写人物事实与常态表现，不写“禁止NPC读心/严禁OOC”等系统命令',
       '少写“绝不XX/死心塌地绝不回头”式死板誓言，留出随关系推进自然变化的弹性',
     ]),
     phrases: Object.freeze([
@@ -757,7 +757,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语（严禁每行开头重复堆砌 {{user}} 浪费上下文），仅在双人互动容易产生指代歧义处点一次 {{user}} 或角色名消歧。',
+          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语，不逐句重复写 {{user}}，仅在双人互动容易产生指代歧义处点一次 {{user}} 或角色名消歧。',
           '2. 职业与特色元素自然收放：职业习惯（如医生、画师）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必提的固定习惯。',
           '3. 心事与边界自洽如常：日常设定保持坦荡自然，不凭空编造未提及的秘密；涉及隐瞒、暗自打算或感情暗流时，清晰区分平时如常的外在表现与未说出口的真实想法，不写成刻意的慌乱怕露馅，把揭晓契机留给剧情推进。',
           '4. 写底层思维防照抄：反应与习惯优先提炼通用思维规律；具体生活片段仅辅助理解人物思维方式，日常随情境自然反应不复刻原桥段。',
@@ -781,7 +781,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '行文平实耐读，剔除悬浮赋魅自夸、“看似…实则…”简历式对仗、固定五官重复微动作，以及“禁止NPC读心/严禁OOC”等与正文预设重复的系统命令口号。',
+          '行文平实耐读，剔除悬浮赋魅自夸、“看似…实则…”简历式对仗、固定五官重复微动作，以及“禁止NPC读心/严禁OOC”等系统命令。',
       },
       {
         id: 'lf_pacing',
@@ -805,7 +805,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           `使用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题，下方按指定板块输出简洁二级小标题（## 板块名），只写有实质内容的有效字段不留空壳；严禁深层缩进、XML 标签、代码块或寒暄说明，默认不加行首方括号可见度前缀。`,
-          '标点干净利落：全文不使用破折号连接或插入分句，改用逗号、冒号或句号，防止后续对话模仿引发破折号增殖。',
+          '全文不使用破折号连接或插入分句，改用逗号、冒号或句号。',
         ].join('\n'),
       },
       {
@@ -903,7 +903,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '删去悬浮赋魅自夸、“看似…实则…”空话、固定重复微动作、心理抒情，以及与正文预设重复的系统禁令口号。',
+          '删去悬浮赋魅自夸、“看似…实则…”空话、固定重复微动作、心理抒情，以及系统命令。',
       },
       {
         id: 'pc_pacing',
@@ -1016,7 +1016,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          '玩家指定的保留设定与修改要求优先级最高；过多吃穿小喜好适度精简收束避免细节每轮重复，顺着人物性格自然保留直白表露或内敛少提的状态，不锁死旁人能否猜中。',
+          '玩家指定的保留设定与修改要求优先级最高；精简琐碎的吃穿喜好，不把细节写成每轮必提，顺着人物性格自然保留直白表露或内敛少提的状态，不锁死旁人能否猜中。',
       },
       {
         id: 'pr_banned',

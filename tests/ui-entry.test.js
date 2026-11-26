@@ -697,7 +697,7 @@ test('ui.js: Shadow DOM structure, bubble stopPropagation, spellcheck, mobile no
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '林清', description: activePersonaDesc, lorebook: '' }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '林清', description: activePersonaDesc, isActive: true }],
-      getActiveCharacterContext: async () => ({ name: '沈听澜', worldName: '海站设定集', description: '观测站同伴' }),
+      getCharacterContext: async () => ({ name: '沈听澜', worldName: '海站设定集', description: '观测站同伴' }),
       savePersonaToHost: async (payload) => {
         savedPersonas.push(payload);
         return { avatarId: 'u2.png', name: payload.name, mode: payload.mode };
@@ -724,7 +724,7 @@ test('ui.js: Shadow DOM structure, bubble stopPropagation, spellcheck, mobile no
   env.doc.documentElement.addEventListener('touchstart', () => { htmlTriggered += 1; });
   env.doc.documentElement.addEventListener('click', () => { htmlTriggered += 1; });
 
-  ui.open();
+  await ui.open();
   assert.equal(ui.getState().isOpen, true);
 
   const sr = ui.shadow;
@@ -879,6 +879,7 @@ test('index.js: mounts host anchors, stops drawer collapse, refreshes on CHAT_CH
 
   assert.ok(env.doc.getElementById('ups-wand-entry'));
   assert.ok(env.doc.getElementById('ups-ext-settings'));
+  assert.ok(env.doc.getElementById('user-persona-studio-host').parentElement === env.doc.documentElement);
   const personaBtn = env.doc.querySelector('[data-ups-persona-btn]');
   assert.ok(personaBtn);
   assert.ok(slashCommands.ups);
@@ -1018,15 +1019,13 @@ test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/
   const schemeOpts = sr.querySelector('[data-ups-scheme]').options.map((o) => o.textContent);
   assert.deepEqual(schemeOpts, ['适合抢话党', '适合不抢话党', '旧人设改写']);
 
-  // 3. Collapsible vibe tray & must-have template CRUD
-  const vibeTray = sr.querySelector('[data-ups-vibe-tray]');
+  // 3. Categorized lexicon & must-have template CRUD
   const mustTray = sr.querySelector('[data-ups-must-tray]');
-  assert.equal(vibeTray.hidden, true);
   assert.equal(mustTray.hidden, true);
 
-  sr.querySelector('[data-ups-toggle-vibe-tray]').click();
-  assert.equal(vibeTray.hidden, false);
-  sr.querySelector('[data-ups-vibe-chip="沉稳可靠"]').click();
+  sr.querySelector('[data-ups-lexicon-toggle]').click();
+  sr.querySelector('[data-ups-lexicon-tab="vibe_aura"]').click();
+  sr.querySelector('[data-ups-lexicon-chip="沉稳可靠"]').click();
   assert.equal(sr.querySelector('[data-ups-inspiration]').value, '沉稳可靠');
 
   const mustIn = sr.querySelector('[data-ups-must-haves]');
@@ -1116,6 +1115,7 @@ test('ui.js regression: Mode A & Mode B local section regeneration sends targetS
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '测试角色', description: '旧原稿' }),
       listPersonas: async () => [],
@@ -1325,6 +1325,7 @@ test('ui.js regression: Mode B preserves original-vs-optimized diff while tasteB
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '林清', description: originalPersona }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '林清', description: originalPersona, isActive: true }],
@@ -2145,6 +2146,7 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '苏砚', description: sampleOldPersona, isActive: true }],
@@ -2202,25 +2204,64 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   searchIn.value = '不存在的筛选词';
   searchIn.dispatchEvent({ type: 'input', bubbles: true });
 
-  let scrolledCount = 0;
-  env.doc.createElement_orig = env.doc.createElement;
+  const content = sr.querySelector('[data-ups-body]');
+  content.clientHeight = 300;
+  content.scrollHeight = 1600;
+  content.clientTop = 0;
+  content.getBoundingClientRect = () => ({ top: 150, bottom: 450 });
+  env.win.getComputedStyle = (el) => ({ overflowY: el === content ? 'auto' : 'visible' });
+  let ancestorScrollCalls = 0;
   const origCreate = env.doc.createElement.bind(env.doc);
   env.doc.createElement = (tag) => {
     const el = origCreate(tag);
-    el.scrollIntoView = () => {
-      scrolledCount += 1;
+    el.scrollIntoView = () => { ancestorScrollCalls += 1; };
+    el.getBoundingClientRect = () => {
+      if (el.classList.contains('ups-just-added')) return { top: 960, bottom: 1320 };
+      return MockNode.prototype.getBoundingClientRect.call(el);
     };
     return el;
   };
 
   sr.querySelector('[data-ups-add-entry]').click();
   assert.equal(searchIn.value, '');
-  assert.ok(scrolledCount >= 1);
+  assert.equal(ancestorScrollCalls, 0);
+  assert.equal(content.scrollTop, 802);
   const addedCard = sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-entry-card').at(-1);
   assert.equal(addedCard.classList.contains('ups-just-added'), true);
   assert.ok(addedCard.querySelector('.ups-entry-editor'));
+  assert.equal(addedCard.querySelector('.ups-entry-editor input').focusCalls, 0);
   assert.match(sr.querySelector('[data-ups-status]').textContent, /新增规则条目并自动跳转展开/);
 
+  ui.destroy();
+});
+
+test('dragged name popup stays in the resized viewport without discarding the focused input', () => {
+  const env = createMockEnvironment();
+  const ui = createStudioUI({ doc: env.doc, win: env.win, onSaveSettings: () => {} });
+  ui.open({ skipRefresh: true });
+  const sr = ui.shadow;
+  sr.querySelector('[data-ups-save-as-btn]').click();
+  const popup = sr.querySelector('[data-ups-save-name-submodal]');
+  const card = popup.querySelector('.ups-submodal-card');
+  const input = card.querySelector('input');
+  input.value = '输入中的稿名';
+  sr.activeElement = input;
+  card.classList.add('is-floating');
+  card.style.left = '720px';
+  card.style.top = '610px';
+  card.style.width = '340px';
+  card.style.height = '160px';
+  env.win.innerWidth = 520;
+  env.win.innerHeight = 420;
+  env.win.visualViewport = { width: 520, height: 280 };
+  env.win.dispatchEvent({ type: 'resize' });
+
+  assert.equal(popup.hidden, false);
+  assert.equal(card.querySelector('input').value, '输入中的稿名');
+  assert.ok(sr.activeElement === input);
+  assert.equal(popup.style.getPropertyValue('--ups-aux-height'), '280px');
+  assert.equal(card.style.left, '172px');
+  assert.equal(card.style.top, '112px');
   ui.destroy();
 });
 
@@ -2231,6 +2272,7 @@ test('UX v1.3: backstory & spotlight modes, anti-parrot & dash cleanup buttons, 
     doc: env.doc,
     win: env.win,
     mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false } },
     hostApi: {
       getActivePersona: async () => ({ avatarId: 'u1.png', name: '沈清', description: '旧描述' }),
       listPersonas: async () => [{ avatarId: 'u1.png', name: '沈清', description: '旧描述', isActive: true }],
@@ -2842,7 +2884,7 @@ test('M2: checked appearance lines share one heading and format warnings have no
   const ui = createStudioUI({
     doc: env.doc,
     win: env.win,
-    initialSettings: { ui: { mode: 'B' } },
+    initialSettings: { ui: { mode: 'B', injectChar: false } },
     onSaveSettings: () => {},
     hostApi: {
       getActivePersona: async () => null,
@@ -2871,6 +2913,36 @@ test('M2: checked appearance lines share one heading and format warnings have no
     const retained = prompt.split('【必须保留不变的设定（严禁改动）】')[1];
     assert.match(retained ?? '', /外貌与体型：\n- 黑发齐肩\n- 身形匀称/);
     assert.equal(draft.value, '外观自然。\n    - 多余缩进');
+  } finally {
+    ui.destroy();
+  }
+});
+
+test('成稿编辑：无标题正文没有虚构段落，清空后可撤销', () => {
+  const env = createMockEnvironment();
+  const ui = createStudioUI({ doc: env.doc, win: env.win });
+  try {
+    const sr = ui.shadow;
+    const draft = sr.querySelector('[data-ups-draft]');
+    const clear = sr.querySelector('[data-ups-clear-draft]');
+    const select = sr.querySelector('[aria-label="选择重生成分段"]');
+    const regen = sr.querySelector('[data-ups-regen-section]');
+    assert.ok(clear);
+    assert.equal(clear.disabled, true);
+    draft.value = '姓名：样例\n身份：书店店员';
+    draft.dispatchEvent({ type: 'input' });
+    assert.equal(select.parentElement.hidden, true);
+    assert.equal(regen.hidden, true);
+    assert.doesNotMatch(select.textContent, /前导概述/);
+    clear.click();
+    assert.equal(draft.value, '');
+    sr.querySelector('[data-ups-undo]').click();
+    assert.equal(draft.value, '姓名：样例\n身份：书店店员');
+    draft.value = '无标题的开头\n## 身份\n书店店员\n## 外貌\n短发';
+    draft.dispatchEvent({ type: 'input' });
+    assert.equal(select.parentElement.hidden, false);
+    assert.equal(regen.hidden, false);
+    assert.deepEqual(select.options.map((option) => option.textContent), ['身份', '外貌']);
   } finally {
     ui.destroy();
   }

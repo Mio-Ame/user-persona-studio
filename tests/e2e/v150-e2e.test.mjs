@@ -328,9 +328,8 @@ test('T1-F03-01: add 1 companion slot in UI, select char and {{user}} relation, 
   await env.waitTicks();
 
   const section = shadow.querySelector('[data-ups-companion-section]');
-  const charSel = section.querySelector('select[data-ups-companion-char], [data-ups-companion-char-select]');
-  assert.ok(charSel, 'Expected companion character selector');
-  env.selectOption(charSel, '1');
+  env.setInputValue(section.querySelector('[data-ups-companion-search]'), '顾寒');
+  section.querySelector('[data-ups-companion-result="1"]').click();
   await env.waitTicks();
 
   const relInput = section.querySelector('[data-ups-companion-relation]');
@@ -934,20 +933,52 @@ test('T1-F11-01: main character search filters candidates by keyword', async () 
   assert.equal(charBox.textContent.includes('周牧'), false);
 });
 
-test('T1-F11-02: companion character search filters companion candidates without clearing main char', async () => {
+test('T1-F11-02: companion search filters choices without replacing the selected card', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   shadow.querySelector('[data-ups-companion-add]').click();
   await env.waitTicks();
 
   const compSection = shadow.querySelector('[data-ups-companion-section]');
-  const compSearch = compSection.querySelector('[data-ups-char-search], input[type="search"], input[type="text"]');
-  assert.ok(compSearch);
-  env.setInputValue(compSearch, '顾');
+  const compSearch = compSection.querySelector('[data-ups-companion-search]');
+  const name = compSection.querySelector('[data-ups-companion-real-name]');
+  const currentCard = compSection.querySelector('[data-ups-companion-selected]');
+  const originalCard = currentCard?.textContent;
+  assert.match(compSection.textContent, /选择角色[\s\S]*卡中角色名[\s\S]*当前关系/);
+  assert.equal(name.value, '');
+  env.setInputValue(compSearch, '苏');
   await env.waitTicks();
 
-  assert.ok(compSection.textContent.includes('顾寒'));
+  const results = compSection.querySelector('[data-ups-companion-results]');
+  assert.ok(results.textContent.includes('苏晚'));
+  assert.equal(results.hidden, false);
+  assert.equal(currentCard.textContent, originalCard);
+  assert.equal(name.value, '');
+  results.querySelector('[data-ups-companion-result="2"]').click();
+  await env.waitTicks(10);
+  assert.match(currentCard.textContent, /苏晚/);
+  assert.equal(results.hidden, true);
+  assert.equal(name.value, '');
   assert.equal(ctrl.getState().selectedCharTarget, '');
+});
+
+test('客串区不提供卡级台词示例开关，也不把该字段发送给模型', async () => {
+  const { env, ctrl, shadow, stHost } = await mountFreshStudio({}, {
+    characters: [
+      { name: '主角色', avatar: 'main.png', description: '修表员' },
+      { name: '顾客甲', avatar: 'a.png', description: '卖茶', mes_example: '<START>\n{{char}}: 这句台词不得发送。' },
+      { name: '顾客乙', avatar: 'b.png', description: '赶路', data: { mes_example: ' <START> ' } },
+    ],
+  });
+  await ctrl.open();
+  shadow.querySelector('[data-ups-companion-add]').click();
+  await env.waitTicks(10);
+  assert.equal(shadow.querySelector('[data-ups-companion-dialogue]'), null);
+  env.setInputValue(shadow.querySelector('[data-ups-inspiration]'), '小镇书店');
+  shadow.querySelector('[data-ups-generate]').click();
+  await env.waitTicks(20);
+  const sent = stHost.capturedGenerations.at(-1).messages.map((message) => message.content).join('\n');
+  assert.doesNotMatch(sent, /这句台词不得发送/);
 });
 
 test('T1-F11-03: [data-ups-char-search] carries spellcheck="false" and clean placeholder', async () => {
@@ -2308,16 +2339,55 @@ test('T2-F16-01: all 7 lexicon categories are sanitized with zero banned/third-p
   for (const b of banned) assert.equal(joined.includes(b), false);
 });
 
-test('T2-F16-02: clicking same lexicon chip 猫系 twice does not duplicate 猫系 in inspiration input', async () => {
+test('T2-F16-02: lexicon chips toggle only whole tags and keep their own labels', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   shadow.querySelector('[data-ups-lexicon-toggle]').click();
   await env.waitTicks();
-  const chip = shadow.querySelectorAll('[data-ups-lexicon-chip]').find((c) => c.textContent.includes('猫系'));
-  chip.click();
-  chip.click();
+  const chip = shadow.querySelector('[data-ups-lexicon-chip="猫系"]');
   const insp = shadow.querySelector('[data-ups-inspiration]');
-  assert.equal(insp.value.split('猫系').length - 1, 1);
+  const start = '想写一个 猫系 的修表匠';
+  env.setInputValue(insp, start);
+  const label = chip.textContent;
+  const status = getStatusText(shadow);
+  chip.click();
+  assert.equal(insp.value, `${start}，猫系`);
+  assert.equal(chip.getAttribute('aria-pressed'), 'true');
+  assert.equal(chip.textContent, label);
+  chip.click();
+  assert.equal(insp.value, start);
+  assert.equal(chip.getAttribute('aria-pressed'), 'false');
+  assert.equal(getStatusText(shadow), status);
+  assert.equal(shadow.querySelector('[data-ups-toggle-vibe-tray]'), null);
+  assert.ok(shadow.querySelector('[data-ups-lexicon-category="vibe_aura"] [data-ups-lexicon-chip="沉稳可靠"]'));
+});
+
+test('跟随当前对话无角色时不发送请求，明确选择不关联后可生成', async () => {
+  const { env, stHost, ctrl, shadow } = await mountFreshStudio({}, { characterId: '' });
+  await ctrl.open();
+  assert.match(shadow.querySelector('[data-ups-char-combo-btn]').textContent, /无角色卡/);
+  env.setInputValue(shadow.querySelector('[data-ups-inspiration]'), '在港口开书店');
+  const generate = shadow.querySelector('[data-ups-generate]');
+  generate.click();
+  await env.waitTicks();
+  assert.equal(stHost.capturedGenerations.length, 0);
+  assert.match(getStatusText(shadow), /无角色卡/);
+  stHost.ctx.characterId = '0';
+  stHost.eventSource.emit('chat_changed');
+  await env.waitTicks(20);
+  assert.match(shadow.querySelector('[data-ups-char-combo-btn]').textContent, /沈砚/);
+  stHost.ctx.characterId = '';
+  stHost.eventSource.emit('chat_changed');
+  generate.click();
+  await env.waitTicks(20);
+  assert.equal(stHost.capturedGenerations.length, 0);
+  assert.match(shadow.querySelector('[data-ups-char-combo-btn]').textContent, /无角色卡/);
+  shadow.querySelector('[data-ups-char-combo-btn]').click();
+  shadow.querySelector('[data-ups-char-opt="__none__"]').click();
+  await env.waitTicks();
+  generate.click();
+  await env.waitTicks(20);
+  assert.equal(stHost.capturedGenerations.length, 1);
 });
 
 test('T2-F16-03: COMMON_PERSONA_LEXICON_CATEGORIES and child category objects are frozen', () => {
@@ -3439,6 +3509,37 @@ test('T4-11: Scenario 11 (v1.6.1) - Searchable char combobox, live 卡中角色�
 // ============================================================================
 // STATIC & COMPLIANCE GATE (16 Checks: S-01 .. S-16)
 // ============================================================================
+
+test('自动生成条目在预设末尾折叠，可保存修改和恢复自动', async () => {
+  const { env, ctrl, shadow } = await mountFreshStudio();
+  await ctrl.open();
+  shadow.querySelector('[data-ups-tab="presets"]').click();
+  const list = shadow.querySelector('[data-ups-acc-list]');
+  const details = list.querySelector('[data-ups-synced-details]');
+  assert.ok(details);
+  assert.equal(list.children.at(-1) === details, true);
+  assert.equal(details.open, false);
+  assert.equal(details.querySelectorAll('[data-ups-synced-id]').length, 3);
+  details.querySelector('summary').click();
+  const identifier = 'ups_synced_sections';
+  const findControl = (control) => details.querySelector(`[data-ups-synced-${control}="${identifier}"]`);
+  findControl('expand').click();
+  assert.match(findControl('body').textContent, /不再随工坊设置更新/);
+  const editor = findControl('edit');
+  assert.equal(editor.getAttribute('spellcheck'), 'false');
+  const automaticText = editor.value;
+  env.setInputValue(editor, '只写外貌与工作。');
+  findControl('save').click();
+  const getScheme = () => {
+    const { settings } = ctrl.getState();
+    return settings.schemes.find(({ id }) => id === settings.activeSchemeId);
+  };
+  assert.equal(getScheme().syncedOverrides.generationSections, '只写外貌与工作。');
+  assert.equal(findControl('edit').value, '只写外貌与工作。');
+  findControl('reset').click();
+  assert.equal(getScheme().syncedOverrides?.generationSections, undefined);
+  assert.equal(findControl('edit').value, automaticText);
+});
 
 test('S-01: manifest.json, package.json, and index.js EXTENSION_VERSION equal 1.6.1', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));

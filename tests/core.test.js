@@ -669,6 +669,54 @@ test('Group 3.3: applyTailRoleStrategy handles all 3 modes cleanly without mutat
 // Group 4: SillyTavern Native Preset JSON Export & Draft Regex Exporter
 // ============================================================================
 
+test('内置预设去掉规则缘由，保留写法要求与已保存的自定义文字', () => {
+  const previous = structuredClone(BUILTIN_PRESET_SCHEMES.longform_coact);
+  const format = previous.entries.find(({ id }) => id === 'lf_format');
+  format.enabled = false;
+  format.content = '全文不使用破折号连接或插入分句，改用逗号、冒号或句号，防止后续对话模仿引发破折号增殖。\n用户自订：保留自然空行。';
+  const craft = previous.entries.find(({ id }) => id === 'lf_craft');
+  craft.content = '各特征短句默认省略主语（严禁每行开头重复堆砌 {{user}} 浪费上下文）。';
+  const restored = createDefaultSettings({ schemes: [previous] }).schemes.find(({ id }) => id === previous.id);
+  const restoredFormat = restored.entries.find(({ id }) => id === 'lf_format');
+  assert.equal(restoredFormat.enabled, false);
+  assert.equal(restoredFormat.content, '全文不使用破折号连接或插入分句，改用逗号、冒号或句号。\n用户自订：保留自然空行。');
+  assert.match(restored.entries.find(({ id }) => id === 'lf_craft').content, /不逐句重复写 \{\{user\}\}/);
+
+  const explanatoryAside = /破折号增殖|浪费\s*(?:上下文|Token)|与正文预设重复|已自动剥离/u;
+  for (const scheme of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    const built = buildGenerationMessages({ mode: 'create', inspiration: '在街角开书店', scheme });
+    assert.equal(explanatoryAside.test(built.assembledPromptText), false);
+    const exported = exportSillyTavernPreset({ scheme });
+    assert.equal(explanatoryAside.test(exported.prompts.map(({ content }) => content).join('\n')), false);
+  }
+  assert.ok(BUILTIN_PRESET_SCHEMES.longform_coact.entries.find(({ id }) => id === 'lf_format').content.includes('改用逗号、冒号或句号'));
+});
+
+test('自动生成条目可单独覆盖，生成和导出只用各条最新正文', () => {
+  const syncedOverrides = {
+    generationSections: '只按所给板块写设定。自定义板块规则。',
+    dualLayer: '自定义拆书规则。',
+    draftAudit: '【草稿自检】自定义检查【/草稿自检】',
+  };
+  const scheme = { ...BUILTIN_PRESET_SCHEMES.longform_coact, syncedOverrides };
+  const ui = { dualLayer: true, draftAudit: true, backstoryMode: 'rich_arc' };
+  const built = buildGenerationMessages({ mode: 'create', inspiration: '在街角开书店', scheme, ...ui });
+  const preview = built.assembledPromptText;
+  const exported = exportSillyTavernPreset({ scheme, uiPreferences: ui });
+  const exportedText = exported.prompts.map(({ content }) => content).join('\n');
+  for (const value of Object.values(syncedOverrides)) {
+    assert.equal(preview.split(value).length - 1, 1);
+    assert.equal(exportedText.split(value).length - 1, 1);
+  }
+  assert.doesNotMatch(preview, /输出版式|本次生成的板块与填写指引/);
+  assert.doesNotMatch(exportedText, /输出版式|本次生成的板块与填写指引/);
+  const disabled = buildGenerationMessages({
+    mode: 'create', inspiration: '在街角开书店', scheme, dualLayer: false, draftAudit: false,
+  }).assembledPromptText;
+  assert.doesNotMatch(disabled, /自定义检查|自定义拆书规则/);
+  assert.match(disabled, /自定义板块规则/);
+});
+
 test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, categorized banned lexicon, optional ups_draft_audit & zero sensitive keys', () => {
   const mandatory12 = [
     'main',

@@ -636,6 +636,7 @@ export const SHADOW_CSS = String.raw`
   pointer-events: none;
   display: flex;
   overflow: hidden;
+  overflow: clip;
   padding: 8px;
 }
 
@@ -671,6 +672,7 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .ups-modal.is-floating {
@@ -1047,6 +1049,7 @@ export const SHADOW_CSS = String.raw`
 @container plugin-win (min-width: 720px) {
   .ups-body.is-studio-tab {
     overflow: hidden;
+    overflow: clip;
     scrollbar-gutter: auto;
     padding: 12px 14px;
   }
@@ -1056,6 +1059,7 @@ export const SHADOW_CSS = String.raw`
     min-height: 0;
     height: 100%;
     overflow: hidden;
+    overflow: clip;
   }
 
   .ups-workbench {
@@ -1066,6 +1070,7 @@ export const SHADOW_CSS = String.raw`
     grid-template-columns: minmax(310px, 42%) minmax(0, 58%);
     gap: 12px;
     overflow: hidden;
+    overflow: clip;
   }
 
   .ups-pane-left,
@@ -2294,6 +2299,22 @@ export const SHADOW_CSS = String.raw`
   gap: 6px;
 }
 
+.ups-companion-group {
+  border-top: 1px solid var(--ups-border);
+  padding-top: 7px;
+}
+
+.ups-companion-results {
+  max-height: 152px;
+  border: 1px solid var(--ups-border);
+  border-radius: 7px;
+  background-color: var(--ups-surface);
+}
+
+.ups-companion-results-note {
+  padding: 6px 10px;
+}
+
 .ups-split-box {
   border: 1px solid var(--ups-border-strong);
   border-left: 3px solid var(--ups-accent);
@@ -2360,6 +2381,7 @@ export const SHADOW_CSS = String.raw`
   width: min(360px, calc(100vw - 20px));
   max-height: min(400px, 76dvh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px 12px;
   background-color: var(--ups-surface);
   background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
@@ -3147,10 +3169,14 @@ export const SHADOW_CSS = String.raw`
   font-size: 12px;
   line-height: 1.55;
   color: var(--ups-fg);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ups-synced-warning {
+  color: var(--ups-warn);
+  overflow-wrap: anywhere;
 }
 
 .ups-api-save-bar {
@@ -3329,6 +3355,9 @@ export const SHADOW_CSS = String.raw`
   border-radius: 10px;
   box-shadow: var(--ups-shadow);
   pointer-events: auto;
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ups-popover {
@@ -3377,6 +3406,8 @@ export const SHADOW_CSS = String.raw`
 .ups-submodal-mask {
   position: fixed;
   inset: 0;
+  width: var(--ups-aux-width, 100vw);
+  height: var(--ups-aux-height, 100dvh);
   z-index: 2147483020;
   background: transparent;
   pointer-events: none;
@@ -3389,8 +3420,8 @@ export const SHADOW_CSS = String.raw`
 .ups-submodal-card {
   position: relative;
   pointer-events: auto;
-  width: min(560px, calc(100vw - 24px));
-  max-height: min(560px, 86dvh);
+  width: min(560px, calc(var(--ups-aux-width, 100vw) - 24px));
+  max-height: min(560px, 86dvh, calc(var(--ups-aux-height, 100dvh) - 24px));
   background-color: var(--ups-surface);
   background-image: linear-gradient(var(--ups-surface), var(--ups-surface));
   color: var(--ups-fg);
@@ -3400,6 +3431,7 @@ export const SHADOW_CSS = String.raw`
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .ups-submodal-card.is-floating {

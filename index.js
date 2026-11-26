@@ -171,7 +171,7 @@ export async function createStudioController(options = {}) {
     hostApi: options.hostApi,
     doc,
     win,
-    mountTarget: options.mountTarget || doc.body,
+    mountTarget: options.mountTarget,
     onEntryVisibilityChange: (uiCfg) => syncEntryVisibility(uiCfg),
   });
 
