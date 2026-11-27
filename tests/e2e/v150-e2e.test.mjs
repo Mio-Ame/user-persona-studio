@@ -58,6 +58,18 @@ async function mountFreshStudio(envOpts = {}, hostConfig = {}, controllerOpts = 
   return { env, stHost, ctrl, shadow: ctrl.shadow };
 }
 
+function addCompanion(shadow, env, chid) {
+  if (shadow.querySelector('[data-ups-companion-body]').hidden) {
+    shadow.querySelector('[data-ups-companion-toggle]').click();
+  }
+  shadow.querySelector('[data-ups-companion-add]').click();
+  if (chid !== undefined) {
+    const slot = Array.from(shadow.querySelectorAll('[data-ups-companion-slot]')).at(-1);
+    env.setInputValue(slot.querySelector('[data-ups-companion-search]'), '');
+    slot.querySelector(`[data-ups-companion-result="${chid}"]`).click();
+  }
+}
+
 function getModalRect(shadow) {
   const modal = shadow.querySelector('.ups-modal');
   assert.ok(modal, 'Expected .ups-modal to exist in Shadow DOM');
@@ -170,7 +182,7 @@ test('T1-F01-01: inline carry mode writes companion anchor into persona without 
 
   const addBtn = shadow.querySelector('[data-ups-companion-add]');
   assert.ok(addBtn, 'Expected [data-ups-companion-add]');
-  addBtn.click();
+  addCompanion(shadow, env, 1);
   await env.waitTicks();
 
   const genBtn = shadow.querySelector('[data-ups-generate]');
@@ -367,7 +379,7 @@ test('T1-F02-04: active_circle tier uses highest companion order and spotlight-r
 test('T1-F02-05: changing companion frequency dropdown in Studio UI updates getState() and LLM prompt payload', async () => {
   const { env, stHost, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env, 1);
   await env.waitTicks();
 
   const freqSelect = shadow.querySelector('[data-ups-companion-frequency], [data-ups-companion-section] select[data-ups-companion-freq]');
@@ -385,7 +397,7 @@ test('T1-F02-05: changing companion frequency dropdown in Studio UI updates getS
 test('T1-F03-01: add 1 companion slot in UI, select char and {{user}} relation, reflects in prompt', async () => {
   const { env, stHost, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   const section = shadow.querySelector('[data-ups-companion-section]');
@@ -410,10 +422,9 @@ test('T1-F03-02: supports 3 concurrent companion slots and exposes COMPANION_REL
 
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   const cards = shadow.querySelectorAll('[data-ups-companion-slot]');
@@ -587,9 +598,8 @@ test('T1-F05-03: adding 2 companions inside Studio causes zero outer .ups-modal 
   await ctrl.open();
   const before = getModalRect(shadow);
 
-  const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   const after = getModalRect(shadow);
@@ -997,7 +1007,7 @@ test('T1-F11-01: main character search filters candidates by keyword', async () 
 test('T1-F11-02: companion search filters choices without replacing the selected card', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   const compSection = shadow.querySelector('[data-ups-companion-section]');
@@ -1032,7 +1042,7 @@ test('客串区不提供卡级台词示例开关，也不把该字段发送给�
     ],
   });
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env, 1);
   await env.waitTicks(10);
   assert.equal(shadow.querySelector('[data-ups-companion-dialogue]'), null);
   env.setInputValue(shadow.querySelector('[data-ups-inspiration]'), '小镇书店');
@@ -1090,7 +1100,7 @@ test('T1-F12-01: 生成板块与比重 defaults collapsed, core on, NPC/Body/亲
   assert.equal(normRatios.private, 0);
 
   const intimateGroup = mods.presets.GENERATION_SECTION_GROUPS.find((g) => g.id === 'intimate');
-  assert.ok(intimateGroup && intimateGroup.label.includes('亲密设定'));
+  assert.ok(intimateGroup && intimateGroup.label === 'NSFW');
   assert.equal(intimateGroup.items.every((i) => i.defaultEnabled === false), true);
 
   const { ctrl, shadow } = await mountFreshStudio();
@@ -1160,7 +1170,7 @@ test('T1-F12-04: custom section + opt-in intimate_dynamic + custom moduleRatios 
   });
   assert.ok(built.assembledPromptText.includes('修仙灵根与境界'));
   assert.ok(built.assembledPromptText.includes('亲密关系倾向'));
-  assert.ok(built.assembledPromptText.includes('不生成') || built.assembledPromptText.includes('禁止生成'));
+  assert.match(built.assembledPromptText, /只写下列板块/);
 });
 
 test('T1-F12-05: unchecking backstory_growth with intimate off forbids backstory AND adult/NSFW content', () => {
@@ -1239,7 +1249,7 @@ test('T1-F14-02: adding active companion makes [data-ups-split-hint] visible eve
   await ctrl.open();
   env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '1000');
   await env.waitTicks();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env, 1);
   await env.waitTicks();
 
   const hint = shadow.querySelector('[data-ups-split-hint]');
@@ -1656,10 +1666,10 @@ test('T2-F03-01: enforces hard cap of 3 companions when attempting to add a 4th'
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   assert.equal(shadow.querySelectorAll('[data-ups-companion-slot]').length, 3);
@@ -1786,10 +1796,9 @@ test('T2-F05-01: rapid open/close and tab switches with 3 companions + long stat
   await ctrl.open();
   const base = getModalRect(shadow);
 
-  const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
+  addCompanion(shadow, env);
   await env.waitTicks();
 
   for (const t of ['presets', 'taste', 'settings', 'studio']) {
@@ -1842,7 +1851,7 @@ test('T2-F05-04: mountStudioForTest degrades gracefully when host lacks worldboo
 test('T2-F05-05: destroy() while companion/submodal open removes host and listeners cleanly', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env, 1);
   shadow.querySelector('[data-ups-save-as-btn]').click();
   await env.waitTicks();
   ctrl.destroy();
@@ -2361,7 +2370,7 @@ test('T2-F14-04: removing companions and lowering targetChars to 600 hides hint 
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   const before = getModalRect(shadow);
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env, 1);
   await env.waitTicks();
   const hint = shadow.querySelector('[data-ups-split-hint]');
   assert.equal(hint.hidden, false);
@@ -2527,7 +2536,7 @@ test('T2-F17-01: XSS payloads in persona name, companion relation, search query,
   await ctrl.open();
   const payload = '<img src=x onerror=alert(1)>';
   env.setInputValue(shadow.querySelector('[data-ups-char-search]'), payload);
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env);
   await env.waitTicks();
   const rel = shadow.querySelector('[data-ups-companion-relation]');
   env.setInputValue(rel, payload);
@@ -2564,7 +2573,7 @@ test('T2-F17-03: SHADOW_CSS and style.css contain zero backdrop-filter and zero 
 test('T2-F17-04: dynamically created companion inputs and save-name submodal input carry spellcheck="false"', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
-  shadow.querySelector('[data-ups-companion-add]').click();
+  addCompanion(shadow, env);
   shadow.querySelector('[data-ups-save-as-btn]').click();
   await env.waitTicks();
 
@@ -2599,10 +2608,9 @@ test('T3-01: 3 companions + persona_book upsert + tight tokens + 长设定拆入
   shadow.querySelector('[data-ups-split-hint]').click();
   env.selectOption(shadow.querySelector('[data-ups-companion-carry-mode]'), 'persona_book');
 
-  const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env, 1);
+  addCompanion(shadow, env, 2);
+  addCompanion(shadow, env, 3);
   await env.waitTicks();
 
   const plan = mods.core.computeCompanionTokenPlan({
@@ -3196,10 +3204,9 @@ test('T4-01: Scenario 1 - New persona + 3 companions + persona_book idempotent r
   await env.waitTicks(15);
 
   env.selectOption(shadow.querySelector('[data-ups-companion-carry-mode]'), 'persona_book');
-  const addBtn = shadow.querySelector('[data-ups-companion-add]');
-  addBtn.click();
-  addBtn.click();
-  addBtn.click();
+  addCompanion(shadow, env, 1);
+  addCompanion(shadow, env, 2);
+  addCompanion(shadow, env, 3);
   await env.waitTicks();
 
   const slots = shadow.querySelectorAll('[data-ups-companion-slot]');
@@ -3832,4 +3839,84 @@ test('S-16: workspace boundary stays strictly inside user-persona-studio', () =>
   for (const line of statusOut.split(/\r?\n/).filter(Boolean)) {
     assert.equal(line.includes('..'), false, `Unexpected parent path in git status: ${line}`);
   }
+});
+
+test('saved board templates reload independently and the selected guidance reaches generation', async () => {
+  const { env, stHost, ctrl, shadow } = await mountFreshStudio({ innerWidth: 390, innerHeight: 844 });
+  await ctrl.open();
+  const get = (selector) => shadow.querySelector(selector);
+  get('[data-ups-ratio-toggle]').click();
+  get('[data-ups-section-preset="minimal"]').click();
+  const family = get('[data-ups-section-group="npc_network"]');
+  family.open = true;
+  const ex = family.querySelector('[data-ups-section-cb="ex_partner"]');
+  ex.checked = true;
+  ex.dispatchEvent({ type: 'change' });
+  env.setInputValue(get('[data-ups-section-template-name]'), '有前任的分段版');
+  get('[data-ups-section-template-save]').click();
+  get('[data-ups-section-preset="standard"]').click();
+  await env.waitTicks();
+  const persisted = JSON.parse(JSON.stringify(stHost.extensionSettings));
+  const reopened = await mountFreshStudio({ innerWidth: 390, innerHeight: 844 }, { extensionSettings: persisted });
+  await reopened.ctrl.open();
+  reopened.shadow.querySelector('[data-ups-ratio-toggle]').click();
+  const template = reopened.shadow.querySelector('[data-ups-section-template]');
+  assert.ok([...template.options].some((option) => option.value === '有前任的分段版'));
+  reopened.env.selectOption(template, '有前任的分段版');
+  assert.ok(reopened.ctrl.getState().settings.ui.generationSections.enabledIds.includes('ex_partner'));
+  reopened.shadow.querySelector('[data-ups-generate]').click();
+  await reopened.env.waitTicks(20);
+  assert.match(reopened.stHost.capturedGenerations.at(-1).messages.map((message) => message.content).join('\n'), /- 前任：写清/);
+});
+
+test('companion browsing is reversible and same-name versions beyond the first page remain selectable', async () => {
+  const { env, ctrl, shadow, stHost } = await mountFreshStudio({}, {
+    characters: Array.from({ length: 45 }, (_, i) => ({
+      name: '同名角色', avatar: `version-${i}.png`, description: `角色版本 ${i}`,
+    })),
+  });
+  await ctrl.open();
+  const toggle = shadow.querySelector('[data-ups-companion-toggle]');
+  const body = shadow.querySelector('[data-ups-companion-body]');
+  assert.equal(body.hidden, true);
+  toggle.click();
+  assert.equal(body.hidden, false);
+  assert.equal(shadow.querySelectorAll('[data-ups-companion-slot]').length, 0);
+  toggle.click();
+  assert.equal(body.hidden, true);
+  addCompanion(shadow, env);
+  assert.match(shadow.querySelector('[data-ups-companion-selected]').textContent, /未选角色卡/);
+  shadow.querySelector('[data-ups-generate]').click();
+  await env.waitTicks(20);
+  assert.doesNotMatch(stHost.capturedGenerations.at(-1).messages.map(({ content }) => content).join('\n'), /客串角色/);
+  const search = shadow.querySelector('[data-ups-companion-search]');
+  env.setInputValue(search, '同名角色');
+  assert.equal(shadow.querySelectorAll('[data-ups-companion-result]').length, 40);
+  shadow.querySelector('[data-ups-companion-more]').click();
+  const end = shadow.querySelector('[data-ups-companion-result="44"]');
+  assert.match(end.textContent, /version-44\.png/);
+  end.click();
+  await env.waitTicks();
+  toggle.click();
+  assert.equal(body.hidden, true);
+  toggle.click();
+  assert.match(shadow.querySelector('[data-ups-companion-selected]').textContent, /version-44\.png/);
+});
+
+test('custom audit timing is immediately visible in the native preview and sent to the model', async () => {
+  const { env, ctrl, shadow, stHost } = await mountFreshStudio();
+  await ctrl.open();
+  env.selectOption(shadow.querySelector('[data-ups-paragraph-review]'), 'every');
+  env.setInputValue(shadow.querySelector('[data-ups-paragraph-interval]'), '4');
+  env.setInputValue(shadow.querySelector('[data-ups-paragraph-max-chars]'), '165');
+  shadow.querySelector('[data-ups-tab="presets"]').click();
+  const audit = shadow.querySelector('[data-ups-synced-body="ups_draft_audit"]');
+  assert.match(audit.textContent, /每 4 段自检一次/);
+  assert.match(audit.textContent, /最多 165 字/);
+  shadow.querySelector('[data-ups-tab="studio"]').click();
+  shadow.querySelector('[data-ups-generate]').click();
+  await env.waitTicks(20);
+  const messages = stHost.capturedGenerations.at(-1).messages;
+  assert.equal(messages.filter(({ content }) => /每 4 段自检一次/.test(content)).length, 1);
+  assert.ok(messages.some(({ content }) => /最多 165 字/.test(content)));
 });

@@ -3200,6 +3200,17 @@ export const SHADOW_CSS = String.raw`
   gap: 8px;
 }
 
+.ups-audit-number {
+  width: 88px;
+  flex: 0 1 88px;
+}
+
+.ups-audit-managed {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ups-fg);
+}
+
 .ups-synced-warning {
   color: var(--ups-warn);
   overflow-wrap: anywhere;

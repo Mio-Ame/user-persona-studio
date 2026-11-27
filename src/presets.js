@@ -305,7 +305,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
         label: '前任',
         group: 'npc_network',
         defaultEnabled: false,
-        guidance: '如有前任设定，交代曾处的阶段、分开原因以及当前是否仍有交集与态度边界。',
+        guidance: '写清交往处于什么阶段、为什么分开、现在还有没有来往，以及双方如何看待这段关系。',
       }),
       Object.freeze({
         id: 'key_npc_pet',
@@ -346,7 +346,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
   }),
   Object.freeze({
     id: 'intimate',
-    label: '亲密设定',
+    label: 'NSFW',
     defaultExpanded: false,
     items: Object.freeze([
       Object.freeze({

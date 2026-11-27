@@ -2930,7 +2930,7 @@ test('M2: checked appearance lines share one heading and format warnings have no
     assert.doesNotMatch(formatWarning.textContent, /加入禁写/);
     sr.querySelector('[data-ups-existing-draft]').value = '外貌与体型：黑发齐肩\n外貌与体型：身形匀称\n敏感取向：需信任';
     sr.querySelector('[data-ups-extract-points]').click();
-    assert.ok(sr.querySelector('[data-ups-point-jump="NSFW / 亲密设定"]'));
+    assert.ok(sr.querySelector('[data-ups-point-jump="NSFW"]'));
     sr.querySelector('[data-ups-generate-b]').click();
     await new Promise((resolve) => setTimeout(resolve, 20));
     const retained = prompt.split('【必须保留不变的设定（严禁改动）】')[1];
@@ -3075,7 +3075,12 @@ test('generation uses only selected reference entries and checks the chosen para
     const sr = ui.shadow;
     sr.querySelector('[data-ups-reference-toggle]').click();
     const book = sr.querySelector('[data-ups-reference-book]');
+    const bookSearch = sr.querySelector('[data-ups-reference-search]');
     for (const name of ['村妹', '镇志']) {
+      bookSearch.value = name;
+      bookSearch.dispatchEvent({ type: 'input' });
+      assert.ok(book.options.some((option) => option.value === name));
+      if (name === '村妹') assert.ok(!book.options.some((option) => option.value === '镇志'));
       book.value = name;
       book.dispatchEvent({ type: 'change' });
       await new Promise((resolve) => setTimeout(resolve, 0));

@@ -81,6 +81,8 @@ import {
   buildCompanionWorldbookEntries,
   resolvePresetEntryPreview,
   buildDraftAuditInstruction,
+  buildSyncedPreferenceEntries,
+  draftAuditOutputBudget,
   buildGenerationMessages,
   applyTailRoleStrategy,
   exportSillyTavernPreset,
@@ -261,7 +263,7 @@ test('Group 1.4: Pure ESM isolation & sanitization check on src/presets.js and s
     })),
     BUILTIN_PRESET_SCHEMES,
     GENERATION_LAYOUT_STYLES,
-    GENERATION_SECTION_GROUPS,
+    GENERATION_SECTION_GROUPS: GENERATION_SECTION_GROUPS.map(({ items }) => items),
     GENERATION_SECTION_PRESETS,
   });
 
@@ -1949,7 +1951,7 @@ test('Group 13.1 (Follow-up 3): GENERATION_LAYOUT_STYLES defaults to structured,
       { id: 'core', label: '人物资料' },
       { id: 'npc_network', label: '家人和朋友' },
       { id: 'body_traits', label: '身体和能力' },
-      { id: 'intimate', label: '亲密设定' },
+      { id: 'intimate', label: 'NSFW' },
     ]
   );
 
@@ -1988,7 +1990,7 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
 
   // blank_self suppresses backstory_growth even if enabled
   const blankDir = buildGenerationSectionDirective(defCfg, { backstoryMode: 'blank_self' });
-  assert.ok(blankDir.includes('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历'));
+  assert.ok(blankDir.includes('严禁生成任何童年、少年或过往家庭经历'));
   assert.equal(blankDir.includes('- 过去经历：'), false);
 
   // Opt-in intimate sections + natural layout + custom sections + companions non-duplication
@@ -2012,7 +2014,7 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
   assert.ok(optInDir.includes('亲密关系倾向'));
   assert.ok(optInDir.includes('边界与事后相处'));
   assert.ok(optInDir.includes('修仙灵根与境界'));
-  assert.ok(optInDir.includes('已携带客串角色时'));
+  assert.ok(optInDir.includes('亲友关系须与已有的人物资料（林栖）'));
   assert.equal(optInDir.includes('严禁生成任何成人向、情色或越界亲密描写内容'), false);
 
   // Structured output generated per directive parses 100% cleanly via extractPersonaPoints
@@ -2833,7 +2835,7 @@ test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion 
     mode: 'create',
     inspiration: '与对方青梅竹马',
     charContext: { name: '周恪' },
-    generationSections: { enabledIds: ['basic_identity', 'parents_family'] },
+    generationSections: { enabledIds: ['basic_identity', 'parents_family', 'backstory_growth'] },
   }).assembledPromptText;
   assert.ok(withNpcSection.includes('在场亲友'));
   assert.ok(withNpcSection.includes('{{char}} 或亲友'));
@@ -2848,7 +2850,7 @@ test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion 
   );
   assert.ok(pacing2000.includes('不少于 1840 字'));
   assert.ok(pacing2000.includes('【细节展开密度：充分扩写】'));
-  assert.ok(pacing2000.includes('分段参考配额（当前启用 7 个板块'));
+  assert.ok(pacing2000.includes('分段参考配额（7 个板块'));
 
   const scheme600 = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.player_controlled, 600);
   const pacing600 = resolvePresetEntryPreview(
@@ -2862,7 +2864,7 @@ test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion 
   );
   assert.ok(pacing600.includes('不少于 550 字'));
   assert.ok(pacing600.includes('【细节展开密度：精炼短句】'));
-  assert.ok(pacing600.includes('当前启用 4 个板块'));
+  assert.ok(pacing600.includes('4 个板块'));
   assert.equal(pacing600.includes('与过往事实'), false);
 
   // Small budget (400 / 600 chars) with only 2 sections must STILL emit concise density, never 充分扩写
@@ -2997,7 +2999,7 @@ test('Group 18.4 (R4.1, R4.2, R4.5): hideDraftAudit default, narrowed nested_ind
   assert.equal(draftSlice.match(/## 外貌与体型/g).length, 1);
 
   // R4.5 NSFW point category routing without false positives
-  assert.ok(CANONICAL_POINT_CATEGORIES.includes('NSFW / 亲密设定'));
+  assert.ok(CANONICAL_POINT_CATEGORIES.includes('NSFW'));
   const nsfwPersona = [
     CORE_SECTION_HEADER,
     '## 经历与技能',
@@ -3008,7 +3010,7 @@ test('Group 18.4 (R4.1, R4.2, R4.5): hideDraftAudit default, narrowed nested_ind
   ].join('\n');
   const pts = extractPersonaPoints(nsfwPersona, 24);
   const grouped = groupPersonaPoints(pts);
-  const nsfwGroup = grouped.find((g) => g.category === 'NSFW / 亲密设定');
+  const nsfwGroup = grouped.find((g) => g.category === 'NSFW');
   assert.ok(nsfwGroup);
   assert.ok(nsfwGroup.items.some((p) => p.fullText.includes('敏感取向')));
   assert.ok(nsfwGroup.items.some((p) => p.fullText.includes('NSFW 场景表现')));
@@ -3079,4 +3081,50 @@ test('edited and custom sections share one order and keep their writing instruct
   assert.match(prompt, /逢集：按集期各写一条。\n- 村里的叫法：写赶集时摊主用的叫法。/);
   assert.match(prompt, /逢集：约 [^\n]*\n- 村里的叫法：约/);
   assert.doesNotMatch(prompt, /隐藏的板块|此处不应发送/);
+});
+
+test('draft audit cadence and optional paragraph length agree in the preview, generation and native export', () => {
+  const scheme = {
+    ...BUILTIN_PRESET_SCHEMES.longform_coact,
+    tailMode: 'assistant_prefill',
+    syncedOverrides: { draftAudit: '旧版全文自检', paragraphAudit: '检查人物说话习惯。' },
+  };
+  const ui = createDefaultSettings({ ui: {
+    draftAudit: true, paragraphReview: 'every', paragraphReviewInterval: 4, paragraphMaxChars: 220,
+  } }).ui;
+  const audit = (preferences) => buildSyncedPreferenceEntries({ scheme, ui: preferences }).find((entry) => entry.id === 'ups_draft_audit');
+  const preview = audit(ui);
+  const generation = buildGenerationMessages({ scheme, ...ui, mode: 'create', inspiration: '修鞋铺' });
+  const native = exportSillyTavernPreset({ scheme, uiPreferences: ui });
+  assert.match(preview.content, /每 4 段自检一次/);
+  assert.match(preview.content, /220 字/);
+  assert.match(preview.content, /检查人物说话习惯/);
+  assert.doesNotMatch(preview.content, /旧版全文自检/);
+  assert.equal(generation.messages.filter((msg) => msg.content === preview.content).length, 1);
+  assert.equal(generation.messages.at(-1).role, 'user');
+  assert.equal(native.prompts.find((entry) => entry.identifier === preview.id).content, preview.content);
+  assert.equal(native.prompts.some((entry) => entry.identifier === 'ups_tail_prefill'), false);
+  assert.equal(native.openai_max_tokens, draftAuditOutputBudget(scheme, ui.paragraphReview));
+  assert.equal(audit({ ...ui, paragraphReview: '0' }).content, '旧版全文自检');
+  const withoutLimit = audit({ ...ui, paragraphReviewInterval: 1, paragraphMaxChars: 0 });
+  assert.match(withoutLimit.content, /每个正文段落/);
+  assert.doesNotMatch(withoutLimit.content, /220 字/);
+  const off = { ...ui, draftAudit: false };
+  assert.equal(audit(off).enabled, false);
+  assert.equal(buildGenerationMessages({ scheme, ...off, mode: 'create' }).messages.some((msg) => msg.content === preview.content), false);
+  assert.equal(exportSillyTavernPreset({ scheme, uiPreferences: off }).prompt_order[0].order.find((entry) => entry.identifier === preview.id).enabled, false);
+});
+
+test('selected ex-partner section is a direct instruction without referring to UI selections', () => {
+  const scheme = BUILTIN_PRESET_SCHEMES.longform_coact;
+  const ui = { generationSections: { layoutStyle: 'natural', enabledIds: ['basic_identity', 'ex_partner'] } };
+  const preview = buildSyncedPreferenceEntries({ scheme, ui }).find(({ key }) => key === 'generationSections').content;
+  const generation = buildGenerationMessages({ scheme, ...ui }).assembledPromptText;
+  const native = exportSillyTavernPreset({ scheme, uiPreferences: ui }).prompts.map(({ content }) => content).join('\n');
+  for (const text of [preview, generation, native]) {
+    assert.match(text, /- 前任：写清交往处于什么阶段、为什么分开/);
+    assert.doesNotMatch(text, /如有前任设定|勾选|启用的板块|当前启用|下方模块化规则/);
+  }
+  const off = buildGenerationSectionDirective({ enabledIds: ['basic_identity'] });
+  assert.doesNotMatch(off, /前任|朋友\/社交圈/);
 });

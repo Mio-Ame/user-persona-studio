@@ -177,7 +177,7 @@ export const CANONICAL_POINT_CATEGORIES = Object.freeze([
   '性格与底色',
   '习惯与喜好',
   '经历与技能',
-  'NSFW / 亲密设定',
+  'NSFW',
   '当前身份与关系',
 ]);
 const NSFW_INTIMATE_RE =
@@ -491,7 +491,7 @@ function sanitizeScheme(scheme, fallbackIndex = 0) {
       ? String(factory.triggerText)
       : (raw.triggerText !== undefined ? rawTrigger : DEFAULT_TRIGGER);
   const syncedOverrides = {};
-  for (const key of ['generationSections', 'dualLayer', 'draftAudit']) {
+  for (const key of ['generationSections', 'dualLayer', 'draftAudit', 'paragraphAudit']) {
     const text = raw.syncedOverrides?.[key];
     if (typeof text === 'string' && text.trim()) syncedOverrides[key] = text.trim();
   }
@@ -635,6 +635,23 @@ export function normalizeGenerationSectionsConfig(config = {}) {
   return { layoutStyle, presetId, enabledIds, customSections, sectionOverrides, sectionOrder };
 }
 
+export function normalizeSectionTemplates(templates) {
+  if (!Array.isArray(templates)) return [];
+  const byName = new Map();
+  for (const item of templates) {
+    const name = typeof item?.name === 'string' ? item.name.trim().slice(0, 40) : '';
+    if (!name || !item.generationSections || typeof item.generationSections !== 'object') continue;
+    byName.set(name, {
+      name,
+      generationSections: normalizeGenerationSectionsConfig(item.generationSections),
+      moduleRatios: normalizeModuleRatios(item.moduleRatios),
+      pureCrossCardReuse: Boolean(item.pureCrossCardReuse),
+    });
+    if (byName.size >= 30) break;
+  }
+  return [...byName.values()];
+}
+
 export function getConfiguredGenerationSections(config, { includeDisabled = false, backstoryMode } = {}) {
   const enabled = new Set(config.enabledIds);
   const items = ALL_SECTION_ITEMS.map((item) => ({
@@ -752,6 +769,8 @@ export function createDefaultSettings(overrides = {}) {
       visibilityTags: Boolean(rawUi.visibilityTags),
       draftAudit: rawUi.draftAudit !== false,
       paragraphReview: normalizeParagraphReview(rawUi.paragraphReview),
+      paragraphReviewInterval: clampInt(rawUi.paragraphReviewInterval, 1, 100, 1),
+      paragraphMaxChars: clampInt(rawUi.paragraphMaxChars, 0, 2000, 0),
       debugAudit: rawUi.debugAudit === true,
       hideDraftAudit: rawUi.hideDraftAudit !== false,
       antiParrot: rawUi.antiParrot !== false,
@@ -761,6 +780,7 @@ export function createDefaultSettings(overrides = {}) {
       worldbookRole: clampInt(rawUi.worldbookRole, 0, 2, DEFAULT_USER_WORLDBOOK_PLACEMENT.role),
       moduleRatios: normalizeModuleRatios(rawUi.moduleRatios),
       generationSections: normalizeGenerationSectionsConfig(rawUi.generationSections),
+      sectionTemplates: normalizeSectionTemplates(rawUi.sectionTemplates),
       mustHaveTemplates: sanitizeMustHaveTemplates(rawUi.mustHaveTemplates),
       geometry: {
         x: Number.isFinite(rawGeo.x) && rawGeo.x >= 0 ? Math.round(rawGeo.x) : 120,
@@ -1370,7 +1390,7 @@ function buildSegmentedPacingDirective(scheme = {}, uiContext = null) {
   } else if (budget.chars >= 1400 || avgPerSection >= 180) {
     densityBlock = [
       '【细节展开密度：充分扩写】',
-      `各启用板块均须充分展开具体的生活细节、言行习惯、行为逻辑与情绪微表现，用扎实的生活质感撑起篇幅，确保成稿有效汉字稳步达到 ${budget.charsMin} 字以上。`,
+      `各板块需充分展开具体的生活细节、言行习惯、行为逻辑与情绪微表现，用扎实的生活质感撑起篇幅，确保成稿有效汉字稳步达到 ${budget.charsMin} 字以上。`,
     ].join('\n');
   } else {
     densityBlock = [
@@ -1382,12 +1402,15 @@ function buildSegmentedPacingDirective(scheme = {}, uiContext = null) {
   return [
     `【总字数硬约束】全文有效汉字不少于 ${budget.charsMin} 字、不超过 ${budget.charsMax} 字（目标约 ${budget.chars} 字，约 ${tokensMin}～${tokensMax} tokens）${ctx.dualLayer ? '；开启世界书分流时为主档案正文与补充世界书条目之和' : ''}。`,
     densityBlock,
-    ...(quotaLines.length ? [`【分段参考配额（当前启用 ${weightedItems.length} 个板块，平均约 ${avgPerSection} 字/板块）】\n${quotaLines.join('\n')}`] : []),
+    ...(quotaLines.length ? [`【分段参考配额（${weightedItems.length} 个板块，平均约 ${avgPerSection} 字/板块）】\n${quotaLines.join('\n')}`] : []),
   ].join('\n\n');
 }
 
 function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = true, uiContext = null) {
   if (entry.slotType === 'worldbook' && scheme.syncedOverrides?.dualLayer) return scheme.syncedOverrides.dualLayer;
+  if (entry.slotType === 'draft_audit' && normalizeParagraphReview(uiContext?.paragraphReview) !== '0') {
+    return buildDraftAuditInstruction(scheme, uiContext);
+  }
   if (entry.slotType === 'draft_audit' && scheme.syncedOverrides?.draftAudit) return scheme.syncedOverrides.draftAudit;
   const sectionsOverridden = Boolean(scheme.syncedOverrides?.generationSections);
   const budget = computeLengthBudget(scheme.targetChars || 1500);
@@ -1440,13 +1463,13 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
       contextAddons.push(
         `【纯通用跨卡复用】保持${CORE_SECTION_HEADER}独立通用，剥离特定角色或旧卡专属绑定，仅在${SHELL_SECTION_HEADER}衔接当前角色关系。`
       );
-    } else if (backstoryMode !== 'blank_self') {
+    } else if (backstoryMode !== 'blank_self' && writesBackstory(uiContext.generationSections)) {
       contextAddons.push(
         `【人物经历与故事融合】人物的成长环境、经历轨迹与习惯成因顺着当前世界观、社会土壤及与${relationTarget}的交集脉络自然生长，长出有来处的真实血肉。`
       );
     }
     if (backstoryMode) {
-      const bsText = buildBackstoryDirective(backstoryMode);
+      const bsText = buildBackstoryDirective(backstoryMode, uiContext.generationSections);
       if (bsText) contextAddons.push(bsText);
     }
     if (spotlightMode) {
@@ -1519,20 +1542,21 @@ function resolveSlotContent(entry, scheme, tasteProfile = {}, includeTaste = tru
   } else if (entry.slotType === 'worldbook' && hasUiCtx && isDefaultEntryContent) {
     content = buildDualLayerDirective(scheme, uiContext.worldbookLightMode);
   } else if (entry.slotType === 'draft_audit' && hasUiCtx && isDefaultEntryContent) {
-    content = buildDraftAuditInstruction(scheme, {
-      backstoryMode: VALID_BACKSTORY_MODES.has(uiContext.backstoryMode) ? uiContext.backstoryMode : 'light_vibe',
-      spotlightMode: VALID_SPOTLIGHT_MODES.has(uiContext.spotlightMode) ? uiContext.spotlightMode : 'balanced',
-    });
+    content = buildDraftAuditInstruction(scheme, uiContext);
   }
 
   return content.trim();
 }
 
 export function buildDraftAuditInstruction(scheme = {}, options = {}) {
+  if (normalizeParagraphReview(options?.paragraphReview) !== '0') {
+    return buildParagraphReviewInstruction(scheme, options).content;
+  }
   const isObjective = scheme?.style === 'objective';
   const backstoryMode = VALID_BACKSTORY_MODES.has(options?.backstoryMode) ? options.backstoryMode : 'light_vibe';
   const backstoryShort =
-    backstoryMode === 'blank_self'
+    !writesBackstory(options?.generationSections) ? '保留已给出的经历，不补写新的过去经历'
+    : backstoryMode === 'blank_self'
       ? '严守过往纯留白零编造'
       : backstoryMode === 'rich_arc'
         ? '成长脉络与性格自然呼应'
@@ -2386,7 +2410,14 @@ function buildConcealmentBoundaryDirective() {
   ].join('\n');
 }
 
-function buildBackstoryDirective(backstoryMode = 'light_vibe') {
+function writesBackstory(sections) {
+  if (!sections) return true;
+  const config = normalizeGenerationSectionsConfig(sections);
+  return config.enabledIds.includes('backstory_growth') || !getConfiguredGenerationSections(config).length;
+}
+
+function buildBackstoryDirective(backstoryMode = 'light_vibe', generationSections) {
+  if (!writesBackstory(generationSections)) return '';
   if (backstoryMode === 'blank_self') {
     return '【经历尺度：纯留白零编造】严禁编造任何玩家未主动提供的家庭出身、童年往事或旧日事件，完全通过当下的气质、习惯与处境立住人物。';
   }
@@ -2427,7 +2458,7 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
   } else {
     lines.push(
       '【输出版式：分段版（平实分段叙述）】',
-      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按本次启用的板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语，仅在双人关系指代不清时点明，禁比喻堆砌、禁代码块与 XML 标签。`
+      `请以 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 为一级标题，下方按所列板块使用简洁二级小标题（## 板块名）配合自然连贯的段落或短句撰写；用平实大白话写具体事实与情绪表现，默认省略主语，仅在双人关系指代不清时点明，禁比喻堆砌、禁代码块与 XML 标签。`
     );
   }
 
@@ -2439,16 +2470,12 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
     lines.push('没有指定板块。根据玩家要求组织正文，不代填固定栏目。');
   }
 
-  const disabledLabels = sections.length
-    ? ALL_SECTION_ITEMS.filter((item) => !effectiveEnabledSet.has(item.id)).map((item) => item.label)
-    : [];
   const anyIntimateEnabled = Array.from(INTIMATE_SECTION_IDS).some((id) => effectiveEnabledSet.has(id));
   const forbidParts = [];
-  if (disabledLabels.length > 0) {
-    forbidParts.push(`以下未勾选板块本次严禁擅自生成（禁止生成未勾选内容）：${disabledLabels.join('、')}。`);
-  }
   if (backstoryMode === 'blank_self') {
-    forbidParts.push('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历。');
+    forbidParts.push('严禁生成任何童年、少年或过往家庭经历。');
+  } else if (sections.length && !effectiveEnabledSet.has('backstory_growth')) {
+    forbidParts.push('保留玩家提供的事实，禁止生成新的过去经历。');
   }
   if (!anyIntimateEnabled) {
     forbidParts.push('严禁生成任何成人向、情色或越界亲密描写内容。');
@@ -2459,11 +2486,11 @@ export function buildGenerationSectionDirective(sectionsConfig = {}, context = {
       .filter(Boolean)
       .join('、');
     forbidParts.push(
-      `已携带客串角色时${compNames ? `（携伴客串：${compNames}）` : ''}，亲友关系网应与客串名单及时间线协调衔接、避免冲突，不重复编写或冲突覆盖客串角色设定。`
+      `亲友关系须与已有的人物资料${compNames ? `（${compNames}）` : ''}和时间线一致，不重复编写或改动这些人物的设定。`
     );
   }
   if (forbidParts.length > 0) {
-    lines.push('【未勾选板块约束（严禁擅自生成）】\n' + forbidParts.join('\n'));
+    lines.push('【写作边界】\n' + forbidParts.join('\n'));
   }
 
   return lines.join('\n\n');
@@ -3139,20 +3166,39 @@ export function inferOptimalTailMode(modelHint = {}) {
 }
 
 function normalizeParagraphReview(value) {
-  return ['1', '2', '3', 'all'].includes(value) ? value : '0';
+  return ['1', '2', '3', 'all', 'every'].includes(value) ? value : '0';
 }
 
-function buildParagraphReviewInstruction(mode) {
-  const scope = mode === 'all' ? '每个正文段落' : `前 ${mode} 个正文段落`;
-  return [
-    '【逐段草稿自检】',
-    `在输出${scope}前逐段完成自检。正文段落与列表项都计数，标题不计。用一个独立的 HTML 注释保存本段工作稿，从 <!-- draft:P1 开始，按段递增编号，以 --> 闭合。`,
-    '每个注释依次写三项：',
-    '初稿：写出该段的完整草稿，紧扣本段任务与已知设定。',
-    '核对：逐句对照本次给出的禁词表、禁写句式和玩家偏好。分开检查词语与句式、语域与人称、人物写法与段落衔接。引用对应的原句或短语，标明具体规则。特别检查空泛标签、替人物下结论、用解释代替可见细节，以及和前段重复的句式。没有命中也要引用核对过的短语，不能只写通过。',
-    '净稿：先删去违规且不承载人物信息的部分。删后事实或语意有缺口时，用符合原设定的具体表达补齐。再核对改动处，不能换成另一种禁写或顺手改掉玩家指定保留的信息。无须修改时可写「同初稿」。',
-    '注释闭合后换行，只输出该段的干净正文一次，再进入下一段。初稿、引用、核对记录和修改标签均留在该段注释内。已有正文如需调整，在当前段定稿前处理衔接，不重复输出前段。审查范围外的段落直接输出正文，仍须遵守写作规则。',
+export function draftAuditOutputBudget(scheme, paragraphReview, fallback = 3300) {
+  const mode = normalizeParagraphReview(paragraphReview);
+  const extra = mode === '0' ? 900
+    : mode === 'all' || mode === 'every' ? Math.max(1200, Math.ceil((Number(scheme?.targetChars) || 1500) * 3))
+      : Number(mode) * 650;
+  return Math.min(32768, clampInt(scheme?.maxTokens, 256, 32768, fallback) + extra);
+}
+
+function buildParagraphReviewInstruction(scheme, options) {
+  const mode = normalizeParagraphReview(options.paragraphReview);
+  const interval = mode === 'every' ? clampInt(options.paragraphReviewInterval, 1, 100, 1) : 1;
+  const maxChars = clampInt(options.paragraphMaxChars, 0, 2000, 0);
+  const scope = mode === 'all' || (mode === 'every' && interval === 1)
+    ? '每个正文段落输出前自检一次。'
+    : mode === 'every'
+      ? `每 ${interval} 段自检一次。先写好这一组的草稿并核对，再输出这一组的正文。末尾不足 ${interval} 段也检查一次。`
+      : `在输出前 ${mode} 个正文段落时，每段先自检一次。其余段落直接输出正文，仍须遵守写作规则。`;
+  const format = [
+    '【分段草稿自检】',
+    scope,
+    '正文段落、单独成行的字段和列表项都计数，标题不计。每次只用一个 HTML 注释，从 <!-- draft:P1 开始，按检查次数递增编号，以 --> 闭合。闭合后只输出本次检查过的干净正文一次。初稿、引用和改动记录留在注释内。',
+    ...(maxChars ? [`每个正文段落或列表项最多 ${maxChars} 字。过长就按意思拆开再计数，保持全文目标篇幅和板块配额。玩家指定逐字保留的原句可超过此限。`] : []),
   ].join('\n');
+  const override = scheme?.syncedOverrides?.paragraphAudit;
+  const rules = override || [
+    '初稿：写出本次要检查的段落，紧扣本段任务与已知设定。',
+    '核对：逐段逐句对照禁词、禁写句式和玩家偏好。分别检查词语与句式、语域与人称、人物写法与段落衔接。引用实际核对过的短语，说明对应规则。特别检查空泛标签、替人物下结论、用解释代替可见细节和重复句式。',
+    '净稿：删去违规且不承载人物信息的写法。删后有缺口时，用符合原设定的具体表达补齐，再核对改动处。保留玩家指定的信息，无须修改可写「同初稿」。',
+  ].join('\n');
+  return { format, rules, content: `${format}\n\n${rules}`, overridden: Boolean(override) };
 }
 
 function formatReferenceWorldbook(entries, charBlock) {
@@ -3197,17 +3243,20 @@ export function buildGenerationMessages(options = {}) {
     (opts.dualLayer !== undefined
       ? Boolean(opts.dualLayer)
       : Boolean(scheme.entries.find((e) => e.slotType === 'worldbook')?.enabled));
-  const useDraftAudit =
-    !useParagraphReview && !targetSection &&
-    (opts.draftAudit !== undefined
+  const useDraftAudit = useParagraphReview || (!targetSection && (
+    opts.draftAudit !== undefined
       ? opts.draftAudit === true
-      : Boolean(scheme.entries.find((e) => e.slotType === 'draft_audit')?.enabled));
+      : Boolean(scheme.entries.find((entry) => entry.slotType === 'draft_audit')?.enabled)
+  ));
 
   const slotUiContext = targetSection
     ? null
     : {
         mode,
         subMode,
+        paragraphReview,
+        paragraphReviewInterval: opts.paragraphReviewInterval,
+        paragraphMaxChars: opts.paragraphMaxChars,
         backstoryMode,
         spotlightMode,
         pureCrossCardReuse: Boolean(opts.pureCrossCardReuse),
@@ -3231,12 +3280,13 @@ export function buildGenerationMessages(options = {}) {
       if (scheme.syncedOverrides?.dualLayer && emittedWorldbookSlot) continue;
       isEntryEnabled = effectiveDualLayer;
     } else if (entry.slotType === 'draft_audit') {
-      if (scheme.syncedOverrides?.draftAudit && emittedDraftAuditSlot) continue;
+      if ((useParagraphReview || scheme.syncedOverrides?.draftAudit) && emittedDraftAuditSlot) continue;
       isEntryEnabled = useDraftAudit;
     }
     if (!isEntryEnabled) continue;
 
-    const resolved = resolveSlotContent(entry, scheme, tasteProfile, true, slotUiContext);
+    const entryContext = targetSection && entry.slotType === 'draft_audit' ? opts : slotUiContext;
+    const resolved = resolveSlotContent(entry, scheme, tasteProfile, true, entryContext);
     if (!resolved) continue;
 
     if (entry.slotType === 'context') emittedContextSlot = true;
@@ -3293,7 +3343,7 @@ export function buildGenerationMessages(options = {}) {
       core_expand:
         `【任务模式：扩写细节（目标约 ${budget.chars} 字，区间 ${budget.charsMin}～${budget.charsMax} 字）】\n保留原人设事实骨架，顺着人物本色补充好恶界线、处事习惯与日常相处细节。`,
       cross_card_adapt:
-        `【任务模式：换卡融合重塑】\n严格保留下方指定的性格神韵、外貌本色与已勾选固定项；同时结合新角色卡的世界观、时代环境与角色关系，自然重塑与之契合的成长经历来处及${SHELL_SECTION_HEADER}，让身份、过往与开场关系在新故事里长出真实血肉。`,
+        `【任务模式：换卡融合重塑】\n严格保留下方指定的性格神韵、外貌本色与需要保留的原句及资料；同时结合新角色卡的世界观、时代环境与角色关系，自然重塑与之契合的成长经历来处及${SHELL_SECTION_HEADER}，让身份、过往与开场关系在新故事里长出真实血肉。`,
     };
     taskParts.push(directiveMap[subMode]);
 
@@ -3354,7 +3404,7 @@ export function buildGenerationMessages(options = {}) {
 
   if (!emittedContextSlot && !sectionsOverride) {
     if (backstoryMode && !targetSection) {
-      const bsText = buildBackstoryDirective(backstoryMode);
+      const bsText = buildBackstoryDirective(backstoryMode, opts.generationSections);
       if (bsText) taskParts.push(bsText);
     }
     if (spotlightMode && !targetSection) {
@@ -3425,9 +3475,9 @@ export function buildGenerationMessages(options = {}) {
       taskParts.push(
         `【基础人设与共同成长融合】\n检测到与 ${jointTarget} 存在青梅竹马、家人养亲、师徒养成或多年共生关系：请将塑造 {{user}} 性格底色、生活习惯与安全感边界的共同成长印记自然融入${CORE_SECTION_HEADER}，不要机械割裂；同时将当下所处时间点、现居状态与开场矛盾写入${SHELL_SECTION_HEADER}，保持年龄与时间线前后一致。`
       );
-    } else if (opts.pureCrossCardReuse !== true && opts.charContext && backstoryMode !== 'blank_self') {
+    } else if (opts.pureCrossCardReuse !== true && opts.charContext && backstoryMode !== 'blank_self' && writesBackstory(opts.generationSections)) {
       taskParts.push(
-        `【人物经历与角色世界血肉融合】\n当前关联了具体角色卡：请不要把${CORE_SECTION_HEADER}写成脱离故事的空泛模板，人物的成长环境、经历轨迹与习惯成因可顺着当前角色卡的世界观、社会土壤及与角色的交集脉络自然生长，让人物真正长出有来处的血肉。`
+        `【人物经历与角色世界血肉融合】\n不要把${CORE_SECTION_HEADER}写成脱离故事的空泛模板，人物的成长环境、经历轨迹与习惯成因可顺着当前角色卡的世界观、社会土壤及与角色的交集脉络自然生长，让人物真正长出有来处的血肉。`
       );
     }
   }
@@ -3468,22 +3518,16 @@ export function buildGenerationMessages(options = {}) {
     taskParts.push(scheme.syncedOverrides?.dualLayer || buildDualLayerDirective(scheme, opts.worldbookLightMode));
   }
 
-  if (useParagraphReview) {
-    messages.push({ role: 'system', content: buildParagraphReviewInstruction(paragraphReview) });
-  }
-
   if (useDraftAudit && !emittedDraftAuditSlot) {
     messages.push({
       role: 'system',
-      content: scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, {
-        backstoryMode: backstoryMode || 'light_vibe',
-        spotlightMode: spotlightMode || 'balanced',
-      }),
+      content: useParagraphReview ? buildDraftAuditInstruction(scheme, opts)
+        : scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, opts),
     });
   }
 
   if (effectiveTailMode === 'user' && scheme.triggerText && scheme.triggerText.trim()) {
-    if (useDraftAudit) {
+    if (useDraftAudit && !useParagraphReview) {
       taskParts.push(
         `${scheme.triggerText.trim()}\n（请先以 ${DRAFT_START_MARKER}…${DRAFT_END_MARKER} 完成简短草稿自检，闭合后立即输出干净的最终人设正文。）`
       );
@@ -3498,7 +3542,7 @@ export function buildGenerationMessages(options = {}) {
   });
 
   const effectivePrefillText =
-    useDraftAudit && effectiveTailMode === 'assistant_prefill'
+    useDraftAudit && !useParagraphReview && effectiveTailMode === 'assistant_prefill'
       ? `${DRAFT_START_MARKER}\n`
       : scheme.prefillText;
 
@@ -3598,7 +3642,7 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     : 'green_selective';
 
   const sectionParts = [
-    buildBackstoryDirective(backstoryMode),
+    buildBackstoryDirective(backstoryMode, sectionsCfg),
     buildSpotlightDirective(spotlightMode),
     buildGenerationSectionDirective(sectionsCfg, { backstoryMode }),
   ].filter(Boolean);
@@ -3619,6 +3663,9 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     );
   }
 
+  const segmentedAudit = normalizeParagraphReview(uiCfg.paragraphReview) === '0'
+    ? null : buildParagraphReviewInstruction(safeScheme, uiCfg);
+  const auditSlot = safeScheme.entries.find((entry) => entry.slotType === 'draft_audit');
   return [
     {
       id: 'ups_synced_sections',
@@ -3642,17 +3689,18 @@ export function buildSyncedPreferenceEntries({ scheme, ui = {} } = {}) {
     },
     {
       id: 'ups_draft_audit',
-      key: 'draftAudit',
-      name: '成稿前草稿自检',
-      role: 'system',
+      key: segmentedAudit ? 'paragraphAudit' : 'draftAudit',
+      name: segmentedAudit ? '分段草稿自检' : '成稿前草稿自检',
+      role: auditSlot?.role || 'system',
       enabled: uiCfg.draftAudit !== false,
       toggleable: true,
-      content: buildDraftAuditInstruction(safeScheme, {
-        backstoryMode,
-        spotlightMode,
+      content: segmentedAudit?.content || buildDraftAuditInstruction(safeScheme, { ...uiCfg, backstoryMode }),
+      ...(segmentedAudit && {
+        managedText: segmentedAudit.format, editableText: segmentedAudit.rules, overridden: segmentedAudit.overridden,
       }),
     },
   ].map((entry) => {
+    if (entry.managedText) return entry;
     const override = safeScheme.syncedOverrides?.[entry.key];
     return override ? { ...entry, content: override, overridden: true } : entry;
   });
@@ -3679,7 +3727,7 @@ export function exportSillyTavernPreset(options = {}) {
   const presetName = rawPresetName || String(scheme.name ?? '').trim() || 'User 人设工坊预设';
 
   const mainSystemContent =
-    `【${presetName}】当前预设用于生成或优化 SillyTavern {{user}} 人设档案。请将玩家在聊天框发送的灵感或旧人设作为本次输入，并结合已启用的角色卡设定与下方模块化规则直接输出人设正文。`;
+    `【${presetName}】当前预设用于生成或优化 SillyTavern {{user}} 人设档案。请将玩家在聊天框发送的灵感或旧人设作为本次输入，并结合收到的角色资料与下方写作要求直接输出人设正文。`;
 
   // All 12 mandatory built-in SillyTavern PromptManager identifiers
   const builtinPrompts = [
@@ -3804,6 +3852,8 @@ export function exportSillyTavernPreset(options = {}) {
     { identifier: 'dialogueExamples', enabled: false }
   );
 
+  const segmentedAudit = normalizeParagraphReview(opts.uiPreferences?.paragraphReview) !== '0';
+  const tailMode = effectiveIncludeDraftAudit && segmentedAudit ? 'user' : scheme.tailMode;
   const exportUiContext = includeSyncedOptions
     ? {
         ...opts.uiPreferences,
@@ -3818,7 +3868,7 @@ export function exportSillyTavernPreset(options = {}) {
 
   for (const entry of scheme.entries) {
     if (entry.slotType === 'worldbook' && scheme.syncedOverrides?.dualLayer && exportedWorldbookSlot) continue;
-    if (entry.slotType === 'draft_audit' && scheme.syncedOverrides?.draftAudit && exportedDraftAuditSlot) continue;
+    if (entry.slotType === 'draft_audit' && (segmentedAudit || scheme.syncedOverrides?.draftAudit) && exportedDraftAuditSlot) continue;
     let identifier;
     if (entry.slotType === 'worldbook' && !usedIds.has('ups_synced_worldbook')) {
       identifier = 'ups_synced_worldbook';
@@ -3855,7 +3905,7 @@ export function exportSillyTavernPreset(options = {}) {
     prompts.push(
       makeCustomPromptEntry({
         identifier,
-        name: entry.name,
+        name: entry.slotType === 'draft_audit' && segmentedAudit ? '分段草稿自检' : entry.name,
         role: entry.role,
         content,
       })
@@ -3892,9 +3942,10 @@ export function exportSillyTavernPreset(options = {}) {
     prompts.push(
       makeCustomPromptEntry({
         identifier: auditId,
-        name: '成稿前草稿自检',
+        name: segmentedAudit ? '分段草稿自检' : '成稿前草稿自检',
         role: 'system',
-        content: scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, opts.uiPreferences || {}),
+        content: segmentedAudit ? buildDraftAuditInstruction(scheme, opts.uiPreferences)
+          : scheme.syncedOverrides?.draftAudit || buildDraftAuditInstruction(scheme, opts.uiPreferences || {}),
       })
     );
     order.push({ identifier: auditId, enabled: true });
@@ -3905,13 +3956,13 @@ export function exportSillyTavernPreset(options = {}) {
   const basePrefill = String(scheme.prefillText ?? '').trimEnd() || DEFAULT_PREFILL.trimEnd();
   const prefillContent =
     effectiveIncludeDraftAudit &&
-    scheme.tailMode === 'assistant_prefill' &&
+    tailMode === 'assistant_prefill' &&
     (basePrefill === CORE_SECTION_HEADER || basePrefill === DEFAULT_PREFILL.trimEnd())
       ? DRAFT_START_MARKER
       : basePrefill;
   const triggerContent = String(scheme.triggerText ?? '').trim() || DEFAULT_TRIGGER;
 
-  if (scheme.tailMode === 'assistant_prefill') {
+  if (tailMode === 'assistant_prefill') {
     const prefillId = 'ups_tail_prefill';
     usedIds.add(prefillId);
     prompts.push(
@@ -3923,7 +3974,7 @@ export function exportSillyTavernPreset(options = {}) {
       })
     );
     order.push({ identifier: prefillId, enabled: true });
-  } else if (scheme.tailMode === 'prefill_plus_user') {
+  } else if (tailMode === 'prefill_plus_user') {
     const prefillId = 'ups_tail_prefill';
     const triggerId = 'ups_tail_trigger';
     usedIds.add(prefillId);
@@ -3974,7 +4025,9 @@ export function exportSillyTavernPreset(options = {}) {
     min_p: 0,
     repetition_penalty: 1,
     openai_max_context: 128000,
-    openai_max_tokens: clampInt(scheme.maxTokens, 256, 32768, 3200),
+    openai_max_tokens: effectiveIncludeDraftAudit && segmentedAudit
+      ? draftAuditOutputBudget(scheme, opts.uiPreferences.paragraphReview, 3200)
+      : clampInt(scheme.maxTokens, 256, 32768, 3200),
     seed: -1,
     n: 1,
     stream_openai: true,
@@ -4009,7 +4062,7 @@ export function exportSillyTavernPreset(options = {}) {
         schemaVersion: 1,
         presetName,
         style: scheme.style,
-        tailMode: scheme.tailMode,
+        tailMode,
         includeDraftAudit: effectiveIncludeDraftAudit,
       },
     },
@@ -4515,7 +4568,7 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
 
   // 3. Strong explicit section-level classification (prevents prose words inside a named section from drifting)
   if (NSFW_INTIMATE_RE.test(sec) || NSFW_INTIMATE_RE.test(lineKey)) {
-    return { category: 'NSFW / 亲密设定', keepByDefault: true };
+    return { category: 'NSFW', keepByDefault: true };
   }
   if (
     /(?:当前身份|当前背景|当前处境|目前处境|当前状态|剧场壳|开场|与.*关系|居住地|当前住址|住址|职业或身份|当前职业|职业与经济|关系网|亲友|父母|兄弟姐妹|朋友|前任|重要伙伴)/i.test(
@@ -4552,7 +4605,7 @@ function classifyPersonaPointCategory(sectionTitle, lineText) {
   // 4. General combined keyword matching for flat / unsectioned lines
   const combined = `${sec} ${line}`.trim();
   if (NSFW_INTIMATE_RE.test(combined)) {
-    return { category: 'NSFW / 亲密设定', keepByDefault: true };
+    return { category: 'NSFW', keepByDefault: true };
   }
   if (
     /(?:外貌|体貌|面容|脸型|五官|眉|眼|瞳|鼻|唇|肤色|发色|头发|发型|身高|体重|体型|身材|体态|身体|腿|手|疤|痣|耳饰|穿衣|穿搭|穿着|衣着|声线|声音|外表|气质|appearance|hair|skin|eyes|nose|lips|face|build|height|weight)/i.test(
