@@ -1013,8 +1013,8 @@ test('T1-F11-02: companion search filters choices without replacing the selected
   const compSection = shadow.querySelector('[data-ups-companion-section]');
   const compSearch = compSection.querySelector('[data-ups-companion-search]');
   const name = compSection.querySelector('[data-ups-companion-real-name]');
-  const currentCard = compSection.querySelector('[data-ups-companion-selected]');
-  const originalCard = currentCard?.textContent;
+  const originalChid = ctrl.getState().companions[0]?.chid;
+  assert.equal(compSection.querySelector('[data-ups-companion-selected]'), null);
   assert.match(compSection.textContent, /选择角色[\s\S]*卡中角色名[\s\S]*当前关系/);
   assert.equal(name.value, '');
   env.setInputValue(compSearch, '苏');
@@ -1023,11 +1023,11 @@ test('T1-F11-02: companion search filters choices without replacing the selected
   const results = compSection.querySelector('[data-ups-companion-results]');
   assert.ok(results.textContent.includes('苏晚'));
   assert.equal(results.hidden, false);
-  assert.equal(currentCard.textContent, originalCard);
+  assert.equal(ctrl.getState().companions[0]?.chid, originalChid);
   assert.equal(name.value, '');
   results.querySelector('[data-ups-companion-result="2"]').click();
   await env.waitTicks(10);
-  assert.match(currentCard.textContent, /苏晚/);
+  assert.match(compSearch.value, /苏晚/);
   assert.equal(results.hidden, true);
   assert.equal(name.value, '');
   assert.equal(ctrl.getState().selectedCharTarget, '');
@@ -1236,12 +1236,12 @@ test('T1-F14-01: targetChars >= 1500 makes [data-ups-split-hint] visible in main
   env.setInputValue(wcInput, '600');
   await env.waitTicks();
   const hint = shadow.querySelector('[data-ups-split-hint]');
-  assert.equal(hint.hidden, true);
+  assert.equal(hint.hidden, false);
 
   env.setInputValue(wcInput, '1500');
   await env.waitTicks();
   assert.equal(hint.hidden, false);
-  assert.ok(hint.textContent.includes('长设定拆入世界书'));
+  assert.equal(hint.getAttribute('aria-label'), '长设定拆入世界书');
 });
 
 test('T1-F14-02: adding active companion makes [data-ups-split-hint] visible even when targetChars=1000', async () => {
@@ -1320,7 +1320,7 @@ test('T1-F15-04: legacy persisted settings with old objective scheme name migrat
     schemes: [
       {
         id: 'player_controlled',
-        name: '纯手控',
+        name: '纯手控精炼方案',
         style: 'objective',
         builtin: true,
         entries: [],
@@ -2329,16 +2329,16 @@ test('T2-F13-05: pure cross-card reuse mode instructs stripping 沈砚-specific 
   assert.ok(/跨卡复用|剥离|独立/.test(built.assembledPromptText));
 });
 
-test('T2-F14-01: [data-ups-split-hint] stays hidden for short draft (400 chars), targetChars=600, 0 companions', async () => {
+test('T2-F14-01: [data-ups-split-hint] remains reachable for short draft (400 chars), targetChars=600, 0 companions', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '600');
   env.setInputValue(shadow.querySelector('[data-ups-draft]'), '短人设测试'.repeat(40));
   await env.waitTicks();
-  assert.equal(shadow.querySelector('[data-ups-split-hint]').hidden, true);
+  assert.equal(shadow.querySelector('[data-ups-split-hint]').hidden, false);
 });
 
-test('T2-F14-02: toggling [data-ups-split-hint] synchronizes with dualLayer checkbox in popover', async () => {
+test('T2-F14-02: splitting has one main switch, synced with settings and no duplicate popover checkbox', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '1600');
@@ -2347,8 +2347,9 @@ test('T2-F14-02: toggling [data-ups-split-hint] synchronizes with dualLayer chec
   hint.click();
   await env.waitTicks();
   const pop = shadow.querySelector('[data-ups-popover]');
-  const dualCb = pop.querySelectorAll('input[type="checkbox"]')[1];
-  assert.equal(dualCb.checked, ctrl.getState().settings.ui.dualLayer);
+  assert.equal(pop.textContent.includes('长设定拆入世界书'), false);
+  assert.equal(hint.getAttribute('aria-checked'), String(ctrl.getState().settings.ui.dualLayer));
+  assert.equal(hint.querySelectorAll('.ups-switch-thumb').length, 1);
 });
 
 test('T2-F14-03: toggling [data-ups-split-hint] OFF when targetChars=2000 respects user opt-out', async () => {
@@ -2366,7 +2367,7 @@ test('T2-F14-03: toggling [data-ups-split-hint] OFF when targetChars=2000 respec
   assert.equal(sent.includes('【长设定自动拆出世界书（已开启）】'), false);
 });
 
-test('T2-F14-04: removing companions and lowering targetChars to 600 hides hint without resizing modal', async () => {
+test('T2-F14-04: removing companions and lowering targetChars to 600 keeps the only split switch reachable without resizing modal', async () => {
   const { env, ctrl, shadow } = await mountFreshStudio();
   await ctrl.open();
   const before = getModalRect(shadow);
@@ -2378,7 +2379,7 @@ test('T2-F14-04: removing companions and lowering targetChars to 600 hides hint 
   shadow.querySelector('[data-ups-companion-remove]').click();
   env.setInputValue(shadow.querySelector('[data-ups-word-count-input]'), '600');
   await env.waitTicks();
-  assert.equal(hint.hidden, true);
+  assert.equal(hint.hidden, false);
   assert.deepEqual(getModalRect(shadow), before);
 });
 
@@ -2765,7 +2766,7 @@ test('T3-06: changing [data-ups-word-count-input] 600 -> 2000 surfaces split hin
   const wc = shadow.querySelector('[data-ups-word-count-input]');
   env.setInputValue(wc, '600');
   await env.waitTicks();
-  assert.equal(shadow.querySelector('[data-ups-split-hint]').hidden, true);
+  assert.equal(shadow.querySelector('[data-ups-split-hint]').hidden, false);
 
   env.setInputValue(wc, '2000');
   await env.waitTicks();
@@ -3063,7 +3064,7 @@ test('T3-22: Subject-omission Token economy removes repeated {{user}} instructio
     inspiration: '安静书店店员',
   });
   assert.ok(/省略主语|省.*主语|不.*重复.*\{\{user\}\}/.test(built.assembledPromptText));
-  assert.ok(/歧义|消歧/.test(built.assembledPromptText));
+  assert.match(built.assembledPromptText, /歧义|消歧|指代不清时点明名字/);
 });
 
 test('T3-23: Three-way classifyWorldbookEntry retains acting_rules (令行禁止/人设修正/剧情守则), isolates system_format, respects disable:true, strips shells', async () => {
@@ -3866,7 +3867,7 @@ test('saved board templates reload independently and the selected guidance reach
   assert.ok(reopened.ctrl.getState().settings.ui.generationSections.enabledIds.includes('ex_partner'));
   reopened.shadow.querySelector('[data-ups-generate]').click();
   await reopened.env.waitTicks(20);
-  assert.match(reopened.stHost.capturedGenerations.at(-1).messages.map((message) => message.content).join('\n'), /- 前任：写清/);
+  assert.match(reopened.stHost.capturedGenerations.at(-1).messages.map((message) => message.content).join('\n'), /- 前任：直接写已给的前任事实/);
 });
 
 test('companion browsing is reversible and same-name versions beyond the first page remain selectable', async () => {
@@ -3885,7 +3886,8 @@ test('companion browsing is reversible and same-name versions beyond the first p
   toggle.click();
   assert.equal(body.hidden, true);
   addCompanion(shadow, env);
-  assert.match(shadow.querySelector('[data-ups-companion-selected]').textContent, /未选角色卡/);
+  assert.equal(shadow.querySelector('[data-ups-companion-search]').value, '');
+  assert.equal(shadow.querySelector('[data-ups-companion-selected]'), null);
   shadow.querySelector('[data-ups-generate]').click();
   await env.waitTicks(20);
   assert.doesNotMatch(stHost.capturedGenerations.at(-1).messages.map(({ content }) => content).join('\n'), /客串角色/);
@@ -3900,7 +3902,7 @@ test('companion browsing is reversible and same-name versions beyond the first p
   toggle.click();
   assert.equal(body.hidden, true);
   toggle.click();
-  assert.match(shadow.querySelector('[data-ups-companion-selected]').textContent, /version-44\.png/);
+  assert.match(shadow.querySelector('[data-ups-companion-search]').value, /version-44\.png/);
 });
 
 test('custom audit timing is immediately visible in the native preview and sent to the model', async () => {
@@ -3919,4 +3921,91 @@ test('custom audit timing is immediately visible in the native preview and sent 
   const messages = stHost.capturedGenerations.at(-1).messages;
   assert.equal(messages.filter(({ content }) => /每 4 段自检一次/.test(content)).length, 1);
   assert.ok(messages.some(({ content }) => /最多 165 字/.test(content)));
+});
+
+test('R1 L7/L11: same-name main cards search by filename without changing the selected label', async () => {
+  const { env, ctrl, shadow } = await mountFreshStudio({}, { characters: [
+    { name: '同名角色', avatar: 'version-a.png', description: '版本甲' },
+    { name: '同名角色', avatar: 'version-b.png', description: '版本乙' },
+    { name: '同名角色', avatar: 'version-c.png', description: '版本丙' },
+  ] });
+  await ctrl.open();
+  assert.equal(shadow.querySelector('[data-ups-char-follow-active]'), null);
+  const button = shadow.querySelector('[data-ups-char-combo-btn]');
+  button.click();
+  shadow.querySelector('[data-ups-char-opt="1"]').click();
+  await env.waitTicks();
+  assert.match(button.textContent, /version-b\.png/);
+  const label = button.textContent;
+  button.click();
+  env.setInputValue(shadow.querySelector('[data-ups-char-search]'), 'version-c');
+  assert.equal(button.textContent, label);
+  assert.match(shadow.querySelector('[data-ups-char-opt="2"]').textContent, /version-c\.png/);
+  env.setInputValue(shadow.querySelector('[data-ups-char-search]'), '没有匹配');
+  assert.equal(button.textContent, label);
+  assert.match(shadow.querySelector('[data-ups-char-combo-list]').textContent, /未找到匹配/);
+});
+
+test('R1 L8: rewrite keeps one persona picker and editable preservation choices inside step one', async () => {
+  const { env, ctrl, shadow } = await mountFreshStudio();
+  await ctrl.open();
+  shadow.querySelector('[data-ups-mode="B"]').click();
+  shadow.querySelector('[data-ups-load-persona]').click();
+  await env.waitTicks();
+  const step = shadow.querySelector('[data-ups-panel-mode="B"]');
+  const points = shadow.querySelector('[data-ups-points-box]');
+  assert.equal(step.contains(points), true);
+  assert.equal(shadow.querySelectorAll('[data-ups-points-persona]').length, 1);
+  assert.equal(step.querySelectorAll('[data-ups-points-persona]').length, 1);
+  const extract = shadow.querySelector('[data-ups-extract-points]');
+  assert.equal(extract.hidden, true);
+  const first = points.querySelector('[data-ups-point-cb]');
+  assert.ok(first);
+  first.click();
+  const kept = first.checked;
+  shadow.querySelector('[data-ups-mode="A"]').click();
+  assert.equal(shadow.querySelector('[data-ups-panel-mode="A"]').contains(points), true);
+  shadow.querySelector('[data-ups-mode="B"]').click();
+  assert.equal(step.contains(points), true);
+  assert.equal(points.querySelector('[data-ups-point-cb]').checked, kept);
+  env.setInputValue(shadow.querySelector('[data-ups-existing-draft]'), '外貌：新增的描写。\n性格：沉稳。');
+  assert.equal(extract.hidden, false);
+  extract.click();
+  assert.equal(extract.hidden, true);
+  assert.match(points.textContent, /新增的描写/);
+});
+
+test('R1 L12/L13/L14/L15: compact menus invoke original actions, Escape closes options, and feedback remains visible', async () => {
+  const { env, ctrl, shadow } = await mountFreshStudio({ innerWidth: 390, innerHeight: 844, coarse: true });
+  await ctrl.open();
+  const footer = shadow.querySelector('[data-ups-footer]');
+  assert.equal(footer.classList.contains('has-status'), false);
+  env.setInputValue(shadow.querySelector('[data-ups-draft]'), '外貌：黑发。\n性格：沉稳。');
+  const more = shadow.querySelector('[data-ups-draft-more]');
+  more.click();
+  const menu = shadow.querySelector('[data-ups-floating-menu]');
+  const clear = [...menu.querySelectorAll('button')].find((button) => button.textContent === '清空正文');
+  assert.ok(clear && !clear.disabled);
+  clear.click();
+  assert.equal(shadow.querySelector('[data-ups-draft]').value, '');
+  assert.equal(menu.hidden, true);
+  assert.equal(footer.classList.contains('has-status'), true);
+  shadow.querySelector('[data-ups-undo]').click();
+  assert.match(shadow.querySelector('[data-ups-draft]').value, /黑发/);
+  const options = shadow.querySelector('[data-ups-popover]');
+  shadow.querySelector('[data-ups-popover-btn]').click();
+  const beforeFocus = env.focusCalls.length;
+  options.querySelector('input').dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+  assert.equal(options.hidden, true);
+  assert.equal(ctrl.getState().isOpen, true);
+  assert.equal(env.focusCalls.length, beforeFocus);
+  shadow.querySelector('[data-ups-tab="settings"]').click();
+  env.selectOption(shadow.querySelector('[data-ups-provider]'), 'custom');
+  env.setInputValue(shadow.querySelector('[data-ups-profile-name]'), '测试方案');
+  shadow.querySelector('[data-ups-profile-create]').click();
+  env.setInputValue(shadow.querySelector('[data-ups-profile-name]'), '重命名方案');
+  shadow.querySelector('[data-ups-profile-more]').click();
+  [...menu.querySelectorAll('button')].find((button) => button.textContent === '重命名').click();
+  assert.match(getStatusText(shadow), /已重命名/);
+  assert.equal(env.focusCalls.length, beforeFocus);
 });

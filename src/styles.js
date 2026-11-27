@@ -996,6 +996,7 @@ export const SHADOW_CSS = String.raw`
 
 /* Scrollable Middle Body — distinct canvas tone & scrollbar-gutter: stable prevents bounce! */
 .ups-body {
+  overscroll-behavior: contain;
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
@@ -1040,6 +1041,7 @@ export const SHADOW_CSS = String.raw`
 
 .ups-pane-left,
 .ups-pane-right {
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1262,7 +1264,7 @@ export const SHADOW_CSS = String.raw`
 .ups-point-group-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   padding: 6px 9px;
   background-color: var(--ups-bg-elevated);
@@ -1270,6 +1272,10 @@ export const SHADOW_CSS = String.raw`
   font-size: 12px;
   font-weight: 600;
   color: var(--ups-fg);
+}
+
+.ups-point-group-head > .ups-badge {
+  margin-left: auto;
 }
 
 .ups-point-group-label {
@@ -1324,6 +1330,7 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-wb-list {
+  overscroll-behavior: contain;
   max-height: 210px;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -1394,16 +1401,62 @@ export const SHADOW_CSS = String.raw`
   justify-content: flex-start;
 }
 
+.ups-btn-row.ups-draft-section-actions {
+  margin-left: auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.ups-draft-section-actions > label {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.ups-select.ups-draft-section-select {
+  width: auto;
+  max-width: 148px;
+  min-width: 0;
+}
+
+.ups-draft-section-actions .ups-label {
+  display: none;
+}
+
+.ups-more-btn.ups-draft-more,
+.ups-more-btn.ups-profile-more {
+  display: none;
+}
+
+@container draft-card (max-width: 680px) {
+  .ups-draft-toolbar .ups-draft-secondary {
+    display: none;
+  }
+  .ups-more-btn.ups-draft-more {
+    display: inline-flex;
+  }
+}
+
 @container draft-card (max-width: 440px) {
   .ups-draft-head {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    justify-items: start;
+    flex-wrap: wrap;
   }
 
   .ups-draft-count {
-    grid-row: 2;
-    grid-column: 1 / -1;
+    order: 2;
+  }
+
+  .ups-btn-row.ups-draft-section-actions {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .ups-draft-section-actions > label {
+    flex: 1 1 auto;
+  }
+
+  .ups-draft-section-actions .ups-draft-section-select {
+    flex: 1 1 auto;
+    max-width: none;
   }
 }
 
@@ -1941,6 +1994,30 @@ export const SHADOW_CSS = String.raw`
   flex-direction: column;
 }
 
+.ups-reference-picker {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ups-reference-results {
+  border: 1px solid var(--ups-border);
+  border-radius: 6px;
+  background: var(--ups-surface);
+  color: var(--ups-fg-muted);
+  font-size: 12px;
+  overscroll-behavior: contain;
+}
+
+.ups-reference-results-note {
+  padding: 6px 10px;
+}
+
+.ups-reference-results > .ups-char-combo-opt {
+  min-height: 36px;
+  overflow-wrap: anywhere;
+}
+
 .ups-char-combo-opt[data-ups-char-opt="__none__"] { border-bottom: 1px solid var(--ups-border-strong); }
 .ups-char-combo-opt {
   min-height: 34px;
@@ -2200,6 +2277,25 @@ export const SHADOW_CSS = String.raw`
 
 .ups-sections-bar > .ups-sections-panel {
   flex: 1 1 100%; min-width: 0; padding: 8px 0 0; background: none;
+  max-height: none;
+  overflow: visible;
+  scrollbar-gutter: auto;
+  overscroll-behavior: contain;
+}
+
+.ups-row.ups-template-row {
+  flex-wrap: nowrap;
+}
+
+.ups-template-row > .ups-input,
+.ups-template-row > .ups-select {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+}
+
+.ups-template-row > button {
+  flex: none;
 }
 .ups-sections-bar-info {
   display: flex;
@@ -2257,6 +2353,7 @@ export const SHADOW_CSS = String.raw`
 
 .ups-section-item .ups-btn-sm {
   flex: none;
+  margin-left: auto;
 }
 
 .ups-section-group-box > summary {
@@ -2296,6 +2393,35 @@ export const SHADOW_CSS = String.raw`
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+}
+
+.ups-ratio-cell .ups-chip-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ups-split-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.ups-row.ups-reference-summary {
+  flex-wrap: nowrap;
+}
+
+.ups-reference-summary > button {
+  flex: none;
+  margin-left: auto;
+}
+
+.ups-tab-panel[data-ups-tab-panel="settings"] > .ups-card {
+  max-width: 560px;
+}
+
+.ups-profile-name-row > button {
+  flex: none;
 }
 
 .ups-companion-section {
@@ -3398,6 +3524,7 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-popover {
+  overscroll-behavior: contain;
   width: min(320px, calc(100vw - 20px));
   padding: 11px 13px;
   display: flex;
@@ -3567,12 +3694,31 @@ export const SHADOW_CSS = String.raw`
   padding: 5px 10px;
 }
 
-.ups-modal.is-compact-h .ups-footer-left {
+.ups-modal.is-compact-h .ups-footer:not(.has-status) .ups-footer-left {
   display: none;
 }
 
 /* Container Queries for 4-State Stability */
 @container plugin-win (max-width: 680px) {
+  .ups-footer:not(.has-status) .ups-footer-left {
+    display: none;
+  }
+
+  .ups-profile-secondary {
+    display: none;
+  }
+
+  .ups-more-btn.ups-profile-more {
+    display: inline-flex;
+  }
+
+  .ups-profile-name-row {
+    flex-wrap: nowrap;
+  }
+
+  .ups-profile-name-row > div {
+    flex-basis: 0 !important;
+  }
   .ups-footer {
     flex-direction: column;
     align-items: stretch;
@@ -3692,7 +3838,7 @@ export const SHADOW_CSS = String.raw`
 }
 
 /* Mobile Fullscreen & Safe Area (excluding floating/mini/menus) */
-@media (max-width: 640px) {
+@media (max-width: 680px), (pointer: coarse) {
   .ups-backdrop {
     padding: 0;
     align-items: stretch;
@@ -3733,6 +3879,9 @@ export const SHADOW_CSS = String.raw`
 @media (max-width: 680px), (pointer: coarse) {
   .ups-input,
   .ups-textarea,
+  .ups-select,
+  .ups-select.ups-input-sm,
+  .ups-palette-select,
   .ups-input.ups-input-sm,
   [data-ups-entry-menu-sender],
   [data-ups-entry-editor-sender],

@@ -29,6 +29,7 @@ import {
   createStudioUI,
 } from '../src/ui.js';
 import { createStudioController, mountStudioForTest, refreshExtensionStylesheet } from '../index.js';
+import { createDefaultSettings } from '../src/core.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -594,7 +595,7 @@ test('styles.js: SHADOW_CSS contains isolation, non-blocking backdrop, 6 palette
   assert.match(SHADOW_CSS, /@container plugin-win \(max-width:\s*560px\)/);
   assert.match(SHADOW_CSS, /@container plugin-win \(max-width:\s*420px\)/);
   assert.match(SHADOW_CSS, /@container plugin-win \(max-width:\s*355px\)/);
-  assert.match(SHADOW_CSS, /@media \(max-width:\s*640px\)/);
+  assert.match(SHADOW_CSS, /@media \(max-width:\s*680px\),\s*\(pointer:\s*coarse\)/);
   assert.match(SHADOW_CSS, /env\(safe-area-inset-top/);
   assert.match(SHADOW_CSS, /env\(safe-area-inset-bottom/);
   assert.match(SHADOW_CSS, /\.ups-modal\.is-mini/);
@@ -945,7 +946,7 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   const initialIds = getEntryIds();
 
   // Clicking second entry's ··· button keeps floatingMenuEl open and allows moving up
-  const moreBtns = sr.querySelectorAll('.ups-more-btn');
+  const moreBtns = sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn');
   moreBtns[1].click();
   const menuEl = sr.querySelector('[data-ups-floating-menu]');
   assert.equal(menuEl.hidden, false);
@@ -959,13 +960,13 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   assert.equal(getEntryIds()[1], initialIds[0]);
 
   // Move back down via first entry's ··· menu
-  sr.querySelectorAll('.ups-more-btn')[0].click();
+  sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn')[0].click();
   assert.equal(menuEl.hidden, false);
   menuEl.querySelectorAll('.ups-menu-item').find((b) => b.textContent === '下移一位').click();
   assert.deepEqual(getEntryIds(), initialIds);
 
   // Expand details via ··· menu
-  sr.querySelectorAll('.ups-more-btn')[0].click();
+  sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn')[0].click();
   menuEl.querySelectorAll('.ups-menu-item').find((b) => b.textContent === '展开详情').click();
   assert.ok(sr.querySelector('.ups-entry-editor'));
 
@@ -991,7 +992,7 @@ test('ui.js regression: Tab 2 ··· floating menu stays open and executes move/
   addBtn.click();
   const afterAddIds = getEntryIds();
   assert.equal(afterAddIds.length, initialIds.length + 1);
-  const lastMoreBtn = sr.querySelectorAll('.ups-more-btn').at(-1);
+  const lastMoreBtn = sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn').at(-1);
   lastMoreBtn.click();
   assert.equal(menuEl.hidden, false);
   const delBtn = menuEl.querySelectorAll('.ups-menu-item').find((b) => b.textContent === '删除条目');
@@ -1096,7 +1097,7 @@ test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/
   assert.ok(sr.querySelector('.ups-drag-handle svg'));
   assert.ok(sr.querySelector('[data-ups-close] svg'));
 
-  // 7. Top-edge viewport clamping: north handle drag & window shrink NEVER allow top < 8px
+  // 7. North handle drag respects the 8px top edge; default window resize stays non-floating.
   const northClamped = computeResizedModalRect({
     origLeft: 100,
     origTop: 50,
@@ -1112,7 +1113,9 @@ test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/
   assert.equal(northClamped.height, 642);
 
   const modalEl = sr.querySelector('[data-ups-window]');
-  modalEl.classList.add('is-floating');
+  assert.equal(modalEl.classList.contains('is-floating'), false);
+  modalEl.getBoundingClientRect = () => ({ left: 80, top: -40, width: 1000, height: 700 });
+  // Stale inline geometry must not pin an untouched default window outside the smaller viewport.
   modalEl.style.left = '80px';
   modalEl.style.top = '-40px';
   modalEl.style.width = '1000px';
@@ -1120,8 +1123,10 @@ test('UX v1.4: clean alabaster-crimson default palette, persona points switcher/
   env.win.innerWidth = 900;
   env.win.innerHeight = 420;
   env.win.dispatchEvent({ type: 'resize' });
-  assert.ok(parseFloat(modalEl.style.top) >= 8, `Expected top >= 8, got ${modalEl.style.top}`);
-  assert.ok(parseFloat(modalEl.style.top) + parseFloat(modalEl.style.height) <= 420);
+  assert.equal(modalEl.classList.contains('is-floating'), false);
+  for (const prop of ['left', 'top', 'width', 'height']) {
+    assert.equal(modalEl.style[prop], '', `Default window must clear stale ${prop} on viewport resize`);
+  }
 
   ui.destroy();
 });
@@ -1732,7 +1737,7 @@ test('Tier 5 | Gap 3: saveCurrentPersona preserves lorebook before refresh, avoi
 
   // Enable dualLayer -> worldbook saved FIRST, then persona saved with final lorebook name
   opLog.length = 0;
-  srB.querySelector('[data-ups-popover]').querySelectorAll('input[type="checkbox"]')[1].click();
+  srB.querySelector('[data-ups-split-hint]').click();
   srB.querySelector('[data-ups-save-as-btn]').click();
   saveSubB.querySelector('input').value = '沈渡';
   saveSubB.querySelector('[data-ups-save-name-confirm]').click();
@@ -1797,7 +1802,7 @@ test('Tier 5 | Gap 6: popoverEl and floatingMenuEl dismiss on switchTab, drag, r
   assert.equal(popoverEl.hidden, true);
 
   // 2. drag pointerdown hides both popoverEl and floatingMenuEl
-  sr.querySelectorAll('.ups-more-btn')[0].click();
+  sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn')[0].click();
   const menuEl = sr.querySelector('[data-ups-floating-menu]');
   assert.equal(menuEl.hidden, false);
   popoverBtn.click();
@@ -1808,14 +1813,14 @@ test('Tier 5 | Gap 6: popoverEl and floatingMenuEl dismiss on switchTab, drag, r
 
   // 3. resize pointerdown hides popoverEl & floatingMenuEl
   popoverBtn.click();
-  sr.querySelectorAll('.ups-more-btn')[0].click();
+  sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn')[0].click();
   resizeEl.dispatchEvent({ type: 'pointerdown', button: 0, pointerId: 2, clientX: 900, clientY: 600, target: resizeEl });
   assert.equal(popoverEl.hidden, true);
   assert.equal(menuEl.hidden, true);
 
   // 4. window resize hides popoverEl & floatingMenuEl
   popoverBtn.click();
-  sr.querySelectorAll('.ups-more-btn')[0].click();
+  sr.querySelector('[data-ups-tab-panel="presets"]').querySelectorAll('.ups-more-btn')[0].click();
   env.win.innerWidth = 1024;
   env.win.dispatchEvent({ type: 'resize' });
   assert.equal(popoverEl.hidden, true);
@@ -2188,7 +2193,8 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   const draftPane = sr.querySelector('[data-ups-pane="right"]');
   const draftToolbar = draftPane.querySelector('[data-ups-draft-toolbar]');
   assert.ok(draftToolbar.querySelectorAll('button').some((button) => button.textContent === '清理缩进'));
-  assert.equal(draftPane.querySelector('.ups-draft-card > .ups-mod-head').querySelectorAll('button').length, 0);
+  assert.equal(draftPane.querySelector('.ups-draft-card > .ups-mod-head').querySelectorAll('[data-ups-regen-section]').length, 1);
+  assert.equal(draftToolbar.querySelector('[data-ups-regen-section]'), null);
 
   // 2. Footer uncluttered: exportPresetBtn moved out of footer into Tab 2 (presets)
   const footer = sr.querySelector('[data-ups-footer]');
@@ -2252,7 +2258,7 @@ test('UX v1.1: two-pane workbench, word-count sync, persona point checklist, unc
   assert.equal(addedCard.classList.contains('ups-just-added'), true);
   assert.ok(addedCard.querySelector('.ups-entry-editor'));
   assert.equal(addedCard.querySelector('.ups-entry-editor input').focusCalls, 0);
-  assert.match(sr.querySelector('[data-ups-status]').textContent, /新增规则条目并自动跳转展开/);
+  assert.match(sr.querySelector('[data-ups-status]').textContent, /已新增条目/);
 
   ui.destroy();
 });
@@ -2873,7 +2879,11 @@ test('R1 & R2 regression: empty worldbook selection persists across refreshConte
   assert.deepEqual(ui.getState().selectedWorldEntryKeys, []);
 
   // Switching back to active character initializes its defaultEnabled worldbook and restores refine flow
-  sr.querySelector('[data-ups-char-follow-active]').click();
+  sr.querySelector('[data-ups-char-combo-btn]').click();
+  const followSearch = sr.querySelector('[data-ups-char-search]');
+  followSearch.value = '';
+  followSearch.dispatchEvent({ type: 'input' });
+  sr.querySelectorAll('[data-ups-char-opt]').find((button) => button.getAttribute('data-ups-char-opt') === '').click();
   await new Promise((r) => setTimeout(r, 25));
   assert.equal(ui.getState().isCharAdaptFlow, false);
   assert.deepEqual(ui.getState().selectedWorldEntryKeys, ['world::甲世界书::1']);
@@ -3073,22 +3083,48 @@ test('generation uses only selected reference entries and checks the chosen para
     ui.open();
     await new Promise((resolve) => setTimeout(resolve, 15));
     const sr = ui.shadow;
-    sr.querySelector('[data-ups-reference-toggle]').click();
-    const book = sr.querySelector('[data-ups-reference-book]');
+    const referenceToggle = sr.querySelector('[data-ups-reference-toggle]');
+    referenceToggle.click();
     const bookSearch = sr.querySelector('[data-ups-reference-search]');
+    const results = sr.querySelector('[data-ups-reference-results]');
+    const shownNames = () => Array.from(results.querySelectorAll('[data-ups-reference-book-option]'), (node) => node.textContent);
+    assert.equal(bookSearch.getAttribute('spellcheck'), 'false');
+    assert.equal(bookSearch.focusCalls, 0);
+    assert.equal(bookSearch.parentNode.querySelectorAll('select').length, 0);
+    assert.equal(results.hidden, true);
+    bookSearch.click();
+    assert.equal(results.hidden, false);
+    assert.deepEqual(shownNames(), ['村妹', '镇志']);
+    bookSearch.value = '村';
+    bookSearch.dispatchEvent({ type: 'input', isComposing: true });
+    assert.deepEqual(shownNames(), ['村妹', '镇志']);
+    bookSearch.dispatchEvent({ type: 'compositionend' });
+    assert.deepEqual(shownNames(), ['村妹']);
+    env.win.innerHeight = 430;
+    env.win.dispatchEvent({ type: 'resize' });
+    assert.equal(results.hidden, false);
     for (const name of ['村妹', '镇志']) {
-      bookSearch.value = name;
+      bookSearch.value = name.slice(0, 1);
       bookSearch.dispatchEvent({ type: 'input' });
-      assert.ok(book.options.some((option) => option.value === name));
-      if (name === '村妹') assert.ok(!book.options.some((option) => option.value === '镇志'));
-      book.value = name;
-      book.dispatchEvent({ type: 'change' });
+      assert.deepEqual(shownNames(), [name]);
+      results.querySelector('[data-ups-reference-book-option]').click();
+      assert.equal(results.hidden, true);
+      assert.equal(bookSearch.value, name);
       await new Promise((resolve) => setTimeout(resolve, 0));
       const checkbox = sr.querySelector('[data-ups-reference-entry]');
       assert.equal(checkbox.checked, false);
       checkbox.checked = true;
       checkbox.dispatchEvent({ type: 'change' });
     }
+    bookSearch.value = '没有这本书';
+    bookSearch.dispatchEvent({ type: 'input' });
+    assert.equal(results.textContent, '未找到世界书');
+    assert.equal(sr.querySelector('[data-ups-reference-entry]').checked, true);
+    referenceToggle.click();
+    referenceToggle.click();
+    assert.equal(results.hidden, true);
+    assert.equal(bookSearch.value, '镇志');
+    assert.equal(bookSearch.placeholder, '搜索或选择世界书');
     const review = sr.querySelector('[data-ups-paragraph-review]');
     assert.equal(review.value, '0');
     review.value = '2';
@@ -3167,4 +3203,216 @@ test('custom section editor saves names, guidance and order at narrow width', ()
   } finally {
     ui.destroy();
   }
+});
+
+test('R1 L1/L3/L5: viewport changes preserve preferred geometry and never promote an untouched window', () => {
+  for (const viewport of [{ innerWidth: 1440 }, { innerWidth: 680, coarse: true }, { innerWidth: 900, coarse: true }]) {
+    const env = createMockEnvironment({ ...viewport, innerHeight: 900 });
+    const ui = createStudioUI({ doc: env.doc, win: env.win });
+    try {
+      ui.open({ skipRefresh: true });
+      const modal = ui.shadow.querySelector('.ups-modal');
+      modal.getBoundingClientRect = () => ({ top: -20, left: 0, width: 1080, height: 700 });
+      const input = ui.shadow.querySelector('[data-ups-reference-search]');
+      input.value = '输入未完成';
+      ui.shadow.activeElement = input;
+      env.win.innerHeight = 420;
+      env.win.dispatchEvent({ type: 'resize' });
+      env.win.innerHeight = 900;
+      env.win.dispatchEvent({ type: 'resize' });
+      assert.equal(modal.classList.contains('is-floating'), false);
+      assert.equal(modal.style.height, '');
+      assert.equal(input.value, '输入未完成');
+      assert.equal(ui.shadow.activeElement === input, true);
+    } finally { ui.destroy(); }
+  }
+  const env = createMockEnvironment({ innerWidth: 1440, innerHeight: 900 });
+  const geometry = { x: 192, y: 60, width: 1080, height: 700 };
+  const ui = createStudioUI({ doc: env.doc, win: env.win, initialSettings: { ui: { geometry } } });
+  try {
+    ui.open({ skipRefresh: true });
+    env.win.innerWidth = 768; env.win.innerHeight = 360;
+    env.win.dispatchEvent({ type: 'resize' });
+    const modal = ui.shadow.querySelector('.ups-modal');
+    assert.equal(parseFloat(modal.style.left) + parseFloat(modal.style.width) <= 768, true);
+    assert.equal(parseFloat(modal.style.top) + parseFloat(modal.style.height) <= 360, true);
+    env.win.innerWidth = 1440; env.win.innerHeight = 900;
+    env.win.dispatchEvent({ type: 'resize' });
+    assert.equal(modal.style.width, '1080px');
+    assert.equal(modal.style.height, '700px');
+    assert.deepEqual(ui.getState().settings.ui.geometry, geometry);
+    ui.shadow.querySelector('[data-ups-close]').click();
+    assert.equal(ui.getState().isOpen, false);
+  } finally { ui.destroy(); }
+});
+
+test('R1 L1: raw and controller-normalized initial settings and setSettings require both explicit coordinates to restore a floating window', () => {
+  const cases = [
+    { geometry: undefined, placed: false },
+    { geometry: { width: 1080, height: 700 }, placed: false },
+    { geometry: { x: null, y: null, width: 1080, height: 700 }, placed: false },
+    { geometry: { x: 0, y: undefined, width: 1080, height: 700 }, placed: false },
+    { geometry: { x: undefined, y: 0, width: 1080, height: 700 }, placed: false },
+    { geometry: { x: null, y: 60, width: 1080, height: 700 }, placed: false },
+    { geometry: { x: 120, y: null, width: 1080, height: 700 }, placed: false },
+    { geometry: { x: 0, y: 0, width: 1080, height: 500 }, placed: true },
+    { geometry: { x: 120, y: 60, width: 1080, height: 500 }, placed: true },
+  ];
+  for (const viaSetSettings of [false, true]) {
+    for (const { geometry, placed, normalized } of [false, true].flatMap((normalized) =>
+      cases.map((item) => ({ ...item, normalized })))) {
+      const env = createMockEnvironment({ innerWidth: 1440, innerHeight: 600, coarse: false });
+      const rawSettings = { ui: { geometry } };
+      // The controller normalizes before initial UI creation and passes normalized state back to setSettings.
+      const nextSettings = normalized
+        ? (geometry === undefined ? createDefaultSettings() : createDefaultSettings(rawSettings))
+        : rawSettings;
+      const previouslyPlacedSettings = { ui: { geometry: { x: 80, y: 20, width: 1080, height: 500 } } };
+      const ui = createStudioUI({
+        doc: env.doc, win: env.win,
+        // Start placed when replacing settings, so empty coordinates must also clear the old state.
+        initialSettings: viaSetSettings
+          ? (normalized ? createDefaultSettings(previouslyPlacedSettings) : previouslyPlacedSettings)
+          : nextSettings,
+      });
+      try {
+        ui.open({ skipRefresh: true });
+        if (viaSetSettings) ui.setSettings(nextSettings);
+        const modal = ui.shadow.querySelector('.ups-modal');
+        const context = `${normalized ? 'controller-normalized' : 'raw'} ${viaSetSettings ? 'setSettings' : 'initialSettings'} ${JSON.stringify(geometry)}`;
+        assert.equal(modal.classList.contains('is-floating'), placed, context);
+        for (const height of [360, 600]) {
+          env.win.innerHeight = height;
+          env.win.dispatchEvent({ type: 'resize' });
+          assert.equal(modal.classList.contains('is-floating'), placed, context);
+          if (!placed) {
+            for (const prop of ['left', 'top', 'width', 'height']) {
+              assert.equal(modal.style[prop], '', `${context}: default ${prop} must remain CSS-controlled`);
+            }
+          }
+        }
+        if (placed) {
+          assert.equal(modal.style.left, `${geometry.x}px`, context);
+          assert.equal(modal.style.top, `${geometry.y}px`, context);
+          assert.equal(modal.style.height, '500px', context);
+        }
+      } finally { ui.destroy(); }
+    }
+  }
+});
+
+test('R1 L4: adding a section focuses its editor only on desktop and reveals the current row after Save or X', () => {
+  for (const mobile of [false, true]) {
+    const env = createMockEnvironment({ innerWidth: mobile ? 680 : 1440, coarse: mobile });
+    const ui = createStudioUI({ doc: env.doc, win: env.win });
+    try {
+      ui.open({ skipRefresh: true });
+      const sr = ui.shadow;
+      const pane = sr.querySelector('.ups-pane-left');
+      pane.clientHeight = 300; pane.scrollHeight = 1600; pane.clientTop = 0;
+      pane.getBoundingClientRect = () => ({ top: 150, bottom: 450 });
+      env.win.getComputedStyle = (node) => ({ overflowY: node === pane ? 'auto' : 'visible' });
+      const original = env.doc.createElement.bind(env.doc);
+      const focusOptions = [];
+      env.doc.createElement = (tag) => {
+        const node = original(tag);
+        const focus = node.focus.bind(node);
+        node.focus = (options) => { focusOptions.push(options); focus(); };
+        const rect = node.getBoundingClientRect.bind(node);
+        node.getBoundingClientRect = () => node.getAttribute('data-ups-section-id')
+          ? { top: 960, bottom: 986 } : rect();
+        node.scrollIntoView = () => assert.fail('must scroll only the owning studio pane');
+        return node;
+      };
+      sr.querySelector('[data-ups-ratio-toggle]').click();
+      for (const closeWithSave of [true, false]) {
+        sr.querySelector('[data-ups-custom-section-name]').value = closeWithSave ? '赶集日' : '维修日';
+        sr.querySelector('[data-ups-custom-section-add]').click();
+        const guidance = sr.querySelector('[data-ups-section-edit-guidance]');
+        assert.equal(guidance.focusCalls, mobile ? 0 : 1);
+        if (closeWithSave) sr.querySelector('[data-ups-section-edit-save]').click();
+        else sr.querySelector('[data-ups-submodal] .ups-icon-btn').click();
+        const id = ui.getState().settings.ui.generationSections.customSections.at(-1).id;
+        const row = sr.querySelector(`[data-ups-section-id="${id}"]`);
+        assert.equal(row.classList.contains('ups-just-added'), true);
+        assert.equal(pane.scrollTop > 0, true);
+        assert.equal(sr.querySelector('[data-ups-submodal]').hidden, true);
+      }
+      assert.equal(focusOptions.length > 0, !mobile);
+      assert.equal(focusOptions.every((options) => options.preventScroll), true);
+    } finally { ui.destroy(); }
+  }
+});
+
+test('R1 L6: successful book refresh prunes deleted selections; failed refresh and character switching preserve them', async () => {
+  const env = createMockEnvironment();
+  let names = ['街区志', '旧年鉴']; let failure = false;
+  const sent = [];
+  const ui = createStudioUI({ doc: env.doc, win: env.win,
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
+    hostApi: {
+      getActivePersona: async () => null, listPersonas: async () => [], listCharacters: async () => [],
+      getActiveCharacterContext: async () => null,
+      listWorldbooks: async () => { if (failure) throw Error('暂时断开'); return [...names]; },
+      loadCharacterWorldbookEntries: async ([name]) => ({ entries: [
+        { entryKey: `${name}:1`, bookName: name, comment: name, content: `${name}所选正文` },
+      ] }),
+      runStudioGeneration: async (payload) => { sent.push(payload); return { text: '正文' }; },
+    },
+  });
+  try {
+    await ui.open(); const sr = ui.shadow;
+    sr.querySelector('[data-ups-reference-toggle]').click();
+    const input = sr.querySelector('[data-ups-reference-search]');
+    const choose = async (name) => {
+      input.click(); input.value = name; input.dispatchEvent({ type: 'input' });
+      sr.querySelector(`[data-ups-reference-book-option="${name}"]`).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(input.value, name);
+      sr.querySelector('[data-ups-reference-entry]').click();
+    };
+    await choose('街区志'); await choose('旧年鉴');
+    const summary = sr.querySelector('.ups-reference-summary .ups-muted');
+    assert.equal(summary.textContent, '已选 2 条 · 2 本');
+    assert.match(summary.title, /街区志.*旧年鉴/);
+    await ui.selectCharacterTarget('__none__');
+    assert.equal(summary.textContent, '已选 2 条 · 2 本');
+    failure = true; await ui.refreshContext();
+    assert.equal(summary.textContent, '已选 2 条 · 2 本');
+    assert.equal(input.value, '旧年鉴');
+    failure = false; names = ['街区志'];
+    const carry = sr.querySelector('[data-ups-companion-carry-mode]');
+    carry.value = 'target_book'; carry.dispatchEvent({ type: 'change' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(summary.textContent, '已选 1 条 · 1 本');
+    assert.equal(input.value, '');
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.equal(sent.length, 1);
+    const prompt = sent[0].messages.map(({ content }) => content).join('\n');
+    assert.match(prompt, /街区志所选正文/); assert.doesNotMatch(prompt, /旧年鉴所选正文/);
+    names = []; await ui.refreshContext();
+    assert.equal(sr.querySelector('[data-ups-reference-toggle]').textContent.includes('（'), false);
+    assert.equal(summary.title, '');
+  } finally { ui.destroy(); }
+});
+
+test('R1 L2/L5/L10/L12/L13/L15: responsive CSS scopes scrolling and preserves compact controls and full labels', () => {
+  const bodyFor = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = [...SHADOW_CSS.matchAll(new RegExp(escaped + '\\s*\\{([^}]+)\\}', 'g'))];
+    assert.ok(matches.length, selector); return matches.map((match) => match[1]).join('\n');
+  };
+  for (const selector of ['.ups-body', '.ups-pane-right', '.ups-wb-list', '.ups-popover']) {
+    assert.match(bodyFor(selector), /overscroll-behavior:\s*contain/);
+  }
+  assert.match(bodyFor('.ups-sections-bar > .ups-sections-panel'), /max-height:\s*none/);
+  assert.match(bodyFor('.ups-sections-bar > .ups-sections-panel'), /overflow:\s*visible/);
+  assert.match(bodyFor('.ups-row.ups-template-row'), /flex-wrap:\s*nowrap/);
+  assert.match(bodyFor('.ups-ratio-cell .ups-chip-label'), /white-space:\s*normal/);
+  assert.match(bodyFor('.ups-section-item .ups-btn-sm'), /margin-left:\s*auto/);
+  assert.match(bodyFor('.ups-tab-panel[data-ups-tab-panel="settings"] > .ups-card'), /max-width:\s*560px/);
+  assert.match(SHADOW_CSS, /@media \(max-width: 680px\), \(pointer: coarse\)[\s\S]*\.ups-select[\s\S]*\.ups-palette-select[^{}]*\{\s*font-size: 16px/);
+  assert.match(SHADOW_CSS, /\.ups-footer:not\(\.has-status\) \.ups-footer-left\s*\{\s*display: none/);
+  assert.match(SHADOW_CSS, /@container draft-card \(max-width: 680px\)/);
 });

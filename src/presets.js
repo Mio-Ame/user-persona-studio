@@ -305,7 +305,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
         label: '前任',
         group: 'npc_network',
         defaultEnabled: false,
-        guidance: '写清交往处于什么阶段、为什么分开、现在还有没有来往，以及双方如何看待这段关系。',
+        guidance: '直接写已给的前任事实，交往阶段、分开原因、目前往来与双方态度只依已有材料。缺少的内容不猜测、不补写，不把前任的经历或态度写成玩家的。',
       }),
       Object.freeze({
         id: 'key_npc_pet',
@@ -539,7 +539,7 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
     description: '空洞吹捧气场或美貌的套话',
     scope: 'all',
     rules: Object.freeze([
-      '不写“人群中一眼认出”“生人勿近的气场”等主观吹捧，改为客观五官穿搭与平时待人的真实态度',
+      '不用缺少依据的吹捧替代人物特征；按设定写清外貌、穿搭或待人态度，不擅自抹去玩家明确设定的气质',
     ]),
     phrases: Object.freeze([
       '在人群中总能一眼被认出',
@@ -562,8 +562,8 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
     description: '用笼统的对仗或模糊修饰代替具体性格',
     scope: 'all',
     rules: Object.freeze([
-      '不用“看似A实则B”“并非…而是…”“既理性又感性”做笼统总结，直接写遇到具体事情时的选择与分寸',
-      '不滥用“某种难以言喻的”“恰到好处地”等模糊修饰词充数',
+      '不用空洞对仗代替性格事实，写清选择、行为及其成立条件；保留设定中真实存在的反差',
+      '删除没有新增信息的模糊修饰与泛泛解释，句意完整时不再补同义总结',
     ]),
     phrases: Object.freeze([
       '看似冷漠实则内心炽热',
@@ -587,7 +587,7 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
     description: '每逢特定情绪都做同一个小动作，或每轮都提同一件道具',
     scope: 'all',
     rules: Object.freeze([
-      '不规定“每次紧张必摸某物/每次说话必推眼镜”式固定小动作，改写为通用的情绪反应倾向',
+      '不将一次动作概括成逢此情境必然发生的反应；玩家明确设定的习惯及其频率照实保留',
     ]),
     phrases: Object.freeze([
       '嘴角勾起一抹意味深长的弧度',
@@ -608,8 +608,8 @@ export const BUILTIN_BANNED_CATEGORIES = Object.freeze([
     description: '写进人设里的系统命令或绝对化誓言',
     scope: 'all',
     rules: Object.freeze([
-      '人设只写人物事实与常态表现，不写“禁止NPC读心/严禁OOC”等系统命令',
-      '少写“绝不XX/死心塌地绝不回头”式死板誓言，留出随关系推进自然变化的弹性',
+      '人设正文记录人物事实，不夹带面向模型的系统命令；玩家指定保留的原句不因此改写',
+      '不从单次事件推定长期立场；按材料保留敌对、忠诚与承诺，不擅自将明确关系改成可变或中立',
     ]),
     phrases: Object.freeze([
       '禁止NPC全知',
@@ -745,7 +745,25 @@ export const QUALITATIVE_LABEL_PATTERNS = Object.freeze([
   },
 ]);
 
-export const BUILTIN_PRESET_SCHEMA_VERSION = 3;
+export const BUILTIN_PRESET_SCHEMA_VERSION = 4;
+
+// Shared by factory entries and the runtime's default whole-draft review.
+export function buildDefaultDraftAuditContent(style, backstoryShort = '按当前经历尺度处理，保留已给出的经历与关系事实') {
+  const styleCheck = style === 'objective'
+    ? '不新编玩家的台词、心理或临场反应；玩家提供的原话可留，不扩成口头禅。'
+    : style === 'refactor'
+      ? '忠于原稿事实与本次修改要求，不擅自软化或改写已给的敌对、忠诚等关系。'
+      : '言行符合人物设定与故事语境，职业、特殊属性与暗线按情境自然呈现。';
+  return [
+    '【成稿前草稿自检】',
+    `输出正文前，在顶部用唯一一组 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：发现问题时引用本稿实际存在的短语，简述改法；未发现问题就简记无误，不编造反例。`,
+    '1. 原句与归属：逐字保留玩家指定不改动的原句，不附编辑备注；核对姓名、经历、言行与关系属于谁，不混淆玩家、当前角色及其他人物。',
+    `2. 经历与写法：${backstoryShort}；${styleCheck}`,
+    '3. 重复与关系：不从一次分歧推定长期敌意，不把一次原话固化为口头禅；保留玩家明确设定。换词后结构或解释路径仍重复也要处理，不改动锁定原句。',
+    '4. 语言与版式：删除无新增信息的套话与解释，核对字数、标题与破折号要求。',
+    `闭合 \`${DRAFT_END_MARKER}\` 后直接输出一次修正后的干净正文，从 \`${CORE_SECTION_HEADER}\` 开始，不附修改总结或编辑备注。`,
+  ].join('\n');
+}
 
 export const BUILTIN_PRESET_SCHEMES = Object.freeze({
   longform_coact: {
@@ -782,7 +800,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content:
-          `顺着题材基调立住鲜活立体的人物，核对年龄与关系时间线前后自洽：将基本身份、外貌穿搭、性格行为逻辑、生活习惯与成长来处归入${CORE_SECTION_HEADER}；将当下时间点的社会处境、开场关系与相处氛围归入${SHELL_SECTION_HEADER}。`,
+          `结合题材基调写清人物的事实与行为逻辑，核对年龄与关系时间线前后自洽：将基本身份、外貌穿搭、性格行为逻辑、生活习惯与成长来处归入${CORE_SECTION_HEADER}；将当下时间点的社会处境、开场关系与相处氛围归入${SHELL_SECTION_HEADER}。`,
       },
       {
         id: 'lf_craft',
@@ -792,10 +810,10 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于本色写大白话：删去空泛形容词排比与抒情比喻，顺着人物自身走向落到具体事实、行事逻辑、目标短板与高兴/生气/动摇时的真实情绪表现；各特征短句默认省略主语，不逐句重复写 {{user}}，仅在双人互动容易产生指代歧义处点一次 {{user}} 或角色名消歧。',
-          '2. 职业与特色元素自然收放：职业习惯（如医生、画师）或特殊属性（如体弱、穿越）区分在岗与日常休闲，平时保持平稳自然状态，不用“总是/时刻/稍微…就…”写成每轮必提的固定习惯。',
+          '1. 忠于本色写大白话：顺着人物设定写具体事实、行事逻辑、目标短板与情绪表现；同一人物连续描述时可省略主语，换人或指代不清时点明名字。',
+          '2. 职业与特色元素自然收放：写清相关习惯或特殊属性在哪些情境下影响生活，区分工作状态与私下日常；按玩家设定保留实际限制。',
           '3. 心事与边界自洽如常：日常设定保持坦荡自然，不凭空编造未提及的秘密；涉及隐瞒、暗自打算或感情暗流时，清晰区分平时如常的外在表现与未说出口的真实想法，不写成刻意的慌乱怕露馅，把揭晓契机留给剧情推进。',
-          '4. 写底层思维防照抄：反应与习惯优先提炼通用思维规律；具体生活片段仅辅助理解人物思维方式，日常随情境自然反应不复刻原桥段。',
+          '4. 从事实写出思路：从具体选择与生活片段归纳人物处理事情的方式，保留事实的适用情境，不在正文附理解说明。',
         ].join('\n'),
       },
       {
@@ -815,8 +833,11 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content:
-          '行文平实耐读，剔除悬浮赋魅自夸、“看似…实则…”简历式对仗、固定五官重复微动作，以及“禁止NPC读心/严禁OOC”等系统命令。',
+        content: [
+          '1. 不从一次分歧推定长期敌意；按已有材料写关系，保留玩家明确设定的敌对、忠诚与承诺。',
+          '2. 不把一句原话或一次反应扩成口头禅或固定桥段；玩家明确指定的习惯照实保留。',
+          '3. 换字后仍在重复同一种句式结构或解释路径，也需合并或重写；不改动玩家锁定原句。',
+        ].join('\n'),
       },
       {
         id: 'lf_pacing',
@@ -827,6 +848,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '全文目标约 {{targetChars}} 字（硬性区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），必须达到 {{targetCharsMin}} 字下限且不超出 {{targetCharsMax}} 字上限：',
+          '按指定板块分配篇幅：短稿优先交代关键事实，长稿将增加的字数用于不同的事实、行为依据与情境差别，不重复解释同一特点，不用空泛修饰凑字。',
           `- ${CORE_SECTION_HEADER}：扎实展开基本身份、外貌穿搭、性格行为逻辑、生活做事习惯与成长脉络；`,
           `- ${SHELL_SECTION_HEADER}：写清当前职业处境、与 {{char}} 的现阶段关系与开场相处氛围。`,
         ].join('\n'),
@@ -840,7 +862,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           `使用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题，下方按指定板块输出简洁二级小标题（## 板块名），只写有实质内容的有效字段不留空壳；严禁深层缩进、XML 标签、代码块或寒暄说明，默认不加行首方括号可见度前缀。`,
-          '全文不使用破折号连接或插入分句，改用逗号、冒号或句号。',
+          '正文不使用破折号连接或插入分句，改用逗号、冒号或句号；玩家指定逐字保留的原句维持原文，不附括注或编辑备注。',
         ].join('\n'),
       },
       {
@@ -852,7 +874,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '【补充世界书拆分规范】',
-          `请将主档案正文精简至约 650～950 字并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在下方生成 2～4 条补充背景条目，严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
+          `主档案与补充条目合计遵守本次全文字数区间；主档案先写关键身份与当前关系，其余背景按篇幅分配到 2～4 条补充条目，不重复主档案。主档案放在上半部分，随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，下方严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
         ].join('\n'),
       },
       {
@@ -862,11 +884,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content: [
-          '【成稿前草稿自检】',
-          `输出正文前，先在顶部用唯一一个 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：核对经历尺度与故事语境、职业与小喜好收放自然无机械重复隐患、清零赋魅套话与破折号。`,
-          `闭合 \`${DRAFT_END_MARKER}\` 后换一行直接从 \`${CORE_SECTION_HEADER}\` 输出干净正文。`,
-        ].join('\n'),
+        content: buildDefaultDraftAuditContent('longform'),
       },
     ],
   },
@@ -883,7 +901,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
     targetTokens: { min: 720, max: 900 },
     tailMode: 'auto',
     prefillText: `${CORE_SECTION_HEADER}\n`,
-    triggerText: '请严格按上述客观规范与目标字数直接输出 User 人设正文，严禁写入代演台词或心理描写的句子。',
+    triggerText: '请严格按上述客观规范与目标字数直接输出 User 人设正文，不新编玩家的台词、心理或临场反应；玩家提供的原话按要求保留。',
     temperature: 0.55,
     maxTokens: 2800,
     entries: [
@@ -915,8 +933,8 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 零代演越界：不写口头禅、说话腔调模板、受惊害羞等固定反应或内心独白。',
-          '2. 职业与特殊属性背景化：职业或体弱、穿越等属性只平实记录客观事实与日常平稳常态，不写高频发作或时刻挂嘴边的表述。',
+          '1. 不替玩家临场演出：不新编台词、心理活动或情绪反应，不写要求玩家照做的说话模板；玩家提供的原话可以保留，不附编辑备注。',
+          '2. 职业与特殊属性背景化：只记录已有的职业、能力或身体限制，写清适用情境，不将明确的限制擅自弱化为平稳常态。',
           '3. 知情边界客观清晰：日常设定保持平实自然；涉及隐瞒或未公开事实时，直接写明日常外在表现自洽如常、知情范围有限，不写诱发每轮猜疑试探的露馅描写。',
         ].join('\n'),
       },
@@ -937,8 +955,11 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content:
-          '删去悬浮赋魅自夸、“看似…实则…”空话、固定重复微动作、心理抒情，以及系统命令。',
+        content: [
+          '1. 不从一次分歧推定长期态度，按材料记录既有关系，不擅自增删玩家明确设定。',
+          '2. 不将玩家提供的一句原话概括为口头禅，不将一次行为泛化为必然反应。',
+          '3. 检查换词后仍重复的句式结构或解释路径，删并无新增信息的重复；锁定原句保持原样。',
+        ].join('\n'),
       },
       {
         id: 'pc_pacing',
@@ -949,6 +970,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '全文目标约 {{targetChars}} 字（硬性区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），必须达到 {{targetCharsMin}} 字下限且不超出 {{targetCharsMax}} 字上限：',
+          '按指定板块分配篇幅：短稿保留关键事实，长稿展开不同的已知事实及适用情境；不新增玩家台词、心理或反应，不靠同义重述与空泛解释凑字。',
           `- ${CORE_SECTION_HEADER}：客观记录基本身份、外貌体态、穿搭特征、能力边界与过往事实；`,
           `- ${SHELL_SECTION_HEADER}：简明写清当前身份、日常节奏与开场既有关系共识。`,
         ].join('\n'),
@@ -962,7 +984,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           `只用 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 搭配简洁二级小标题（## 板块名），不留空壳字段，禁嵌套缩进、XML、代码块或额外说明。`,
-          '全文不使用破折号连接分句，改用逗号、冒号或句号。',
+          '正文不使用破折号连接分句，改用逗号、冒号或句号；玩家指定逐字保留的原句维持原文，不附括注或编辑备注。',
         ].join('\n'),
       },
       {
@@ -974,7 +996,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '【补充世界书拆分规范】',
-          `请将主档案正文精简至约 350～550 字并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在下方生成 2～3 条客观补充条目，严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
+          `主档案与补充条目合计遵守本次全文字数区间；主档案先写关键身份与当前关系，其余已有事实按篇幅分配到 2～3 条客观补充条目，不重复主档案。主档案放在上半部分，随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，下方严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
         ].join('\n'),
       },
       {
@@ -984,11 +1006,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content: [
-          '【成稿前草稿自检】',
-          `输出正文前，先在顶部用唯一一个 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：核对不抢话零代演边界、客观经历尺度与无套话破折号。`,
-          `闭合 \`${DRAFT_END_MARKER}\` 后换一行直接从 \`${CORE_SECTION_HEADER}\` 输出干净正文。`,
-        ].join('\n'),
+        content: buildDefaultDraftAuditContent('objective'),
       },
     ],
   },
@@ -1037,10 +1055,10 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         enabled: true,
         locked: false,
         content: [
-          '1. 忠于原稿走向拆空词：保留原稿传神的气质锚点词，顺着原稿自身的性格走向落到具体言行，仅删去无信息量的形容词堆砌与比喻套话。',
-          '2. 高频元素自然收放：删去职业或特殊体质中的“总是/时刻/稍微…就…”等绝对化高频词，区分工作与私下平稳常态，生动却不喧宾夺主。',
-          '3. 暗线与日常表象自洽：去掉刻意“生怕露馅”的诱导词，保持日常表象自然自洽；原稿无暗线时不凭空塞入秘密。',
-          '4. 具象举例提炼脑回路：先提炼底层思维规律；保留简短示例时括注仅作理解思维参考、日常随情境反应不复刻原例。',
+          '1. 忠于原稿走向：保留气质与性格本色，用原稿中的具体事实支撑人物特点；玩家指定保留的原句逐字照录，不附改写说明。',
+          '2. 职业与属性：区分原稿中工作与私下的适用情境，照实保留职业特点、身体限制及其实际频率。',
+          '3. 暗线与日常：按原稿记录秘密、外在表现和知情范围，不凭空增添秘密或暴露迹象，不改掉已经发生的暴露事实。',
+          '4. 从事实梳理思路：归纳原稿中处理事情的方式；保留的生活片段直接写作事实，不添加括注或理解说明。',
         ].join('\n'),
       },
       {
@@ -1060,8 +1078,11 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content:
-          '彻底洗去原稿混入的系统命令口号（如禁止NPC读心）、悬浮玛丽苏自夸、“看似…实则…”空话及固定重复微动作。',
+        content: [
+          '1. 不从一次分歧推定长期敌意，也不以增加弹性为由改写原稿明确的敌对、忠诚或承诺；关系变化只依本次修改要求。',
+          '2. 保留玩家指定的原句与人物归属，不将一次原话或反应扩成口头禅或固定桥段；既有习惯照实保留。',
+          '3. 不只替换词语；重复的句式结构或解释路径需合并或重写，不改动锁定原句。',
+        ].join('\n'),
       },
       {
         id: 'pr_pacing',
@@ -1072,6 +1093,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '重构全文目标约 {{targetChars}} 字（硬性区间 {{targetCharsMin}}～{{targetCharsMax}} 汉字，约 {{targetMin}}～{{targetMax}} tokens），必须达到 {{targetCharsMin}} 字下限且不超出 {{targetCharsMax}} 字上限：',
+          '按指定板块分配篇幅：短稿保留关键事实，长稿展开原稿中不同的事实、行为依据与适用情境；不补造过往，不靠重复解释与空泛修饰凑字。',
           `- ${CORE_SECTION_HEADER}：保留外貌声音、性格神韵与思维规律、适度收束的生活习惯及成长经历；`,
           `- ${SHELL_SECTION_HEADER}：聚焦当前故事下的身份日常、与 {{char}} 的现阶段关系与开场氛围。`,
         ].join('\n'),
@@ -1085,7 +1107,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           `归入 ${CORE_SECTION_HEADER} 与 ${SHELL_SECTION_HEADER} 两个一级标题配简洁二级小标题（## 板块名），只写有效字段不留空壳，禁嵌套缩进、XML、代码块或修改总结。`,
-          '全文不使用破折号连接分句，并将原稿泛滥的破折号顺手整理为逗号、冒号或短句。',
+          '将原稿中用于连接分句的破折号整理为逗号、冒号或短句；玩家指定逐字保留的原句维持原文，不附括注或编辑备注。',
         ].join('\n'),
       },
       {
@@ -1097,7 +1119,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         locked: false,
         content: [
           '【补充世界书拆分规范】',
-          `请将主档案正文精简至约 650～950 字并放在上半部分；随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，在下方拆出 2～4 条补充背景条目，严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
+          `主档案与补充条目合计遵守本次全文字数区间；主档案先保留关键身份与当前关系，其余原稿事实按篇幅拆为 2～4 条补充背景条目，不重复主档案。主档案放在上半部分，随后另起一行输出分隔标题 \`${WORLDBOOK_DIVIDER}\`，下方严格按 [条目：条目标题] / 触发方式： / 关键词： / 内容： 格式输出。`,
         ].join('\n'),
       },
       {
@@ -1107,11 +1129,7 @@ export const BUILTIN_PRESET_SCHEMES = Object.freeze({
         role: 'system',
         enabled: true,
         locked: false,
-        content: [
-          '【成稿前草稿自检】',
-          `输出正文前，先在顶部用唯一一个 \`${DRAFT_START_MARKER}\` 与 \`${DRAFT_END_MARKER}\` 包裹简短核对（控制在 120 字内）：核对原稿保留项、当前故事语境融合与无套话破折号。`,
-          `闭合 \`${DRAFT_END_MARKER}\` 后换一行直接从 \`${CORE_SECTION_HEADER}\` 输出干净正文。`,
-        ].join('\n'),
+        content: buildDefaultDraftAuditContent('refactor'),
       },
     ],
   },

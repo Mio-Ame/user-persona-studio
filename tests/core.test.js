@@ -31,7 +31,9 @@ import {
   DEFAULT_BANNED_PHRASES,
   QUALITATIVE_LABEL_PATTERNS,
   BUILTIN_PRESET_SCHEMES,
+  BUILTIN_PRESET_SCHEMA_VERSION,
 } from '../src/presets.js';
+import { BUILTIN_PRESET_HISTORY } from '../src/preset-history.js';
 
 import {
   DEFAULT_PREFILL,
@@ -311,14 +313,17 @@ test('Group 2.1: createDefaultSettings returns valid deep-isolated defaults, 3 s
   assert.equal(s1.ui.antiParrot, true);
   assert.equal(s1.ui.geometry.width, 1080);
   assert.equal(s1.ui.geometry.height, 700);
+  assert.equal(s1.ui.geometry.x, null);
+  assert.equal(s1.ui.geometry.y, null);
+  assert.deepEqual(createDefaultSettings(s1).ui.geometry, s1.ui.geometry);
   assert.equal(s1.ui.minimized, false);
   assert.equal(s1.ui.mustHaveTemplates.length, 4);
 
   // Legacy v1.0 saved scheme names & old tight maxTokens automatically migrate to clean beginner names & higher maxTokens
   const migratedLegacy = createDefaultSettings({
     schemes: [
-      { ...BUILTIN_PRESET_SCHEMES.longform_coact, name: '长文代演主力方案（含语气与反应）', maxTokens: 3200 },
-      { ...BUILTIN_PRESET_SCHEMES.player_controlled, name: '纯手控客观方案（零代演台词）', maxTokens: 1200 },
+      { ...BUILTIN_PRESET_SCHEMES.longform_coact, name: '长文代演主力方案', maxTokens: 3200 },
+      { ...BUILTIN_PRESET_SCHEMES.player_controlled, name: '纯手控精炼方案', maxTokens: 1200 },
       { ...BUILTIN_PRESET_SCHEMES.persona_refactor, name: '旧人设改写与跨卡重构', maxTokens: 3300 },
     ],
   });
@@ -517,11 +522,11 @@ test('Group 3.1: buildGenerationMessages honors bannedSendMode, backstoryMode, s
   assert.ok(res.estimatedTokens > 100);
   // Disabled taste slot is excluded
   assert.equal(res.assembledPromptText.includes('偏爱节制留白的日常互动'), false);
-  // smart_compact sends rules + first 3 representative phrases, saves tokens on tail phrases, and omits disabled persona_tic_lock
-  assert.ok(res.assembledPromptText.includes(DEFAULT_BANNED_PHRASES[0]));
+  // Compact mode sends writing rules without rehearsing built-in negative examples.
+  assert.equal(res.assembledPromptText.includes(DEFAULT_BANNED_PHRASES[0]), false);
   assert.equal(res.assembledPromptText.includes(BUILTIN_BANNED_CATEGORIES[0].phrases.at(-1)), false);
   assert.equal(res.assembledPromptText.includes('嘴角勾起一抹意味深长的弧度'), false);
-  assert.ok(res.assembledPromptText.includes('并非…而是…'));
+  assert.equal(res.assembledPromptText.includes('并非…而是…'), false);
   assert.ok(res.assembledPromptText.includes('强行制造狗血误会'));
   assert.ok(res.assembledPromptText.includes('偏爱日常甜文不虐'));
   // Backstory blank_self + balanced spotlight (no duplicate block needed) + Anti-parrot example reminder
@@ -681,8 +686,8 @@ test('内置预设去掉规则缘由，保留写法要求与已保存的自定�
   const restored = createDefaultSettings({ schemes: [previous] }).schemes.find(({ id }) => id === previous.id);
   const restoredFormat = restored.entries.find(({ id }) => id === 'lf_format');
   assert.equal(restoredFormat.enabled, false);
-  assert.equal(restoredFormat.content, '全文不使用破折号连接或插入分句，改用逗号、冒号或句号。\n用户自订：保留自然空行。');
-  assert.match(restored.entries.find(({ id }) => id === 'lf_craft').content, /不逐句重复写 \{\{user\}\}/);
+  assert.equal(restoredFormat.content, format.content, 'Player text is retained even when it contains historical wording.');
+  assert.equal(restored.entries.find(({ id }) => id === 'lf_craft').content, craft.content);
 
   const explanatoryAside = /破折号增殖|浪费\s*(?:上下文|Token)|与正文预设重复|已自动剥离/u;
   for (const scheme of Object.values(BUILTIN_PRESET_SCHEMES)) {
@@ -799,7 +804,7 @@ test('Group 4.1: exportSillyTavernPreset emits all 12 built-ins, categorized ban
   const jsonStr = JSON.stringify(exported);
   assert.ok(jsonStr.includes('偏好写实生活细节'));
   assert.ok(jsonStr.includes('不要过度戏剧化'));
-  assert.ok(jsonStr.includes(DEFAULT_BANNED_PHRASES[0]));
+  assert.equal(jsonStr.includes(DEFAULT_BANNED_PHRASES[0]), false);
 
   // Zero ST sensitiveFields & zero API/connection keys
   for (const field of ST_SENSITIVE_FIELDS) {
@@ -1990,7 +1995,7 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
 
   // blank_self suppresses backstory_growth even if enabled
   const blankDir = buildGenerationSectionDirective(defCfg, { backstoryMode: 'blank_self' });
-  assert.ok(blankDir.includes('严禁生成任何童年、少年或过往家庭经历'));
+  assert.ok(blankDir.includes('严禁编造任何未提供的童年、少年或过往家庭经历'));
   assert.equal(blankDir.includes('- 过去经历：'), false);
 
   // Opt-in intimate sections + natural layout + custom sections + companions non-duplication
@@ -2129,7 +2134,7 @@ test('Group 14.1 (R7): detectConcealmentSignals, anti-mind-reading & joint upbri
 
 test('Group 14.2: Subject-omission Token-economy rules & resolveCharacterRealName across XML/YAML/title-cards', () => {
   const promptText = buildGenerationMessages({ mode: 'create', inspiration: '画师日常' }).assembledPromptText;
-  assert.ok(promptText.includes('默认省略主语'));
+  assert.match(promptText, /同一人物连续描述时可省略主语|默认省略主语/);
   assert.equal(promptText.includes('尽量用 {{user}} 指代'), false);
 
   // 1. XML attribute extraction
@@ -2559,7 +2564,7 @@ test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldboo
     schemes: [
       {
         id: 'player_controlled',
-        name: '手控客观非抢话',
+        name: '手控客观非抢话方案',
         builtin: true,
         favorite: true,
         targetChars: 2000,
@@ -2569,14 +2574,14 @@ test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldboo
             name: '旧规则',
             role: 'system',
             enabled: true,
-            content: '完全锁死【人物本体核（跨卡可锁）】，仅重新设计【当前剧场壳（随卡可换）】',
+            content: BUILTIN_PRESET_HISTORY.player_controlled.entries.pc_context.at(-1).content,
           },
           {
             id: 'pc_pacing',
             name: '旧字数',
             role: 'system',
             enabled: false,
-            content: '约合 1300 至 2400 汉字',
+            content: BUILTIN_PRESET_HISTORY.player_controlled.entries.pc_pacing.at(-1).content,
           },
           {
             id: 'user_extra_rule',
@@ -2669,6 +2674,210 @@ test('Group 17 (v1.6.0): legacy preset migration, ±8% 2000-char range, worldboo
   });
   const distillJoined = distillMsgs.map((m) => m.content).join('\n');
   assert.ok(distillJoined.includes('句式') && distillJoined.includes('解释性语言'));
+});
+
+test('R1 preset migration refreshes only unchanged shipped text and preserves every player edit', () => {
+  const base = structuredClone(BUILTIN_PRESET_SCHEMES.longform_coact);
+  const changed = structuredClone(base);
+  changed.presetVersion = BUILTIN_PRESET_SCHEMA_VERSION - 1;
+  changed.entries.find((entry) => entry.id === 'lf_banned').content = '玩家自己的完整避雷规则';
+  changed.entries.find((entry) => entry.id === 'lf_banned').role = 'user';
+  changed.entries.find((entry) => entry.id === 'lf_banned').enabled = false;
+  changed.entries.find((entry) => entry.id === 'lf_banned').locked = true;
+  changed.entries.find((entry) => entry.id === 'lf_banned').name = '我自己的标题';
+  changed.entries.unshift(changed.entries.splice(changed.entries.findIndex((entry) => entry.id === 'lf_banned'), 1)[0]);
+  changed.entries.push({ id: 'custom_keep', name: '用户条目', content: '包含约占 20% 与“非抢话”的普通规则' });
+
+  const [result] = createDefaultSettings({ schemes: [changed] }).schemes;
+  const banned = result.entries.find((entry) => entry.id === 'lf_banned');
+  assert.equal(banned.content, '玩家自己的完整避雷规则');
+  assert.equal(banned.role, 'user');
+  assert.equal(banned.enabled, false);
+  assert.equal(banned.locked, true);
+  assert.equal(banned.name, '我自己的标题');
+  assert.equal(result.entries[0].id, 'lf_banned');
+  assert.ok(result.entries.some((entry) => entry.id === 'custom_keep'));
+  assert.equal(JSON.stringify(result.entries).includes('包含约占 20%'), true);
+
+  const stale = structuredClone(base);
+  stale.presetVersion = BUILTIN_PRESET_SCHEMA_VERSION - 1;
+  stale.entries.find((entry) => entry.id === 'lf_banned').content =
+    BUILTIN_PRESET_HISTORY.longform_coact.entries.lf_banned.at(-1).content;
+  const upgraded = createDefaultSettings({ schemes: [stale] }).schemes[0];
+  assert.equal(upgraded.entries.find((entry) => entry.id === 'lf_banned').content, BUILTIN_PRESET_SCHEMES.longform_coact.entries.find((entry) => entry.id === 'lf_banned').content);
+
+  for (const factory of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    const legacy = structuredClone(factory);
+    for (const entry of legacy.entries) {
+      entry.content = BUILTIN_PRESET_HISTORY[factory.id].entries[entry.id].at(-1).content;
+      delete entry.slotType;
+    }
+    const migrated = createDefaultSettings({ schemes: [legacy] }).schemes.find((scheme) => scheme.id === factory.id);
+    assert.deepEqual(migrated.entries.map((entry) => entry.slotType), factory.entries.map((entry) => entry.slotType));
+    legacy.entries[0].slotType = 'custom';
+    assert.equal(createDefaultSettings({ schemes: [legacy] }).schemes.find((scheme) => scheme.id === factory.id).entries[0].slotType, 'custom');
+  }
+});
+
+test('R1 native export keeps generation rules in sync when their source entry is disabled', () => {
+  for (const [schemeId, slotId, uiPreferences] of [
+    ['longform_coact', 'lf_format', { generationSections: { enabledIds: ['basic_identity', 'relation_to_char'] }, backstoryMode: 'light_vibe', spotlightMode: 'balanced' }],
+    ['longform_coact', 'lf_context', { generationSections: { enabledIds: ['basic_identity', 'relation_to_char'] }, backstoryMode: 'light_vibe', spotlightMode: 'balanced' }],
+    ['longform_coact', 'lf_pacing', { generationSections: { enabledIds: ['basic_identity', 'relation_to_char'] }, backstoryMode: 'light_vibe', spotlightMode: 'balanced', moduleRatios: { mode: 'custom', appearance: 20, personality: 30, backstory: 20, relationship: 30, private: 0 } }],
+  ]) {
+    const scheme = structuredClone(BUILTIN_PRESET_SCHEMES[schemeId]);
+    const source = scheme.entries.find((entry) => entry.id === slotId);
+    source.enabled = false;
+    const native = exportSillyTavernPreset({ scheme, uiPreferences });
+    const nativeEnabledText = native.prompts
+      .filter((prompt) => native.prompt_order[0].order.some((entry) => entry.identifier === prompt.identifier && entry.enabled))
+      .map((prompt) => prompt.content).join('\n');
+    const generated = buildGenerationMessages({ scheme, ...uiPreferences, draftAudit: false }).assembledPromptText;
+    for (const marker of ['【输出版式：', '【板块与写法】', '【经历尺度：', '【人设构成占比指导】']) {
+      if (generated.includes(marker)) assert.ok(nativeEnabledText.includes(marker), `${schemeId}/${slotId} export missing ${marker}`);
+    }
+  }
+});
+
+test('R1 migration preserves named variants, explicit custom content and intentionally empty entries', () => {
+  for (const [id, name] of [['longform_coact', '适合抢话党·我的短版'], ['player_controlled', '我自己的手控写法'], ['persona_refactor', '旧人设改写·保留版']]) {
+    const scheme = structuredClone(BUILTIN_PRESET_SCHEMES[id]);
+    scheme.name = name;
+    const entry = scheme.entries.find((item) => item.slotType === 'banned');
+    entry.content = BUILTIN_PRESET_HISTORY[id].entries[entry.id].at(-1).content;
+    entry.slotType = 'custom';
+    const migrated = createDefaultSettings({ schemes: [scheme] }).schemes.find((item) => item.id === id);
+    assert.equal(migrated.name, name);
+    assert.equal(migrated.entries.find((item) => item.id === entry.id).content, entry.content);
+    scheme.entries = [];
+    assert.deepEqual(createDefaultSettings({ schemes: [scheme] }).schemes.find((item) => item.id === id).entries, []);
+  }
+});
+
+test('R1 deleted audit slots keep fact checks and partial regeneration omits full-document quotas', () => {
+  for (const factory of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    const scheme = structuredClone(factory);
+    scheme.entries = scheme.entries.filter((entry) => entry.slotType !== 'draft_audit');
+    scheme.syncedOverrides = { draftAudit: '只检查错别字。' };
+    const generated = buildGenerationMessages({ scheme, draftAudit: true, paragraphReview: '0' });
+    const audit = generated.messages.find((message) => message.content.includes('只检查错别字。'));
+    assert.match(audit.content, /逐字保留的原句与标点/);
+    for (const subMode of ['de_label_reformat', 'core_expand', 'cross_card_adapt']) {
+      const partial = buildGenerationMessages({ scheme, targetSection: '外貌', subMode, mode: 'optimize', existingDraft: '## 外貌\n穿灰衣。', draftAudit: false });
+      assert.doesNotMatch(partial.assembledPromptText, /总字数硬约束|分段参考配额|全文目标约|重构全文目标约|目标约 \d+ 字/);
+    }
+  }
+});
+
+test('R1 objective expansion and native context fallback preserve writing boundaries', () => {
+  const scheme = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.player_controlled, 2000);
+  const ui = { backstoryMode: 'blank_self', generationSections: { enabledIds: ['basic_identity', 'appearance_outfit'] } };
+  const generated = buildGenerationMessages({ scheme, ...ui }).assembledPromptText;
+  assert.doesNotMatch(generated, /充分展开[^\n]*情绪微表现/);
+  const full = structuredClone(BUILTIN_PRESET_SCHEMES.longform_coact);
+  full.entries.find((entry) => entry.slotType === 'context').enabled = false;
+  const exported = exportSillyTavernPreset({ scheme: full, uiPreferences: { backstoryMode: 'light_vibe' } });
+  const fallback = exported.prompts.find((entry) => entry.identifier === 'ups_synced_sections').content;
+  assert.match(fallback, /人物经历与角色世界血肉融合/);
+});
+
+test('R1 examples preserve quoted facts without adding editorial notes to the persona', () => {
+  const quote = '比如遇到争执，他会先把双方的理由听完。';
+  for (const factory of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    const prompt = buildGenerationMessages({ scheme: factory, inspiration: quote, lockedCore: quote }).assembledPromptText;
+    assert.match(prompt, /示例防照抄提醒/);
+    assert.ok(prompt.includes(quote));
+    assert.doesNotMatch(prompt, /须.*括号内注明|仅作理解思维逻辑的参考例/);
+  }
+});
+
+test('R1 personal-only mode sends no built-in examples and defaults allow literal transactions and locked quotes', () => {
+  const request = buildGenerationMessages({
+    scheme: BUILTIN_PRESET_SCHEMES.longform_coact,
+    inspiration: '一名修钟师，玩家要求保留原句：欠账记纸上，不记人身上。',
+    lockedCore: '欠账记纸上，不记人身上。',
+    tasteProfile: { useBuiltinBanned: true, bannedSendMode: 'personal_only' },
+    draftAudit: false,
+  }).assembledPromptText;
+  for (const category of BUILTIN_BANNED_CATEGORIES) {
+    for (const phrase of category.phrases) assert.equal(request.includes(phrase), false, `unexpected built-in example: ${phrase}`);
+  }
+  const issues = lintPersonaText('白天核对账目。\n欠账记纸上，不记人身上。', {
+    banned: [{ text: '这笔账我记下了', note: '关系隐喻' }],
+  }).issues;
+  assert.deepEqual(issues.filter((issue) => issue.type === 'cliche_phrase'), []);
+});
+
+test('R1 quota ranges add up to the full budget even with many unequal sections', () => {
+  for (const targetChars of [200, 600, 2000]) {
+    for (const enabledIds of [
+      ['basic_identity'],
+      GENERATION_SECTION_GROUPS.flatMap((group) => group.items || group.sections || []).map((section) => section.id),
+      undefined,
+    ]) {
+      const scheme = applyTargetCharsToScheme(BUILTIN_PRESET_SCHEMES.longform_coact, targetChars);
+      const generationSections = enabledIds ? { enabledIds } : {};
+      const pacingEntry = scheme.entries.find((entry) => entry.slotType === 'pacing');
+      const prompt = resolvePresetEntryPreview(pacingEntry, scheme, {}, { generationSections });
+      const quotas = [...prompt.matchAll(/^- .+：约 (\d+)～(\d+) 字$/gm)];
+      assert.ok(quotas.length);
+      const minimum = quotas.reduce((sum, match) => sum + Number(match[1]), 0);
+      const maximum = quotas.reduce((sum, match) => sum + Number(match[2]), 0);
+      const budget = computeLengthBudget(targetChars);
+      assert.equal(minimum, budget.charsMin);
+      assert.equal(maximum, budget.charsMax);
+    }
+  }
+});
+
+test('R1 worldbook main text range scales with 600 and 2000 character totals for all presets and light modes', () => {
+  for (const factory of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    for (const chars of [600, 2000]) {
+      for (const lightMode of ['green_selective', 'blue_constant', 'smart_mix']) {
+        const scheme = applyTargetCharsToScheme(factory, chars);
+        const worldbook = buildSyncedPreferenceEntries({ scheme, ui: { dualLayer: true, worldbookLightMode: lightMode } })
+          .find((entry) => entry.key === 'dualLayer').content;
+        const range = worldbook.match(/主档案正文精简至约 (\d+)～(\d+) 字/);
+        assert.ok(range);
+        const budget = computeLengthBudget(chars);
+        assert.ok(Number(range[1]) < Number(range[2]));
+        assert.ok(Number(range[2]) < budget.charsMax);
+        assert.ok(Number(range[1]) >= budget.charsMin * 0.6);
+      }
+    }
+  }
+});
+
+test('R1 native audit budgets match the shared output budget in every check mode', () => {
+  for (const factory of Object.values(BUILTIN_PRESET_SCHEMES)) {
+    for (const targetChars of [600, 2000]) {
+      const scheme = applyTargetCharsToScheme(factory, targetChars);
+      for (const paragraphReview of ['0', '1', '2', '3', 'all', 'every']) {
+        const exported = exportSillyTavernPreset({ scheme, uiPreferences: { draftAudit: true, paragraphReview } });
+        assert.equal(exported.openai_max_tokens, draftAuditOutputBudget(scheme, paragraphReview));
+      }
+    }
+  }
+});
+
+test('R1 draft audit preserves fact checks with player-edited rules and checks the final group', () => {
+  for (const paragraphReview of ['0', 'every']) {
+    const scheme = structuredClone(BUILTIN_PRESET_SCHEMES.longform_coact);
+    scheme.syncedOverrides = { draftAudit: '只检查错别字。', paragraphAudit: '只检查错别字。' };
+    const ui = { paragraphReview, paragraphReviewInterval: 3, draftAudit: true };
+    const preview = buildSyncedPreferenceEntries({ scheme, ui }).find((entry) => entry.id === 'ups_draft_audit');
+    const generated = buildGenerationMessages({ scheme, ...ui, lockedCore: '欠账记纸上，不记人身上。' });
+    const native = exportSillyTavernPreset({ scheme, uiPreferences: ui });
+    for (const content of [preview.content, generated.messages.find((entry) => entry.content.includes('只检查错别字。')).content, native.prompts.find((entry) => entry.identifier === 'ups_draft_audit').content]) {
+      assert.match(content, /只检查错别字/);
+      assert.match(content, /逐字保留的原句与标点/);
+      assert.match(content, /分清 \{\{user\}\}、\{\{char\}\}/);
+      if (paragraphReview === 'every') {
+        assert.match(content, /末尾不足 3 段也检查一次/);
+        assert.match(content, /通查全文/);
+      }
+    }
+  }
 });
 
 // ============================================================================
@@ -2898,7 +3107,7 @@ test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion 
     DRAFT_START_MARKER
   );
 
-  // Stale v3 entries with removed phrases auto-upgrade
+  // Update exact shipped text without replacing a whole scheme based on keywords.
   const upgradedStale = createDefaultSettings({
     schemes: [
       {
@@ -2908,7 +3117,7 @@ test('Group 18.3 (R2.1 & R3.1–R3.3): preset/prompt hygiene, dynamic companion 
           {
             id: 'lf_pacing',
             slotType: 'pacing',
-            content: '切勿大幅缩水或超写，与 {{char}}（及在场亲友）相处。',
+            content: BUILTIN_PRESET_HISTORY.longform_coact.entries.lf_pacing.at(-1).content,
           },
         ],
       },
@@ -3037,7 +3246,7 @@ test('paragraph self-check replaces the full-draft prefill only when enabled', (
   assert.doesNotMatch(every.assembledPromptText, /在顶部用唯一一个/);
 
   const single = buildGenerationMessages({ ...options, draftAudit: true, paragraphReview: '0' });
-  assert.match(single.assembledPromptText, /在顶部用唯一一个/);
+  assert.match(single.assembledPromptText, /在顶部用唯一一[个组]/);
   assert.equal(single.messages.at(-1).role, 'assistant');
 
   const disabled = buildGenerationMessages({ ...options, draftAudit: false, paragraphReview: 'all' });
@@ -3105,7 +3314,8 @@ test('draft audit cadence and optional paragraph length agree in the preview, ge
   assert.equal(native.prompts.find((entry) => entry.identifier === preview.id).content, preview.content);
   assert.equal(native.prompts.some((entry) => entry.identifier === 'ups_tail_prefill'), false);
   assert.equal(native.openai_max_tokens, draftAuditOutputBudget(scheme, ui.paragraphReview));
-  assert.equal(audit({ ...ui, paragraphReview: '0' }).content, '旧版全文自检');
+  assert.match(audit({ ...ui, paragraphReview: '0' }).content, /^旧版全文自检\n/);
+  assert.match(audit({ ...ui, paragraphReview: '0' }).content, /逐字保留的原句与标点/);
   const withoutLimit = audit({ ...ui, paragraphReviewInterval: 1, paragraphMaxChars: 0 });
   assert.match(withoutLimit.content, /每个正文段落/);
   assert.doesNotMatch(withoutLimit.content, /220 字/);
@@ -3122,7 +3332,8 @@ test('selected ex-partner section is a direct instruction without referring to U
   const generation = buildGenerationMessages({ scheme, ...ui }).assembledPromptText;
   const native = exportSillyTavernPreset({ scheme, uiPreferences: ui }).prompts.map(({ content }) => content).join('\n');
   for (const text of [preview, generation, native]) {
-    assert.match(text, /- 前任：写清交往处于什么阶段、为什么分开/);
+    assert.match(text, /- 前任：直接写已给的前任事实/);
+    assert.match(text, /缺少的内容不猜测、不补写/);
     assert.doesNotMatch(text, /如有前任设定|勾选|启用的板块|当前启用|下方模块化规则/);
   }
   const off = buildGenerationSectionDirective({ enabledIds: ['basic_identity'] });
