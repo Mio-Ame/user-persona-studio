@@ -3034,3 +3034,132 @@ test('角色称呼：能清空自动主角称呼，也能编辑已选群像角�
     ui.destroy();
   }
 });
+
+
+test('generation uses only selected reference entries and checks the chosen paragraphs before output in one request', async () => {
+  const env = createMockEnvironment({ innerWidth: 390, innerHeight: 670, coarse: true });
+  const calls = [];
+  const booksRead = [];
+  const body = '## 性格\n第一段。\n\n第二段。\n\n第三段。';
+  const auditedBody = '## 性格\n<!-- draft:P1\n初稿：第一段旧写法。\n核对：引用旧写法并删除。\n净稿：第一段。\n-->\n第一段。\n\n<!-- draft:P2\n核对：引用第二段。\n-->\n第二段。\n\n第三段。';
+  const visibleChunks = [];
+  const ui = createStudioUI({
+    doc: env.doc, win: env.win, mountTarget: env.doc.body,
+    initialSettings: { ui: { injectChar: false, hostApiConfirmed: true } },
+    hostApi: {
+      getActivePersona: async () => null,
+      getActiveCharacterContext: async () => null,
+      listWorldbooks: async () => ['村妹', '镇志'],
+      loadCharacterWorldbookEntries: async ([name]) => {
+        booksRead.push(name);
+        return { entries: [
+          { entryKey: `${name}:1`, bookName: name, comment: '参考条目', content: `${name}参考原文` },
+          { entryKey: `${name}:2`, bookName: name, comment: '其他条目', content: `${name}未选原文` },
+        ] };
+      },
+      runStudioGeneration: async (payload) => {
+        calls.push(payload);
+        if (calls.length === 2) return { text: '## 性格\n<!-- draft:P1\n未完成的初稿。' };
+        if (calls.length === 3) return { text: '## 性格\n保留下来的正文。\n\n<!-- draft:P2\n未完成的初稿。' };
+        for (const chunk of ['## 性格\n<!-- dra', '## 性格\n<!-- draft:P1\n第一段旧写法。', auditedBody]) {
+          payload.onChunk?.('', chunk);
+          visibleChunks.push(ui.shadow.querySelector('[data-ups-draft]').value);
+        }
+        return { text: auditedBody };
+      },
+    },
+  });
+  try {
+    ui.open();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    const sr = ui.shadow;
+    sr.querySelector('[data-ups-reference-toggle]').click();
+    const book = sr.querySelector('[data-ups-reference-book]');
+    for (const name of ['村妹', '镇志']) {
+      book.value = name;
+      book.dispatchEvent({ type: 'change' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const checkbox = sr.querySelector('[data-ups-reference-entry]');
+      assert.equal(checkbox.checked, false);
+      checkbox.checked = true;
+      checkbox.dispatchEvent({ type: 'change' });
+    }
+    const review = sr.querySelector('[data-ups-paragraph-review]');
+    assert.equal(review.value, '0');
+    review.value = '2';
+    review.dispatchEvent({ type: 'change' });
+    sr.querySelector('[data-ups-inspiration]').value = '乡村日常';
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.deepEqual(booksRead, ['村妹', '镇志']);
+    assert.equal(calls.length, 1);
+    const prompt = calls[0].messages.map((m) => m.content).join('\n');
+    assert.match(prompt, /村妹参考原文/);
+    assert.match(prompt, /镇志参考原文/);
+    assert.doesNotMatch(prompt, /未选原文/);
+    assert.match(prompt, /前 2 个正文段落/);
+    assert.match(prompt, /<!-- draft:P1/);
+    assert.match(prompt, /逐项|逐句/);
+    assert.match(prompt, /引用/);
+    assert.doesNotMatch(prompt, /在顶部用唯一一个/);
+    assert.equal(calls[0].messages.at(-1).role, 'user');
+    assert.equal(sr.querySelector('[data-ups-draft]').value, body);
+    assert.equal(visibleChunks[0], '## 性格');
+    assert.equal(visibleChunks[1], '## 性格');
+    assert.equal(visibleChunks[2].includes('第一段旧写法'), false);
+    const debug = sr.querySelector('[data-ups-debug-audit]');
+    debug.checked = true;
+    debug.dispatchEvent({ type: 'change' });
+    sr.querySelector('[data-ups-view-draft-log]').click();
+    assert.match(sr.querySelector('[data-ups-submodal]').querySelector('textarea').value, /第一段旧写法/);
+
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sr.querySelector('[data-ups-draft]').value, body);
+
+    sr.querySelector('[data-ups-generate]').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sr.querySelector('[data-ups-draft]').value, '## 性格\n保留下来的正文。');
+    assert.equal(calls.length, 3);
+  } finally {
+    ui.destroy();
+  }
+});
+
+
+test('custom section editor saves names, guidance and order at narrow width', () => {
+  const env = createMockEnvironment({ innerWidth: 390, innerHeight: 670, coarse: true });
+  const ui = createStudioUI({
+    doc: env.doc, win: env.win, mountTarget: env.doc.body,
+    initialSettings: { ui: { generationSections: { enabledIds: ['basic_identity', 'habits_tastes'] } } },
+  });
+  try {
+    const sr = ui.shadow;
+    sr.querySelector('[data-ups-ratio-toggle]').click();
+    sr.querySelector('[data-ups-section-edit="habits_tastes"]').click();
+    const name = sr.querySelector('[data-ups-section-edit-name]');
+    const guidance = sr.querySelector('[data-ups-section-edit-guidance]');
+    assert.equal(guidance.getAttribute('spellcheck'), 'false');
+    assert.notEqual(sr.activeElement, name);
+    name.value = '一天怎么过';
+    guidance.value = '按早晚各写一条。';
+    sr.querySelector('[data-ups-section-move="up"]').click();
+    sr.querySelector('[data-ups-section-edit-save]').click();
+    let config = ui.getState().settings.ui.generationSections;
+    assert.deepEqual(config.sectionOrder.slice(0, 2), ['habits_tastes', 'basic_identity']);
+    assert.deepEqual(config.sectionOverrides.habits_tastes, { name: '一天怎么过', guidance: '按早晚各写一条。' });
+    sr.querySelector('[data-ups-section-preset="blank"]').click();
+    assert.deepEqual(ui.getState().settings.ui.generationSections.enabledIds, []);
+    sr.querySelector('[data-ups-custom-section-name]').value = '赶集';
+    sr.querySelector('[data-ups-custom-section-add]').click();
+    sr.querySelector('[data-ups-section-edit-guidance]').value = '写带什么去卖。';
+    sr.querySelector('[data-ups-section-edit-save]').click();
+    config = ui.getState().settings.ui.generationSections;
+    assert.equal(config.customSections[0].guidance, '写带什么去卖。');
+    const checkbox = sr.querySelector(`[data-ups-section-cb="${config.customSections[0].id}"]`);
+    checkbox.click();
+    assert.equal(ui.getState().settings.ui.generationSections.customSections[0].enabled, false);
+  } finally {
+    ui.destroy();
+  }
+});

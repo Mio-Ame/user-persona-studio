@@ -1173,7 +1173,7 @@ test('T1-F12-05: unchecking backstory_growth with intimate off forbids backstory
       enabledIds: ['basic_identity', 'appearance_outfit', 'personality_logic', 'relation_to_char'],
     },
   });
-  assert.ok(built.assembledPromptText.includes('成长经历与现状'));
+  assert.ok(built.assembledPromptText.includes('过去经历'));
   assert.ok(/不生成|禁止输出|严禁生成/.test(built.assembledPromptText));
   assert.ok(/亲密|成人|NSFW/.test(built.assembledPromptText));
 });
@@ -2244,7 +2244,7 @@ test('T2-F12-03: unchecking backstory_growth overrides rich_arc so unwanted chil
     { enabledIds: ['basic_identity', 'personality_logic'] },
     { backstoryMode: 'rich_arc' }
   );
-  assert.ok(dir.includes('成长经历与现状'));
+  assert.ok(dir.includes('过去经历'));
   assert.ok(/不生成|禁止/.test(dir));
 });
 
@@ -2948,7 +2948,7 @@ test('T3-18: lexicon tags + structured layout + custom section + unchecked backs
     },
   });
   assert.ok(built.assembledPromptText.includes('校园社团日常'));
-  assert.ok(built.assembledPromptText.includes('成长经历与现状'));
+  assert.ok(built.assembledPromptText.includes('过去经历'));
   assert.equal(built.assembledPromptText.includes('```'), false);
 });
 
@@ -3489,7 +3489,7 @@ test('T4-09: Scenario 9 - Pure cross-card reuse vs joint upbringing & minimal no
   await env.waitTicks(20);
   const runB = stHost.capturedGenerations.at(-1).messages.map((m) => m.content).join('\n');
   assert.ok(/跨卡复用|剥离/.test(runB));
-  assert.ok(runB.includes('成长经历与现状') && /不生成|禁止/.test(runB));
+  assert.ok(runB.includes('过去经历') && /不生成|禁止/.test(runB));
 });
 
 test('T4-10: Scenario 10 - Token headroom recovery (over -> tight -> ok) & verbatim fidelity audit', async () => {

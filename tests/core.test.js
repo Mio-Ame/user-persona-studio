@@ -1946,9 +1946,9 @@ test('Group 13.1 (Follow-up 3): GENERATION_LAYOUT_STYLES defaults to structured,
   assert.deepEqual(
     GENERATION_SECTION_GROUPS.map((g) => ({ id: g.id, label: g.label })),
     [
-      { id: 'core', label: '核心板块' },
-      { id: 'npc_network', label: '关系网与亲友' },
-      { id: 'body_traits', label: '身体特征' },
+      { id: 'core', label: '人物资料' },
+      { id: 'npc_network', label: '家人和朋友' },
+      { id: 'body_traits', label: '身体和能力' },
       { id: 'intimate', label: '亲密设定' },
     ]
   );
@@ -1981,7 +1981,7 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
   const defDirective = buildGenerationSectionDirective(defCfg, { backstoryMode: 'light_vibe' });
   assert.ok(defDirective.includes('清单版'));
   assert.equal(defDirective.includes('结构化清单版'), false);
-  assert.ok(defDirective.includes('浅层中文键值'));
+  assert.ok(defDirective.includes('每条设定单独一行'));
   assert.ok(defDirective.includes('严禁生成任何成人向、情色或越界亲密描写内容'));
   assert.equal(/\bnsfw\b/i.test(defDirective), false);
   assert.equal(defDirective.includes('```'), false);
@@ -1989,7 +1989,7 @@ test('Group 13.2: normalizeGenerationSectionsConfig & buildGenerationSectionDire
   // blank_self suppresses backstory_growth even if enabled
   const blankDir = buildGenerationSectionDirective(defCfg, { backstoryMode: 'blank_self' });
   assert.ok(blankDir.includes('当前处于纯留白模式，严禁生成任何童年、少年或过往家庭经历'));
-  assert.equal(blankDir.includes('- 成长经历与现状：'), false);
+  assert.equal(blankDir.includes('- 过去经历：'), false);
 
   // Opt-in intimate sections + natural layout + custom sections + companions non-duplication
   const customCfg = normalizeGenerationSectionsConfig({
@@ -2061,7 +2061,7 @@ test('Group 13.3: MODULE_RATIO_KEYS, normalizeModuleRatios, buildGenerationMessa
     moduleRatios: { mode: 'custom', appearance: 30, personality: 35, backstory: 10, relationship: 15, private: 10 },
   }).assembledPromptText;
   assert.ok(customPrompt.includes('【人设构成占比指导】'));
-  assert.ok(customPrompt.includes('私密心事或暗线约 10%'));
+  assert.ok(customPrompt.includes('隐藏的秘密/心思约 10%'));
 
   const settings = createDefaultSettings({
     ui: {
@@ -3018,4 +3018,65 @@ test('Group 18.4 (R4.1, R4.2, R4.5): hideDraftAudit default, narrowed nested_ind
   );
   const expGroup = grouped.find((g) => g.category === '经历与技能');
   assert.ok(expGroup && expGroup.items.some((p) => p.fullText.includes('修补古籍书画')));
+});
+
+
+test('paragraph self-check replaces the full-draft prefill only when enabled', () => {
+  const options = {
+    scheme: { ...BUILTIN_PRESET_SCHEMES.longform_coact, tailMode: 'assistant_prefill' },
+    inspiration: '在村口开修鞋铺',
+    tasteProfile: { banned: [{ text: '悬浮套话' }] },
+  };
+  const every = buildGenerationMessages({ ...options, draftAudit: true, paragraphReview: 'all' });
+  assert.match(every.assembledPromptText, /每个正文段落/);
+  assert.match(every.assembledPromptText, /悬浮套话/);
+  assert.match(every.assembledPromptText, /初稿[\s\S]*核对[\s\S]*净稿/);
+  assert.equal(every.messages.at(-1).role, 'user');
+  assert.doesNotMatch(every.assembledPromptText, /在顶部用唯一一个/);
+
+  const single = buildGenerationMessages({ ...options, draftAudit: true, paragraphReview: '0' });
+  assert.match(single.assembledPromptText, /在顶部用唯一一个/);
+  assert.equal(single.messages.at(-1).role, 'assistant');
+
+  const disabled = buildGenerationMessages({ ...options, draftAudit: false, paragraphReview: 'all' });
+  assert.doesNotMatch(disabled.assembledPromptText, /逐段草稿自检|在顶部用唯一一个/);
+  assert.equal(createDefaultSettings({ ui: { paragraphReview: 'unknown' } }).ui.paragraphReview, '0');
+});
+
+test('paragraph audit blocks strip cleanly for streaming, final text and exported regex', () => {
+  const partial = '## 习惯\n已经定稿。\n\n<!-- draft:P2\n这一段还在检查。';
+  const stripped = stripDraftAuditBlocks(partial, { streaming: true });
+  assert.equal(stripped.cleanText, '## 习惯\n已经定稿。');
+  assert.equal(stripped.hasUnclosedDraft, true);
+  const raw = '## 习惯\n<!-- draft:P1\n有禁词的初稿。\n-->\n已经定稿。\n\n<!-- 自检：引用原句 -->\n第二段定稿。';
+  const clean = '## 习惯\n已经定稿。\n\n第二段定稿。';
+  assert.equal(normalizeFlatLayout(raw), clean);
+  const pattern = exportDraftStripRegexScript().findRegex;
+  const end = pattern.lastIndexOf('/');
+  assert.equal(raw.replace(new RegExp(pattern.slice(1, end), pattern.slice(end + 1)), ''), clean);
+});
+
+test('local banned phrase check reports matches in separate paragraphs', () => {
+  const { issues } = lintPersonaText('不想要的句式。\n\n这里又用了不想要的句式。', {
+    useBuiltinBanned: false,
+    banned: [{ text: '不想要的句式' }],
+  });
+  assert.deepEqual(issues.filter((issue) => issue.term === '不想要的句式').map((issue) => issue.line), [1, 3]);
+});
+
+
+test('edited and custom sections share one order and keep their writing instructions', () => {
+  const config = {
+    enabledIds: ['basic_identity', 'habits_tastes'],
+    sectionOverrides: { basic_identity: { name: '村里的叫法', guidance: '写赶集时摊主用的叫法。' } },
+    customSections: [{ id: 'custom_markets', name: '逢集', guidance: '按集期各写一条。' },
+      { id: 'custom_unused', name: '隐藏的板块', guidance: '此处不应发送', enabled: false }],
+    sectionOrder: ['custom_markets', 'basic_identity', 'habits_tastes'],
+  };
+  const normalized = normalizeGenerationSectionsConfig(config);
+  assert.deepEqual(normalizeGenerationSectionsConfig(normalized), normalized);
+  const prompt = buildGenerationMessages({ inspiration: '村里的修鞋匠', generationSections: normalized }).assembledPromptText;
+  assert.match(prompt, /逢集：按集期各写一条。\n- 村里的叫法：写赶集时摊主用的叫法。/);
+  assert.match(prompt, /逢集：约 [^\n]*\n- 村里的叫法：约/);
+  assert.doesNotMatch(prompt, /隐藏的板块|此处不应发送/);
 });

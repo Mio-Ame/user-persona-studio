@@ -173,7 +173,7 @@ export const GENERATION_LAYOUT_STYLES = Object.freeze([
   Object.freeze({
     id: 'structured',
     label: '清单版',
-    description: '浅层中文分栏与平实白话，条目直观好检索',
+    description: '每条设定单独一行',
   }),
   Object.freeze({
     id: 'natural',
@@ -185,7 +185,7 @@ export const GENERATION_LAYOUT_STYLES = Object.freeze([
 export const GENERATION_SECTION_GROUPS = Object.freeze([
   Object.freeze({
     id: 'core',
-    label: '核心板块',
+    label: '人物资料',
     defaultExpanded: true,
     items: Object.freeze([
       Object.freeze({
@@ -193,55 +193,90 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
         label: '基本身份',
         group: 'core',
         defaultEnabled: true,
-        guidance: '交代姓名、常用称呼或小名、年龄、性别、身高及当前身份定位；用平实白话直写，贴合世界观时代背景自适应子项，不留空壳占位格。',
+        guidance: '交代人物是谁、别人怎么叫、现在是什么身份。年龄等资料按故事需要补充。',
       }),
       Object.freeze({
         id: 'appearance_outfit',
         label: '外貌与穿搭',
         group: 'core',
         defaultEnabled: true,
-        guidance: '写清发色发型、眉眼五官、肤色气质、体态比例与辨识特征，以及贴合当下题材的日常或特定场合穿搭；不用空泛吹捧套话。',
+        guidance: '挑几处一眼能辨认的外貌特征，写清平时或特定场合怎么穿。',
       }),
       Object.freeze({
         id: 'personality_logic',
-        label: '性格与行为逻辑',
+        label: '性格与做事方式',
         group: 'core',
         defaultEnabled: true,
-        guidance: '用大白话写清核心性情、感情与亲密态度、高兴/生气/动摇时的情绪表现、行事原则、个人目标与短板弱点，不堆砌比喻句。',
+        guidance: '写平时怎么做决定，遇到意见不合或被为难时怎么处理。给一个具体表现，不堆性格标签。',
       }),
       Object.freeze({
         id: 'habits_tastes',
-        label: '生活与做事习惯',
+        label: '日常习惯',
         group: 'core',
         defaultEnabled: true,
-        guidance: '写出日常起居作息、工作或学业习惯、擅长技能与盲区、喜好与雷点；琐碎偏好点到即止，并按人物性格自然呈现外显度。',
+        guidance: '写平时如何过一天，常做什么、喜欢什么，哪些小习惯只有熟人才知道。',
       }),
       Object.freeze({
         id: 'backstory_growth',
-        label: '成长经历与现状',
+        label: '过去经历',
         group: 'core',
         defaultEnabled: true,
-        guidance: '让家庭氛围、过往履历或与主角色的交集顺着当前世界观与时间线自然生长，长出真实血肉，不编造悬浮狗血创伤。',
+        guidance: '写对现在有实际影响的一两件旧事。按玩家允许的范围补充经历。',
       }),
       Object.freeze({
         id: 'career_finance',
-        label: '职业与经济状况',
+        label: '工作与生计',
         group: 'core',
         defaultEnabled: true,
-        guidance: '写清职业或学业分工、经济来源、消费观与社会处境；古风或架空题材自动采用对应时代定位，不硬套现代商务词汇。',
+        guidance: '写在做什么工作或学什么，靠什么生活。钱和开销只在故事需要时写。',
       }),
       Object.freeze({
         id: 'relation_to_char',
         label: '与当前角色的关系',
         group: 'core',
         defaultEnabled: true,
-        guidance: '写明与主角色的相识渊源、相识时间线、当前关系阶段与相处张力；仅在双人互动容易产生指代歧义时点一次 {{user}} 或角色真名。',
+        guidance: '写清两人怎么认识，现在怎么来往，有哪些已经发生的事。不预定之后的感情走向。',
+      }),
+      Object.freeze({
+        id: 'speech_habits',
+        label: '说话方式',
+        group: 'core',
+        defaultEnabled: false,
+        guidance: '写在熟人和陌生人面前怎么开口，哪些话会直说，哪些事习惯避而不谈。',
+      }),
+      Object.freeze({
+        id: 'home_surroundings',
+        label: '住处与常去的地方',
+        group: 'core',
+        defaultEnabled: false,
+        guidance: '写住在什么地方，平时常去哪里，各处与生活有什么关系。',
+      }),
+      Object.freeze({
+        id: 'skills_limits',
+        label: '擅长与不擅长',
+        group: 'core',
+        defaultEnabled: false,
+        guidance: '写实际能做哪些事，遇到什么会犯难，能力有何限制。',
+      }),
+      Object.freeze({
+        id: 'personal_goals',
+        label: '正在做的事和打算',
+        group: 'core',
+        defaultEnabled: false,
+        guidance: '写近期在做什么、为什么做、接下来打算怎么做。不替玩家做决定。',
+      }),
+      Object.freeze({
+        id: 'unspoken_matters',
+        label: '隐藏的秘密/心思',
+        group: 'core',
+        defaultEnabled: false,
+        guidance: '只写玩家给出的心事、秘密或打算。说清谁知道，不编造秘密或规定别人一定会察觉。',
       }),
     ]),
   }),
   Object.freeze({
     id: 'npc_network',
-    label: '关系网与亲友',
+    label: '家人和朋友',
     defaultExpanded: false,
     items: Object.freeze([
       Object.freeze({
@@ -283,7 +318,7 @@ export const GENERATION_SECTION_GROUPS = Object.freeze([
   }),
   Object.freeze({
     id: 'body_traits',
-    label: '身体特征',
+    label: '身体和能力',
     defaultExpanded: false,
     items: Object.freeze([
       Object.freeze({
@@ -424,7 +459,7 @@ export const SPOTLIGHT_MODES = Object.freeze([
   },
   {
     id: 'featured',
-    label: '突出设定暗线',
+    label: '突出人物的长期打算',
     description: '适合专门想玩职场日常、特殊体质拉扯或身份试探的局，提高职业习惯、特殊设定与伏笔线索的比重。',
   },
   {

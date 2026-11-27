@@ -68,6 +68,7 @@ import {
   buildCompanionWorldbookEntries,
   normalizeModuleRatios,
   normalizeGenerationSectionsConfig,
+  getConfiguredGenerationSections,
   resolvePresetEntryPreview,
   buildSyncedPreferenceEntries,
 } from './core.js';
@@ -712,6 +713,7 @@ export function createStudioUI(options = {}) {
     companionCarryMode: settings.ui.companionCarryMode || 'persona_book',
     companionTargetBook: settings.ui.companionTargetBook || '',
     availableWorldbooks: [],
+    referenceEntriesByBook: new Map(),
     generationHistory: readHistoryFromStorage(),
     expandedEntryIds: new Set(),
     stackSearchQuery: '',
@@ -1036,6 +1038,18 @@ export function createStudioUI(options = {}) {
   const injectCharCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.injectChar });
   const dualLayerCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.dualLayer });
   const draftAuditCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.draftAudit });
+  const paragraphReviewSelect = createEl(doc, 'select', {
+    className: 'ups-select',
+    attrs: { 'data-ups-paragraph-review': 'true' },
+  }, [
+    ['0', '全文一次'], ['1', '前 1 段'], ['2', '前 2 段'], ['3', '前 3 段'], ['all', '每段一次'],
+  ].map(([value, text]) => createEl(doc, 'option', { value, text })));
+  paragraphReviewSelect.value = settings.ui.paragraphReview;
+  paragraphReviewSelect.disabled = !state.draftAudit;
+  paragraphReviewSelect.addEventListener('change', () => {
+    settings.ui.paragraphReview = paragraphReviewSelect.value;
+    persistSettings();
+  }, { signal });
   const antiParrotCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.antiParrot });
   const visibilityTagsCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: state.visibilityTags });
   const debugAuditCheckbox = createEl(doc, 'input', { type: 'checkbox', checked: settings.ui.debugAudit, attrs: { 'data-ups-debug-audit': 'true' } });
@@ -1062,7 +1076,11 @@ export function createStudioUI(options = {}) {
       ]),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         draftAuditCheckbox,
-        createEl(doc, 'span', { text: '生成前自检' }),
+        createEl(doc, 'span', { text: '草稿自检' }),
+      ]),
+      createEl(doc, 'label', { className: 'ups-row' }, [
+        createEl(doc, 'span', { text: '自检范围' }),
+        paragraphReviewSelect,
       ]),
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         antiParrotCheckbox,
@@ -1255,7 +1273,7 @@ export function createStudioUI(options = {}) {
     'select',
     {
       className: 'ups-select',
-      attrs: { 'data-ups-spotlight': 'true', 'aria-label': '职业与暗线伏笔戏份' },
+      attrs: { 'data-ups-spotlight': 'true', 'aria-label': '设定在故事里的分量' },
     },
     SPOTLIGHT_MODES.map((m) => createEl(doc, 'option', { value: m.id, text: m.label }))
   );
@@ -1342,9 +1360,10 @@ export function createStudioUI(options = {}) {
     GENERATION_LAYOUT_STYLES.map((st) => createEl(doc, 'option', { value: st.id, text: st.label }))
   );
   const sectionPresetBtns = [
-    { id: 'minimal', label: '精简核心' },
-    { id: 'standard', label: '日常标准' },
-    { id: 'full', label: '完整详尽' },
+    { id: 'minimal', label: '简版' },
+    { id: 'standard', label: '日常' },
+    { id: 'full', label: '详细' },
+    { id: 'blank', label: '从空白开始' },
   ].map((p) =>
     createEl(doc, 'button', {
       type: 'button',
@@ -1358,7 +1377,7 @@ export function createStudioUI(options = {}) {
     type: 'text',
     className: 'ups-input ups-input-sm',
     style: { flex: '1 1 140px' },
-    placeholder: '自定义板块名称（如：修仙灵根与境界）',
+    placeholder: '新板块名称',
     attrs: { 'data-ups-custom-section-name': 'true', 'aria-label': '自定义板块名称' },
   });
   const customSectionAddBtn = createEl(doc, 'button', {
@@ -1368,7 +1387,6 @@ export function createStudioUI(options = {}) {
     attrs: { 'data-ups-custom-section-add': 'true' },
   });
   setButtonIconLabel(doc, customSectionAddBtn, '添加板块', ICON_PATHS.plus, { iconFirst: true });
-  const customSectionsListEl = createEl(doc, 'div', { className: 'ups-chip-group' });
   const pureReuseCheckbox = createEl(doc, 'input', {
     type: 'checkbox',
     checked: state.pureCrossCardReuse,
@@ -1380,7 +1398,7 @@ export function createStudioUI(options = {}) {
     { key: 'personality', label: '性格' },
     { key: 'backstory', label: '经历' },
     { key: 'relationship', label: '关系' },
-    { key: 'private', label: '私密暗线' },
+    { key: 'private', label: '隐藏的秘密/心思' },
   ];
   const ratioInputsMap = new Map();
   const ratioRowEl = createEl(
@@ -1416,7 +1434,6 @@ export function createStudioUI(options = {}) {
       ]),
       sectionGroupsContainerEl,
       createEl(doc, 'div', { className: 'ups-row' }, [customSectionNameInput, customSectionAddBtn]),
-      customSectionsListEl,
       createEl(doc, 'label', { className: 'ups-check-row' }, [
         pureReuseCheckbox,
         createEl(doc, 'span', { text: '写成跨卡通用人设' }),
@@ -1435,7 +1452,7 @@ export function createStudioUI(options = {}) {
     className: 'ups-textarea',
     rows: 4,
     placeholder:
-      '写一两句你想演的人设、关系或暗线（如：刑侦搭档日常，表面散漫实则办案极稳；或同居日常，外冷内热的青年画师）……',
+      '写一两句你想演的人设、关系或隐藏的秘密/心思（如：刑侦搭档日常，表面散漫实则办案极稳；或同居日常，外冷内热的青年画师）……',
     attrs: { 'data-ups-inspiration': 'true' },
   });
 
@@ -1569,7 +1586,7 @@ export function createStudioUI(options = {}) {
   const mustHavesAInput = createEl(doc, 'input', {
     type: 'text',
     className: 'ups-input',
-    placeholder: '选填：必带的外貌、习惯、职业或私密伏笔细节',
+    placeholder: '选填：必带的外貌、习惯、职业或想保留的秘密',
     attrs: { 'data-ups-must-haves': 'true' },
   });
   const toggleMustTrayBtn = createEl(doc, 'button', {
@@ -2220,6 +2237,104 @@ export function createStudioUI(options = {}) {
     ]
   );
 
+  const referenceToggle = createEl(doc, 'button', {
+    type: 'button', className: 'ups-btn-sm',
+    attrs: { 'data-ups-reference-toggle': 'true', 'aria-expanded': 'false' },
+  });
+  const referenceBookSelect = createEl(doc, 'select', {
+    className: 'ups-select',
+    attrs: { 'data-ups-reference-book': 'true' },
+  });
+  const referenceClear = createEl(doc, 'button', {
+    type: 'button', className: 'ups-btn-sm', text: '清除全部选择', hidden: true,
+  });
+  const referenceCount = createEl(doc, 'div', { className: 'ups-muted' });
+  const referenceList = createEl(doc, 'div', { className: 'ups-wb-list' });
+  const referenceBody = createEl(doc, 'div', { className: 'ups-wb-body', hidden: true }, [
+    createEl(doc, 'label', { className: 'ups-row' }, [
+      createEl(doc, 'span', { text: '选择世界书' }), referenceBookSelect,
+    ]),
+    createEl(doc, 'div', { className: 'ups-row' }, [referenceCount, referenceClear]),
+    referenceList,
+  ]);
+  const referencePanel = createEl(doc, 'div', { className: 'ups-char-box' }, [referenceToggle, referenceBody]);
+
+  function syncReferenceSelection() {
+    const books = [...state.referenceEntriesByBook].map(([name, entries]) => `${name} ${entries.size} 条`);
+    const count = [...state.referenceEntriesByBook.values()].reduce((total, entries) => total + entries.size, 0);
+    setDisclosureLabel(doc, referenceToggle, count ? `参考世界书（${count} 条）` : '参考世界书', !referenceBody.hidden);
+    referenceCount.textContent = books.length ? books.join('、') : '勾选要发送给 AI 的条目。';
+    referenceClear.hidden = !count;
+  }
+
+  function syncReferenceBookOptions() {
+    const previous = referenceBookSelect.value;
+    referenceBookSelect.replaceChildren(
+      createEl(doc, 'option', { value: '', text: state.availableWorldbooks.length ? '请选择' : '暂无可用世界书' }),
+      ...state.availableWorldbooks.map((name) => createEl(doc, 'option', { value: name, text: name })),
+    );
+    referenceBookSelect.value = state.availableWorldbooks.includes(previous) ? previous : '';
+    if (!referenceBookSelect.value) referenceList.replaceChildren();
+  }
+
+  let referenceRequest = 0;
+  async function renderReferenceEntries() {
+    const request = ++referenceRequest;
+    const name = referenceBookSelect.value;
+    if (!name) {
+      referenceList.replaceChildren();
+      return;
+    }
+    referenceList.textContent = '正在读取条目…';
+    try {
+      const { entries } = await hostApi.loadCharacterWorldbookEntries([name]);
+      if (request !== referenceRequest || signal.aborted || referenceBookSelect.value !== name) return;
+      const previous = state.referenceEntriesByBook.get(name);
+      const selected = new Map(entries.filter((entry) => previous?.has(entry.entryKey)).map((entry) => [entry.entryKey, entry]));
+      if (selected.size) state.referenceEntriesByBook.set(name, selected);
+      else state.referenceEntriesByBook.delete(name);
+      referenceList.replaceChildren(...entries.map((entry) => {
+        const checkbox = createEl(doc, 'input', {
+          type: 'checkbox', checked: selected.has(entry.entryKey),
+          attrs: { 'data-ups-reference-entry': entry.entryKey },
+        });
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) selected.set(entry.entryKey, entry);
+          else selected.delete(entry.entryKey);
+          if (selected.size) state.referenceEntriesByBook.set(name, selected);
+          else state.referenceEntriesByBook.delete(name);
+          syncReferenceSelection();
+        }, { signal });
+        return createEl(doc, 'label', { className: 'ups-wb-item' }, [
+          checkbox,
+          createEl(doc, 'span', { className: 'ups-wb-item-meta' }, [
+            createEl(doc, 'span', { className: 'ups-wb-item-title', text: entry.comment }),
+            createEl(doc, 'span', { className: 'ups-wb-item-preview', text: String(entry.content || '').slice(0, 96) }),
+          ]),
+        ]);
+      }));
+      if (!entries.length) referenceList.textContent = '未读取到条目';
+      syncReferenceSelection();
+    } catch {
+      if (request !== referenceRequest || signal.aborted || referenceBookSelect.value !== name) return;
+      referenceList.textContent = '读取失败，请重新选择世界书';
+    }
+  }
+
+  referenceToggle.addEventListener('click', () => {
+    referenceBody.hidden = !referenceBody.hidden;
+    syncReferenceSelection();
+  }, { signal });
+  referenceBookSelect.addEventListener('change', () => void renderReferenceEntries(), { signal });
+  referenceClear.addEventListener('click', () => {
+    state.referenceEntriesByBook.clear();
+    referenceBookSelect.value = '';
+    void renderReferenceEntries();
+    syncReferenceSelection();
+  }, { signal });
+  syncReferenceBookOptions();
+  syncReferenceSelection();
+
   // Optional Collapsible Cross-Card Companion Section
   const companionBudgetBadgeEl = createEl(doc, 'span', {
     className: 'ups-badge',
@@ -2304,6 +2419,7 @@ export function createStudioUI(options = {}) {
           syncHostBtn,
         ]),
         charAdaptBoxEl,
+        referencePanel,
       ]),
       modeAPanel,
       modeBPanel,
@@ -2330,7 +2446,7 @@ export function createStudioUI(options = {}) {
             backstorySelect,
           ]),
           createEl(doc, 'div', { className: 'ups-field' }, [
-            createEl(doc, 'label', { className: 'ups-label', text: '日常与暗线重心' }),
+            createEl(doc, 'label', { className: 'ups-label', text: '设定在故事里的分量' }),
             spotlightSelect,
           ]),
         ]),
@@ -3205,7 +3321,7 @@ export function createStudioUI(options = {}) {
     const cfg = normalizeGenerationSectionsConfig(state.generationSections);
     const layoutObj =
       GENERATION_LAYOUT_STYLES.find((s) => s.id === cfg.layoutStyle) || GENERATION_LAYOUT_STYLES[0];
-    const totalCount = cfg.enabledIds.length + (cfg.customSections?.length || 0);
+    const totalCount = getConfiguredGenerationSections(cfg, { backstoryMode: state.backstoryMode }).length;
     sectionsSummaryEl.textContent = `${layoutObj.label} · 已选 ${totalCount} 个板块${
       state.pureCrossCardReuse ? ' · 通用跨卡' : ''
     }`;
@@ -3227,65 +3343,143 @@ export function createStudioUI(options = {}) {
       btn.classList.toggle('is-active', cfg.presetId === pid);
     }
 
-    const enabledSet = new Set(cfg.enabledIds);
-    const groupNodes = GENERATION_SECTION_GROUPS.map((grp) => {
-      const itemNodes = grp.items.map((item) => {
-        const cb = createEl(doc, 'input', {
-          type: 'checkbox',
-          checked: enabledSet.has(item.id),
-          attrs: { 'data-ups-section-cb': item.id },
-        });
-        cb.addEventListener('change', () => {
-          const curSet = new Set(state.generationSections.enabledIds);
-          if (cb.checked) curSet.add(item.id);
-          else curSet.delete(item.id);
-          state.generationSections = normalizeGenerationSectionsConfig({
-            ...state.generationSections,
-            presetId: 'custom',
-            enabledIds: Array.from(curSet),
-          });
-          settings.ui.generationSections = state.generationSections;
-          for (const b of sectionPresetBtns) b.classList.remove('is-active');
-          syncSectionsSummary();
-          if (state.activeTab === 'presets') renderSyncedEntriesBlock();
-          persistSettings();
-        });
-        return createEl(doc, 'label', { className: 'ups-check-row ups-section-item' }, [
-          cb,
-          createEl(doc, 'span', { text: item.label }),
-        ]);
+    const items = getConfiguredGenerationSections(cfg, { includeDisabled: true });
+    const active = items.filter((item) => item.enabled);
+    const available = items.filter((item) => !item.enabled);
+    function renderRow(item) {
+      const checkbox = createEl(doc, 'input', {
+        type: 'checkbox', checked: item.enabled,
+        attrs: { 'data-ups-section-cb': item.id },
       });
-      return createEl(doc, 'div', { className: 'ups-section-group-box' }, [
-        createEl(doc, 'div', { className: 'ups-chip-label', text: grp.label }),
-        createEl(doc, 'div', { className: 'ups-section-items-grid' }, itemNodes),
+      checkbox.addEventListener('change', () => {
+        const enabledIds = new Set(state.generationSections.enabledIds);
+        if (item.group) {
+          if (checkbox.checked) enabledIds.add(item.id);
+          else enabledIds.delete(item.id);
+        }
+        updateSections({
+          presetId: 'custom',
+          enabledIds: [...enabledIds],
+          customSections: state.generationSections.customSections.map((section) =>
+            section.id === item.id ? { ...section, enabled: checkbox.checked } : section
+          ),
+        });
+      });
+      const edit = createEl(doc, 'button', {
+        type: 'button', className: 'ups-btn-sm', text: '编辑',
+        attrs: { 'data-ups-section-edit': item.id, 'aria-label': `编辑${item.name}` },
+      });
+      edit.addEventListener('click', () => openSectionEditor(item));
+      return createEl(doc, 'div', { className: 'ups-section-item' }, [
+        createEl(doc, 'label', { className: 'ups-check-row' }, [checkbox, createEl(doc, 'span', { text: item.name })]),
+        edit,
       ]);
+    }
+    const otherGroups = [...GENERATION_SECTION_GROUPS, { id: undefined, label: '自定义' }].flatMap((group) => {
+      const rows = available.filter((item) => item.group === group.id).map(renderRow);
+      if (!rows.length) return [];
+      const groupId = group.id || 'custom';
+      const wasOpen = sectionGroupsContainerEl.querySelector(`[data-ups-section-group="${groupId}"]`)?.open;
+      return [createEl(doc, 'details', {
+        className: 'ups-section-group-box', open: Boolean(wasOpen),
+        attrs: { 'data-ups-section-group': groupId },
+      }, [
+        createEl(doc, 'summary', { className: 'ups-section-group-title', text: group.label }),
+        createEl(doc, 'div', { className: 'ups-section-items-grid' }, rows),
+      ])];
     });
-    sectionGroupsContainerEl.replaceChildren(...groupNodes);
+    sectionGroupsContainerEl.replaceChildren(
+      createEl(doc, 'div', { className: 'ups-section-group-title', text: '已选板块' }),
+      active.length
+        ? createEl(doc, 'div', { className: 'ups-section-items-grid ups-section-selected' }, active.map(renderRow))
+        : createEl(doc, 'div', { className: 'ups-muted', text: '还没选板块' }),
+      ...otherGroups,
+    );
+  }
 
-    const customPills = (cfg.customSections || []).map((cs) => {
-      const delBtn = createEl(doc, 'button', {
-        type: 'button',
-        className: 'ups-tpl-del',
-        title: `移除自定义板块「${cs.name}」`,
-        attrs: { 'aria-label': `移除自定义板块 ${cs.name}` },
-      }, [createSvgIcon(doc, ICON_PATHS.close, 12)]);
-      delBtn.addEventListener('click', () => {
-        state.generationSections = normalizeGenerationSectionsConfig({
-          ...state.generationSections,
-          customSections: state.generationSections.customSections.filter((x) => x.id !== cs.id),
-        });
-        settings.ui.generationSections = state.generationSections;
-        renderSectionsPanel();
-        if (state.activeTab === 'presets') renderSyncedEntriesBlock();
-        persistSettings();
-        setStatus(`已移除自定义板块：${cs.name}`);
-      });
-      return createEl(doc, 'span', { className: 'ups-tpl-pill' }, [
-        createEl(doc, 'span', { className: 'ups-tpl-apply', text: cs.name }),
-        delBtn,
-      ]);
+  function updateSections(changes) {
+    state.generationSections = normalizeGenerationSectionsConfig({ ...state.generationSections, ...changes });
+    settings.ui.generationSections = state.generationSections;
+    renderSectionsPanel();
+    if (state.activeTab === 'presets') renderSyncedEntriesBlock();
+    persistSettings();
+  }
+
+  function openSectionEditor(item) {
+    const cfg = state.generationSections;
+    const activeIds = getConfiguredGenerationSections(cfg).map(({ id }) => id);
+    const position = activeIds.indexOf(item.id);
+    const nameField = createEl(doc, 'input', {
+      type: 'text', className: 'ups-input', value: item.name,
+      attrs: { maxlength: 30, 'data-ups-section-edit-name': 'true' },
     });
-    customSectionsListEl.replaceChildren(...customPills);
+    const guidanceField = createEl(doc, 'textarea', {
+      className: 'ups-textarea', rows: 5, value: item.guidance,
+      placeholder: '例如只写赶集时的称呼和卖什么',
+      attrs: { maxlength: 600, 'data-ups-section-edit-guidance': 'true' },
+    });
+    const saveBtn = createEl(doc, 'button', {
+      type: 'button', className: 'ups-btn ups-btn-primary', text: '保存',
+      attrs: { 'data-ups-section-edit-save': 'true' },
+    });
+    const removeBtn = createEl(doc, 'button', {
+      type: 'button', className: 'ups-btn-ghost', text: item.group ? '恢复默认' : '删除板块',
+    });
+    const orderRow = createEl(doc, 'div', { className: 'ups-row', hidden: position < 0 });
+    let newPosition = position;
+    const positionLabel = createEl(doc, 'span', { text: `第 ${position + 1} 个` });
+    const upBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-sm', text: '上移', attrs: { 'data-ups-section-move': 'up' } });
+    const downBtn = createEl(doc, 'button', { type: 'button', className: 'ups-btn-sm', text: '下移', attrs: { 'data-ups-section-move': 'down' } });
+    function syncPosition() {
+      positionLabel.textContent = `第 ${newPosition + 1} 个`;
+      upBtn.disabled = newPosition <= 0;
+      downBtn.disabled = newPosition >= activeIds.length - 1;
+    }
+    upBtn.addEventListener('click', () => { newPosition -= 1; syncPosition(); });
+    downBtn.addEventListener('click', () => { newPosition += 1; syncPosition(); });
+    orderRow.replaceChildren(positionLabel, upBtn, downBtn);
+    syncPosition();
+    saveBtn.addEventListener('click', () => {
+      const name = nameField.value.trim();
+      if (!name) {
+        setStatus('请输入板块名称', 'warn');
+        return;
+      }
+      if (getConfiguredGenerationSections(cfg, { includeDisabled: true }).some((section) => section.id !== item.id && section.name === name)) {
+        setStatus('已有同名板块', 'warn');
+        return;
+      }
+      const guidance = guidanceField.value.trim();
+      const changes = { presetId: 'custom' };
+      if (position >= 0 && newPosition !== position) {
+        activeIds.splice(position, 1);
+        activeIds.splice(newPosition, 0, item.id);
+        changes.sectionOrder = [...activeIds, ...cfg.sectionOrder.filter((id) => !activeIds.includes(id))];
+      }
+      if (item.group) changes.sectionOverrides = { ...cfg.sectionOverrides, [item.id]: { name, guidance } };
+      else changes.customSections = cfg.customSections.map((section) => section.id === item.id ? { ...section, name, guidance } : section);
+      updateSections(changes);
+      closeSubmodal();
+    });
+    removeBtn.addEventListener('click', () => {
+      if (item.group) {
+        const sectionOverrides = { ...cfg.sectionOverrides };
+        delete sectionOverrides[item.id];
+        updateSections({ sectionOverrides });
+      } else {
+        updateSections({ customSections: cfg.customSections.filter((section) => section.id !== item.id) });
+      }
+      closeSubmodal();
+    });
+    openSubmodal({
+      title: '编辑板块',
+      bodyNodes: [
+        createEl(doc, 'label', { className: 'ups-field' }, [createEl(doc, 'span', { text: '板块名称' }), nameField]),
+        createEl(doc, 'label', { className: 'ups-field' }, [createEl(doc, 'span', { text: '写作要求' }), guidanceField]),
+        orderRow,
+      ],
+      footerNodes: [removeBtn, saveBtn],
+    });
   }
 
   function syncTargetBookSelectOptions() {
@@ -4519,7 +4713,10 @@ export function createStudioUI(options = {}) {
     }`;
 
     const issueNodes = lint.issues.slice(0, 6).map((issue) => {
-      const children = [createEl(doc, 'span', { text: issue.message || issue.code })];
+      const message = issue.type === 'cliche_phrase' && issue.line
+        ? `第 ${issue.line} 行 · ${issue.message}`
+        : issue.message || issue.code;
+      const children = [createEl(doc, 'span', { text: message })];
       if (issue.type === 'replay_risk') {
         const guardBtn = createEl(doc, 'button', {
           type: 'button',
@@ -4860,6 +5057,7 @@ export function createStudioUI(options = {}) {
             state.draftAudit = !state.draftAudit;
             settings.ui.draftAudit = state.draftAudit;
             draftAuditCheckbox.checked = state.draftAudit;
+            paragraphReviewSelect.disabled = !state.draftAudit;
             renderSyncedEntriesBlock();
             persistSettings();
             setStatus(state.draftAudit ? '✓ 已开启成稿前草稿自检条目' : '已关闭成稿前草稿自检条目', 'ok');
@@ -6003,6 +6201,7 @@ export function createStudioUI(options = {}) {
       state.cachedPersonas = Array.isArray(allP) ? allP : [];
       state.cachedCharacters = Array.isArray(allChars) ? allChars : [];
       state.availableWorldbooks = Array.isArray(worldbooks) ? worldbooks : [];
+      syncReferenceBookOptions();
 
       syncTargetBookSelectOptions();
       if (state.companions.length > 0) {
@@ -6095,6 +6294,7 @@ export function createStudioUI(options = {}) {
       scheme,
       inspiration: inspirationInput.value,
       charContext: charContextForPrompt,
+      referenceWorldEntries: Array.from(state.referenceEntriesByBook.values()).flatMap((entries) => [...entries.values()]),
       selectedSubCharacterKeys: state.selectedSubCharKeys,
       existingDraft,
       lockedCore: getCombinedLockedPointsText(),
@@ -6103,7 +6303,8 @@ export function createStudioUI(options = {}) {
       dualLayer: state.dualLayer,
       worldbookLightMode: state.worldbookLightMode,
       visibilityTags: state.visibilityTags,
-      draftAudit: state.draftAudit && !isSectionRegen,
+      draftAudit: state.draftAudit && (!isSectionRegen || settings.ui.paragraphReview !== '0'),
+      paragraphReview: settings.ui.paragraphReview,
       antiParrot: state.antiParrot,
       spotlightMode: state.spotlightMode,
       backstoryMode: state.backstoryMode,
@@ -6255,10 +6456,14 @@ export function createStudioUI(options = {}) {
       setStatus(targetSection ? `正在重写【${targetSection}】…` : '正在生成人设…');
 
       const activeScheme = getActiveScheme(settings);
-      const minMaxTokens =
-        state.draftAudit && !targetSection
-          ? Math.min(32768, (Number(activeScheme?.maxTokens) || 3300) + 900)
-          : undefined;
+      const reviewMode = settings.ui.paragraphReview;
+      const auditEnabled = state.draftAudit && (!targetSection || reviewMode !== '0');
+      const extraTokens = reviewMode === '0' ? 900
+        : reviewMode === 'all' ? Math.max(1200, Math.ceil(activeScheme.targetChars * 3))
+          : Number(reviewMode) * 650;
+      const minMaxTokens = auditEnabled
+        ? Math.min(32768, (Number(activeScheme?.maxTokens) || 3300) + extraTokens)
+        : undefined;
 
       const res = await hostApi.runStudioGeneration({
         settings,
@@ -6267,7 +6472,7 @@ export function createStudioUI(options = {}) {
         signal: ac.signal,
         onChunk: (_delta, fullText) => {
           if (!targetSection) {
-            const stripped = stripDraftAuditBlocks(fullText);
+            const stripped = stripDraftAuditBlocks(fullText, { streaming: true });
             if (stripped.draftLog) {
               state.lastDraftLog = stripped.draftLog;
             }
@@ -6280,12 +6485,12 @@ export function createStudioUI(options = {}) {
         },
       });
 
-      const strippedFinal = stripDraftAuditBlocks(res.text || '');
+      const strippedFinal = stripDraftAuditBlocks(res.text || '', { streaming: true });
       if (strippedFinal.draftLog) {
         state.lastDraftLog = strippedFinal.draftLog;
       }
       const cleaned = normalizeFlatLayout(strippedFinal.cleanText);
-      if (!cleaned.trim()) {
+      if (!cleaned.trim() || (strippedFinal.hasUnclosedDraft && !parsePersonaSections(cleaned).some((section) => section.content))) {
         setDraftValue(prevDraftBeforeGen, { recordHistory: false });
         setStatus('没有收到成稿正文', 'warn');
         return;
@@ -6308,6 +6513,10 @@ export function createStudioUI(options = {}) {
 
       setDraftValue(finalDraft, { recordHistory: true });
       recordHistorySnapshot(finalDraft);
+      if (strippedFinal.hasUnclosedDraft) {
+        setStatus('生成中断，已保留完成的正文', 'warn');
+        return;
+      }
       setStatus(
         targetSection ? `✓ 已重写「${targetSection}」` : '✓ 人设已生成',
         'ok',
@@ -6777,6 +6986,7 @@ export function createStudioUI(options = {}) {
 
   draftAuditCheckbox.addEventListener('change', () => {
     state.draftAudit = draftAuditCheckbox.checked;
+    paragraphReviewSelect.disabled = !state.draftAudit;
     settings.ui.draftAudit = state.draftAudit;
     if (state.activeTab === 'presets') renderSyncedEntriesBlock();
     persistSettings();
@@ -6820,12 +7030,13 @@ export function createStudioUI(options = {}) {
     if (state.activeTab === 'presets') renderSyncedEntriesBlock();
     persistSettings();
     const picked = SPOTLIGHT_MODES.find((m) => m.id === state.spotlightMode);
-    setStatus(`已切换日常与暗线重心：${picked?.label || state.spotlightMode}`);
+    setStatus(`已切换设定在故事里的分量：${picked?.label || state.spotlightMode}`);
   }, { signal });
 
   backstorySelect.addEventListener('change', () => {
     state.backstoryMode = backstorySelect.value;
     settings.ui.backstoryMode = state.backstoryMode;
+    syncSectionsSummary();
     if (state.activeTab === 'presets') renderSyncedEntriesBlock();
     persistSettings();
     const picked = BACKSTORY_MODES.find((m) => m.id === state.backstoryMode);
@@ -6956,15 +7167,12 @@ export function createStudioUI(options = {}) {
   for (const btn of sectionPresetBtns) {
     btn.addEventListener('click', () => {
       const presetId = btn.getAttribute('data-ups-section-preset') || 'standard';
-      state.generationSections = normalizeGenerationSectionsConfig({
-        ...state.generationSections,
-        presetId,
-        enabledIds: GENERATION_SECTION_PRESETS[presetId],
+      const preset = GENERATION_SECTION_PRESETS[presetId];
+      updateSections({
+        presetId: preset ? presetId : 'custom',
+        enabledIds: preset?.enabledIds || [],
+        ...(!preset ? { customSections: state.generationSections.customSections.map((item) => ({ ...item, enabled: false })) } : {}),
       });
-      settings.ui.generationSections = state.generationSections;
-      renderSectionsPanel();
-      if (state.activeTab === 'presets') renderSyncedEntriesBlock();
-      persistSettings();
       setStatus(`已切换板块预设：${btn.textContent}`);
     }, { signal });
   }
@@ -6975,24 +7183,20 @@ export function createStudioUI(options = {}) {
       setStatus('请先输入自定义板块名称', 'warn');
       return;
     }
-    const nextCustom = [
-      ...(state.generationSections.customSections || []),
-      {
-        id: `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-        name: rawName,
-        guidance: '按玩家指定要求平实写清该板块核心事实。',
-      },
-    ];
-    state.generationSections = normalizeGenerationSectionsConfig({
-      ...state.generationSections,
-      customSections: nextCustom,
-    });
-    settings.ui.generationSections = state.generationSections;
+    const cfg = state.generationSections;
+    if (cfg.customSections.length >= 12) {
+      setStatus('最多添加 12 个自定义板块', 'warn');
+      return;
+    }
+    const name = rawName.slice(0, 30);
+    if (getConfiguredGenerationSections(cfg, { includeDisabled: true }).some((item) => item.name === name)) {
+      setStatus('已有同名板块', 'warn');
+      return;
+    }
+    const item = { id: `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, name, guidance: '' };
+    updateSections({ presetId: 'custom', customSections: [...cfg.customSections, item] });
     customSectionNameInput.value = '';
-    renderSectionsPanel();
-    if (state.activeTab === 'presets') renderSyncedEntriesBlock();
-    persistSettings();
-    setStatus(`✓ 已添加自定义板块：${rawName}`, 'ok');
+    openSectionEditor(item);
   }, { signal });
 
   pureReuseCheckbox.addEventListener('change', () => {
@@ -8921,10 +9125,14 @@ export function createStudioUI(options = {}) {
 
   function setSettings(nextSettings) {
     settings = createDefaultSettings(nextSettings);
+    state.draftAudit = settings.ui.draftAudit;
+    draftAuditCheckbox.checked = state.draftAudit;
     debugAuditCheckbox.checked = settings.ui.debugAudit;
     state.miniMode = Boolean(settings.ui?.miniMode);
     state.hasUserPlacedWindow = Boolean(nextSettings?.ui?.geometry);
     state.worldbookLightMode = settings.ui?.worldbookLightMode || 'green_selective';
+    paragraphReviewSelect.value = settings.ui.paragraphReview;
+    paragraphReviewSelect.disabled = !state.draftAudit;
     state.generationSections = normalizeGenerationSectionsConfig(settings.ui?.generationSections);
     state.moduleRatios = normalizeModuleRatios(settings.ui?.moduleRatios);
     state.pureCrossCardReuse = Boolean(settings.ui?.pureCrossCardReuse);

@@ -2232,9 +2232,35 @@ export const SHADOW_CSS = String.raw`
 }
 
 .ups-section-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+
+.ups-section-selected {
+  margin-top: 0;
+}
+
+.ups-section-item {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px 14px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ups-section-item .ups-check-row {
+  align-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ups-section-item .ups-btn-sm {
+  flex: none;
+}
+
+.ups-section-group-box > summary {
+  cursor: pointer;
 }
 
 .ups-sec-group {
